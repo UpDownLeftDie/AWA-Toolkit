@@ -40,8 +40,8 @@ importers:
         specifier: ^73.0.0
         version: 73.0.0(eslint@10.8.1)
       globals:
-        specifier: ^17.10.0
-        version: 17.10.0
+        specifier: ^17.11.0
+        version: 17.11.0
       postcss:
         specifier: ^8.5.26
         version: 8.5.26
@@ -732,8 +732,8 @@ packages:
     resolution: {integrity: sha512-V0kztuWST2k8A/VbxAY8+L+7+Rgo3fyA24IHRLrZp7HOzJjV0gHSaZUjK9lpP/IrBSNite2tZ1prhRkinRu1CA==}
     engines: {node: '>=18'}
 
-  globals@17.9.0:
-    resolution: {integrity: sha512-m/MvAW61QVU5VDNF1Vj8axt016h8w7L5TU1e9zlab7XIttAT2YAlCwl75K1fOqvMM9apmD7lbCIRhpfkhmxhCg==}
+  globals@17.11.0:
+    resolution: {integrity: sha512-Z2I8hM+PbJDXQDq3Icgpzv+mPdwr68iZUU9d5WW4FuXfDUQfkZaZuvjMv42/5crNyw154+9+VWXbYrUgDXbxNw==}
     engines: {node: '>=18'}
 
   htmlparser2@12.0.0:
@@ -1671,7 +1671,7 @@ snapshots:
       bytes: 3.1.2
       eslint: 10.8.1
       functional-red-black-tree: 1.0.1
-      globals: 17.9.0
+      globals: 17.10.0
       jsx-ast-utils-x: 0.1.0
       lodash.merge: 4.6.2
       minimatch: 10.2.6
@@ -1693,7 +1693,7 @@ snapshots:
       entities: 4.5.0
       eslint: 10.8.1
       find-up-simple: 1.0.1
-      globals: 17.9.0
+      globals: 17.10.0
       indent-string: 5.0.0
       is-builtin-module: 5.0.0
       is-identifier: 1.1.0
@@ -1810,7 +1810,7 @@ snapshots:
 
   globals@17.10.0: {}
 
-  globals@17.9.0: {}
+  globals@17.11.0: {}
 
   htmlparser2@12.0.0:
     dependencies:

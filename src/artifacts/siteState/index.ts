@@ -2,8 +2,11 @@ import { GM } from '$';
 import { resolveSiteStateSteamFreeToPlay } from '../steamApp';
 import {
   applyRedeemableArpFromDocument,
+  arpLogSignature,
+  isArpLogDocumentReady,
   mergeArpLogScrape,
   scrapeArpLogFromDocument,
+  waitForArpLogDocument,
 } from './arpLog';
 import {
   applyBattlePassEndFromDocument,
@@ -169,10 +172,11 @@ export function applyLiveDocumentToSiteState(next: SiteState): void {
     }
   }
 
-  if (path.includes('/arp-log')) {
+  if (path.includes('/arp-log') && isArpLogDocumentReady(document)) {
     // The page defaults to its 10 most recent rows unless the user added
     // from/to params — merge so a plain visit doesn't clobber a wider
-    // background-fetched window.
+    // background-fetched window. Skip before the table exists: an empty
+    // scrape would still stamp scrapedAt and hide a just-cast Discord vote.
     next.arpLog = mergeArpLogScrape(
       scrapeArpLogFromDocument(document),
       next.arpLog,
@@ -204,6 +208,10 @@ export async function refreshSiteStateFromPage(): Promise<SiteState> {
     gameVault: [],
   };
 
+  if (location.pathname.includes('/arp-log')) {
+    await waitForArpLogDocument();
+  }
+
   const next: SiteState = {
     ...previous,
     updatedAt: new Date().toISOString(),
@@ -220,7 +228,7 @@ export async function refreshSiteStateFromPage(): Promise<SiteState> {
  */
 function watchLiveSiteStatePage(options: {
   isPage: boolean;
-  datasetFlag: 'aoBpWatch' | 'aoCcWatch';
+  datasetFlag: 'aoBpWatch' | 'aoCcWatch' | 'aoArpWatch';
   isReady: (document_: Document) => boolean;
   signature: (document_: Document) => string;
   waitForReady: () => Promise<void>;
@@ -338,6 +346,23 @@ export function watchControlCenterPage(
     isReady: isControlCenterActivityReady,
     signature: controlCenterActivitySignature,
     waitForReady: waitForControlCenterDocument,
+    ...(onPersist && { onPersist }),
+  });
+}
+
+/**
+ * Persist Discord Poll / calendar earns when the ARP Log table paints.
+ * `@run-at document-start` otherwise stamps an empty scrape as fresh.
+ */
+export function watchArpLogPage(
+  onPersist?: (state: SiteState) => void | Promise<void>,
+): void {
+  watchLiveSiteStatePage({
+    isPage: location.pathname.includes('/arp-log'),
+    datasetFlag: 'aoArpWatch',
+    isReady: isArpLogDocumentReady,
+    signature: arpLogSignature,
+    waitForReady: waitForArpLogDocument,
     ...(onPersist && { onPersist }),
   });
 }
@@ -508,4 +533,7 @@ export {
   applyRedeemableArpFromDocument,
   scrapeArpLogFromDocument,
   mergeArpLogScrape,
+  isArpLogDocumentReady,
+  arpLogSignature,
+  waitForArpLogDocument,
 } from './arpLog';

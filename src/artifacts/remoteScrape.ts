@@ -16,6 +16,7 @@ import {
   applySteamFreeToPlayResolution,
   applySteamQuestsFromDocument,
   emptySiteState,
+  isArpLogDocumentReady,
   isBattlePassDocumentReady,
   isChooseYourOwnGameQuest,
   isControlCenterActivityReady,
@@ -256,7 +257,7 @@ function requiresIframeFallback(path: string, fetched: Document): boolean {
     );
   }
   if (path.includes('/arp-log')) {
-    return !/ARP Log|Redeemable ARP/i.test(fetched.body?.textContent ?? '');
+    return !isArpLogDocumentReady(fetched);
   }
   if (path.includes('/battle-pass')) {
     return !isBattlePassDocumentReady(fetched);

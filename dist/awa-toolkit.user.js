@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         AWA Toolkit
 // @namespace    https://github.com/UpDownLeftDie/AWA-Toolkit
-// @version      2.0.4
+// @version      2.0.5
 // @author       jaredcat
 // @description  Artifact Optimizer, Control Center tasks, giveaway/vault filters, and UCF reading mode
 // @license      AGPL-3.0-or-later
@@ -265,6 +265,11 @@
 		const ms = Date.parse(value);
 		return Number.isFinite(ms) ? ms : NaN;
 	}
+	var ARP_LOG_ROW_SELECTOR = ".card-table-row";
+	var ARP_LOG_AFTER_ROWS_SELECTOR = "#arp-logs-per-page, #arp-log-chart";
+	var ARP_LOG_DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
+	var ARP_LOG_AMOUNT_RE = /^[+]?\d[\d,]*$/;
+	var ARP_LOG_TOGGLE_RE = /^[▼▲^▾▴]$/;
 	function parseRedeemableArpText(text) {
 		const match = /Redeemable ARP:\s*([\d,]+)/i.exec(text);
 		if (!match?.[1]) return;
@@ -296,22 +301,30 @@
 			redeemableArp: arp
 		};
 	}
-	function scrapeArpLogFromDocument(document_) {
-		const body = pageText(document_);
-		const state = {
-			scrapedAt: new Date().toISOString(),
-			recent: []
-		};
-		const redeemableArp = parseRedeemableArpText(body);
-		if (redeemableArp !== void 0) state.redeemableArp = redeemableArp;
-		const lifetime = /Lifetime ARP:\s*([\d,]+)/i.exec(body);
-		if (lifetime?.[1]) state.lifetimeArp = Number(lifetime[1].replaceAll(",", ""));
-		const todayTotal = /Total ARP earned today:\s*([\d,]+)/i.exec(body);
-		if (todayTotal?.[1]) state.todayDelta = Number(todayTotal[1].replaceAll(",", ""));
-		else {
-			const plusMatch = /Redeemable ARP:[\s\S]{0,80}?\+\s*([\d,]+)/i.exec(body);
-			if (plusMatch?.[1]) state.todayDelta = Number(plusMatch[1].replaceAll(",", ""));
+	function parseArpAmount(text) {
+		const value = Number(text.replaceAll(",", "").replace(/^\+/, ""));
+		return Number.isFinite(value) ? value : void 0;
+	}
+	function scrapeArpLogRowsFromTable(document_) {
+		const entries = [];
+		for (const row of document_.querySelectorAll(ARP_LOG_ROW_SELECTOR)) {
+			const cols = [...row.children].map((element) => (element.textContent ?? "").replaceAll(/\s+/g, " ").trim());
+			const date = cols.find((col) => ARP_LOG_DATE_RE.test(col));
+			const arpText = cols.findLast((col) => col !== date && ARP_LOG_AMOUNT_RE.test(col));
+			const action = cols.find((col) => col.length > 0 && col !== date && col !== arpText && !ARP_LOG_TOGGLE_RE.test(col));
+			if (!action || arpText === void 0) continue;
+			const arp = parseArpAmount(arpText);
+			if (arp === void 0) continue;
+			const entry = {
+				action,
+				arp
+			};
+			if (date) entry.date = date;
+			entries.push(entry);
 		}
+		return entries;
+	}
+	function scrapeArpLogRowsFromText(body) {
 		const actionNames = [
 			"Time On Site",
 			"Game Prize",
@@ -331,14 +344,64 @@
 			"Quest"
 		].join("|");
 		const rowPattern = new RegExp(String.raw`(${actionNames})\s+(\d+)\s+(\d{4}-\d{2}-\d{2})`, "gi");
+		const entries = [];
 		for (const match of body.matchAll(rowPattern)) {
 			const entry = {
 				action: match[1] ?? "Unknown",
 				arp: Number(match[2])
 			};
 			if (match[3]) entry.date = match[3];
-			state.recent.push(entry);
+			entries.push(entry);
 		}
+		return entries;
+	}
+	function isArpLogDocumentReady(document_) {
+		if (!document_.body) return false;
+		return Boolean(document_.querySelector(`${ARP_LOG_ROW_SELECTOR}, ${ARP_LOG_AFTER_ROWS_SELECTOR}`));
+	}
+	function arpLogSignature(document_) {
+		if (!isArpLogDocumentReady(document_)) return "";
+		return scrapeArpLogFromDocument(document_).recent.map((entry) => `${entry.date ?? ""}|${entry.action}|${entry.arp}`).join(";");
+	}
+	async function waitForArpLogDocument(timeoutMs = 12e3) {
+		if (isArpLogDocumentReady(document)) return;
+		await new Promise((resolve) => {
+			let isSettled = false;
+			const observer = new MutationObserver(() => {
+				if (isArpLogDocumentReady(document)) finish();
+			});
+			const timer = setTimeout(finish, timeoutMs);
+			function finish() {
+				if (isSettled) return;
+				isSettled = true;
+				observer.disconnect();
+				clearTimeout(timer);
+				resolve();
+			}
+			observer.observe(document.documentElement, {
+				childList: true,
+				subtree: true
+			});
+		});
+	}
+	function scrapeArpLogFromDocument(document_) {
+		const body = pageText(document_);
+		const state = {
+			scrapedAt: new Date().toISOString(),
+			recent: []
+		};
+		const redeemableArp = parseRedeemableArpText(body);
+		if (redeemableArp !== void 0) state.redeemableArp = redeemableArp;
+		const lifetime = /Lifetime ARP:\s*([\d,]+)/i.exec(body);
+		if (lifetime?.[1]) state.lifetimeArp = Number(lifetime[1].replaceAll(",", ""));
+		const todayTotal = /Total ARP earned today:\s*([\d,]+)/i.exec(body);
+		if (todayTotal?.[1]) state.todayDelta = Number(todayTotal[1].replaceAll(",", ""));
+		else {
+			const plusMatch = /Redeemable ARP:[\s\S]{0,80}?\+\s*([\d,]+)/i.exec(body);
+			if (plusMatch?.[1]) state.todayDelta = Number(plusMatch[1].replaceAll(",", ""));
+		}
+		const fromTable = scrapeArpLogRowsFromTable(document_);
+		state.recent = fromTable.length > 0 ? fromTable : scrapeArpLogRowsFromText(body);
 		return state;
 	}
 	function mergeArpLogScrape(scraped, previous) {
@@ -356,7 +419,7 @@
 		const lifetimeArp = scraped.lifetimeArp ?? previous.lifetimeArp;
 		const todayDelta = scraped.todayDelta ?? previous.todayDelta;
 		return {
-			scrapedAt: scraped.scrapedAt,
+			scrapedAt: scraped.recent.length === 0 && previous.recent.length > 0 ? previous.scrapedAt : scraped.scrapedAt,
 			...redeemableArp !== void 0 && { redeemableArp },
 			...lifetimeArp !== void 0 && { lifetimeArp },
 			...todayDelta !== void 0 && { todayDelta },
@@ -2342,7 +2405,7 @@
 			const battlePass = scrapeBattlePass();
 			if (battlePass) next.battlePass = mergeBattlePassScrape(battlePass, next.battlePass);
 		}
-		if (path.includes("/arp-log")) next.arpLog = mergeArpLogScrape(scrapeArpLogFromDocument(document), next.arpLog);
+		if (path.includes("/arp-log") && isArpLogDocumentReady(document)) next.arpLog = mergeArpLogScrape(scrapeArpLogFromDocument(document), next.arpLog);
 		if (path.includes("/steam/community-event")) applyCommunityEventPage(next);
 		if (/\/steam\/quests\/.+/.test(path)) applySteamQuestDetailFromDocument(next, document, path);
 		next.caps = applyArpLogActivityCaps(next.caps, next.arpLog);
@@ -2354,6 +2417,7 @@
 			caps: { ...DEFAULT_CAPS },
 			gameVault: []
 		};
+		if (location.pathname.includes("/arp-log")) await waitForArpLogDocument();
 		const next = {
 			...previous,
 			updatedAt: new Date().toISOString(),
@@ -2434,6 +2498,16 @@
 			isReady: isControlCenterActivityReady,
 			signature: controlCenterActivitySignature,
 			waitForReady: waitForControlCenterDocument,
+			...onPersist && { onPersist }
+		});
+	}
+	function watchArpLogPage(onPersist) {
+		watchLiveSiteStatePage({
+			isPage: location.pathname.includes("/arp-log"),
+			datasetFlag: "aoArpWatch",
+			isReady: isArpLogDocumentReady,
+			signature: arpLogSignature,
+			waitForReady: waitForArpLogDocument,
 			...onPersist && { onPersist }
 		});
 	}
@@ -5788,7 +5862,7 @@
 	}
 	function requiresIframeFallback(path, fetched) {
 		if (path.includes("/artifacts") || path.includes("/user-artifacts-room")) return !fetched.body?.querySelector(":scope a.artifact-list-item.change-artifact-modal, :scope .slot img");
-		if (path.includes("/arp-log")) return !/ARP Log|Redeemable ARP/i.test(fetched.body?.textContent ?? "");
+		if (path.includes("/arp-log")) return !isArpLogDocumentReady(fetched);
 		if (path.includes("/battle-pass")) return !isBattlePassDocumentReady(fetched);
 		if (path.includes("/steam/community-event")) return !fetched.querySelector(".carousel-cell") || !hasPersonalHours(fetched);
 		if (/\/steam\/quests\/.+/.test(path)) return !hasSteamPlayEligibilitySignal(fetched);
@@ -7135,6 +7209,10 @@
 			injectShowroomPanel();
 		} else if (isSiteStatePage()) {
 			if (location.pathname.includes("/battle-pass")) watchBattlePassPage(async (state) => {
+				await applyAsceCommunityHours(state);
+				await saveSiteState(state);
+			});
+			else if (location.pathname.includes("/arp-log")) watchArpLogPage(async (state) => {
 				await applyAsceCommunityHours(state);
 				await saveSiteState(state);
 			});

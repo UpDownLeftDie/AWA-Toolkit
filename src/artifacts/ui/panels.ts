@@ -5,6 +5,7 @@ import {
   refreshSiteStateFromPage,
   saveSiteState,
   waitForControlCenterDocument,
+  watchArpLogPage,
   watchBattlePassPage,
   watchControlCenterPage,
 } from '../siteState';
@@ -814,6 +815,11 @@ export async function initArtifactOptimizer(): Promise<void> {
   } else if (isSiteStatePage()) {
     if (location.pathname.includes('/battle-pass')) {
       watchBattlePassPage(async (state) => {
+        await applyAsceCommunityHours(state);
+        await saveSiteState(state);
+      });
+    } else if (location.pathname.includes('/arp-log')) {
+      watchArpLogPage(async (state) => {
         await applyAsceCommunityHours(state);
         await saveSiteState(state);
       });

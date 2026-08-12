@@ -7,6 +7,17 @@ export interface ArpLogEntry {
   date?: string;
 }
 
+const ARP_LOG_ROW_SELECTOR = '.card-table-row';
+/**
+ * Pagination / chart sit after the row list in SSR, so they only exist once
+ * the table (or an empty list) has been parsed. `#from` is above the rows
+ * and is not a ready signal.
+ */
+const ARP_LOG_AFTER_ROWS_SELECTOR = '#arp-logs-per-page, #arp-log-chart';
+const ARP_LOG_DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
+const ARP_LOG_AMOUNT_RE = /^[+]?\d[\d,]*$/;
+const ARP_LOG_TOGGLE_RE = /^[▼▲^▾▴]$/;
+
 export interface ArpLogState {
   scrapedAt: string;
   redeemableArp?: number;
@@ -70,6 +81,135 @@ export function applyRedeemableArpFromDocument(
   };
 }
 
+function parseArpAmount(text: string): number | undefined {
+  const value = Number(text.replaceAll(',', '').replace(/^\+/, ''));
+  return Number.isFinite(value) ? value : undefined;
+}
+
+function scrapeArpLogRowsFromTable(document_: Document): ArpLogEntry[] {
+  const entries: ArpLogEntry[] = [];
+  for (const row of document_.querySelectorAll(ARP_LOG_ROW_SELECTOR)) {
+    const cols = [...row.children].map((element) =>
+      (element.textContent ?? '').replaceAll(/\s+/g, ' ').trim(),
+    );
+    const date = cols.find((col) => ARP_LOG_DATE_RE.test(col));
+    const arpText = cols.findLast(
+      (col) => col !== date && ARP_LOG_AMOUNT_RE.test(col),
+    );
+    const action = cols.find(
+      (col) =>
+        col.length > 0 &&
+        col !== date &&
+        col !== arpText &&
+        !ARP_LOG_TOGGLE_RE.test(col),
+    );
+    if (!action || arpText === undefined) {
+      continue;
+    }
+    const arp = parseArpAmount(arpText);
+    if (arp === undefined) {
+      continue;
+    }
+    const entry: ArpLogEntry = { action, arp };
+    if (date) {
+      entry.date = date;
+    }
+    entries.push(entry);
+  }
+  return entries;
+}
+
+function scrapeArpLogRowsFromText(body: string): ArpLogEntry[] {
+  const actionNames = [
+    'Time On Site',
+    'Game Prize',
+    'Daily Login Calendar',
+    'Daily Login Streak',
+    'Discord Poll',
+    'Steam Community Event Reward',
+    'Steam Quest',
+    'Steam Quests',
+    'Twitch Passive',
+    'Watch Twitch',
+    'Community Event',
+    'Forum Post',
+    'Giveaway',
+    'Battle Pass Reward',
+    'Battle Pass',
+    'Quest',
+  ].join('|');
+  const rowPattern = new RegExp(
+    String.raw`(${actionNames})\s+(\d+)\s+(\d{4}-\d{2}-\d{2})`,
+    'gi',
+  );
+  const entries: ArpLogEntry[] = [];
+  for (const match of body.matchAll(rowPattern)) {
+    const entry: ArpLogEntry = {
+      action: match[1] ?? 'Unknown',
+      arp: Number(match[2]),
+    };
+    if (match[3]) {
+      entry.date = match[3];
+    }
+    entries.push(entry);
+  }
+  return entries;
+}
+
+/**
+ * Log rows are SSR'd into `.card-table-row`, but `@run-at document-start`
+ * can scrape before `<body>` (or the table) exists. An empty scrape still
+ * stamps `scrapedAt`, which then blocks the 6h background re-fetch — Discord
+ * Poll completion is only visible here, so that miss sticks until Refresh.
+ */
+export function isArpLogDocumentReady(document_: Document): boolean {
+  if (!document_.body) {
+    return false;
+  }
+  return Boolean(
+    document_.querySelector(
+      `${ARP_LOG_ROW_SELECTOR}, ${ARP_LOG_AFTER_ROWS_SELECTOR}`,
+    ),
+  );
+}
+
+export function arpLogSignature(document_: Document): string {
+  if (!isArpLogDocumentReady(document_)) {
+    return '';
+  }
+  return scrapeArpLogFromDocument(document_)
+    .recent.map((entry) => `${entry.date ?? ''}|${entry.action}|${entry.arp}`)
+    .join(';');
+}
+
+export async function waitForArpLogDocument(timeoutMs = 12_000): Promise<void> {
+  if (isArpLogDocumentReady(document)) {
+    return;
+  }
+  await new Promise<void>((resolve) => {
+    let isSettled = false;
+    const observer = new MutationObserver(() => {
+      if (isArpLogDocumentReady(document)) {
+        finish();
+      }
+    });
+    const timer = setTimeout(finish, timeoutMs);
+    function finish(): void {
+      if (isSettled) {
+        return;
+      }
+      isSettled = true;
+      observer.disconnect();
+      clearTimeout(timer);
+      resolve();
+    }
+    observer.observe(document.documentElement, {
+      childList: true,
+      subtree: true,
+    });
+  });
+}
+
 /**
  * Best-effort ARP Log scrape (action rows + balance header).
  */
@@ -100,38 +240,9 @@ export function scrapeArpLogFromDocument(document_: Document): ArpLogState {
     }
   }
 
-  const actionNames = [
-    'Time On Site',
-    'Game Prize',
-    'Daily Login Calendar',
-    'Daily Login Streak',
-    'Discord Poll',
-    'Steam Community Event Reward',
-    'Steam Quest',
-    'Steam Quests',
-    'Twitch Passive',
-    'Watch Twitch',
-    'Community Event',
-    'Forum Post',
-    'Giveaway',
-    'Battle Pass Reward',
-    'Battle Pass',
-    'Quest',
-  ].join('|');
-  const rowPattern = new RegExp(
-    String.raw`(${actionNames})\s+(\d+)\s+(\d{4}-\d{2}-\d{2})`,
-    'gi',
-  );
-  for (const match of body.matchAll(rowPattern)) {
-    const entry: ArpLogEntry = {
-      action: match[1] ?? 'Unknown',
-      arp: Number(match[2]),
-    };
-    if (match[3]) {
-      entry.date = match[3];
-    }
-    state.recent.push(entry);
-  }
+  const fromTable = scrapeArpLogRowsFromTable(document_);
+  state.recent =
+    fromTable.length > 0 ? fromTable : scrapeArpLogRowsFromText(body);
 
   return state;
 }
@@ -170,8 +281,14 @@ export function mergeArpLogScrape(
   const redeemableArp = scraped.redeemableArp ?? previous.redeemableArp;
   const lifetimeArp = scraped.lifetimeArp ?? previous.lifetimeArp;
   const todayDelta = scraped.todayDelta ?? previous.todayDelta;
+  // Empty row list is usually "page not painted yet", not a real empty log.
+  // Keep the previous scrapedAt so a failed visit cannot hide a later fetch.
+  const scrapedAt =
+    scraped.recent.length === 0 && previous.recent.length > 0
+      ? previous.scrapedAt
+      : scraped.scrapedAt;
   return {
-    scrapedAt: scraped.scrapedAt,
+    scrapedAt,
     ...(redeemableArp !== undefined && { redeemableArp }),
     ...(lifetimeArp !== undefined && { lifetimeArp }),
     ...(todayDelta !== undefined && { todayDelta }),
