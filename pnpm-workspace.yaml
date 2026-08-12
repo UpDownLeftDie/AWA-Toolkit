@@ -1,0 +1,2 @@
+minimumReleaseAgeExclude:
+  - globals@17.10.0

@@ -1,0 +1,11 @@
+node_modules
+*.log
+pnpm-debug.log
+/.idea
+/.nyc_output
+/coverage
+/types
+.DS_Store
+thumbs.db
+
+HARs
