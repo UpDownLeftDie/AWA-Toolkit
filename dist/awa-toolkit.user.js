@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         AWA Toolkit
 // @namespace    https://github.com/UpDownLeftDie/AWA-Toolkit
-// @version      2.0.2
+// @version      2.0.4
 // @author       jaredcat
 // @description  Artifact Optimizer, Control Center tasks, giveaway/vault filters, and UCF reading mode
 // @license      AGPL-3.0-or-later
@@ -7146,6 +7146,542 @@
 		}
 		await createOptimizerModal();
 	}
+	var defaultSettings = {
+		higherTier: "hide",
+		autoSyncTier: true,
+		outOfStock: "hide",
+		claimed: "hide",
+		closedGiveaways: "hide",
+		enteredGiveaways: "hide"
+	};
+	var FILTER_MODES = new Set([
+		"off",
+		"dim",
+		"hide"
+	]);
+	function isFilterMode(value) {
+		return typeof value === "string" && FILTER_MODES.has(value);
+	}
+	function isSettingsRecord(value) {
+		return typeof value === "object" && value !== null;
+	}
+	function filterModeFromSaved(parsed, modeKey, legacyHideKey, fallback) {
+		if (isFilterMode(parsed[modeKey])) return parsed[modeKey];
+		const legacyHide = parsed[legacyHideKey];
+		if (typeof legacyHide === "boolean") return legacyHide ? "hide" : "off";
+		return fallback;
+	}
+	async function getSettings() {
+		const savedSettings = await _GM.getValue("filterSettings");
+		const settings = { ...defaultSettings };
+		if (!savedSettings) return settings;
+		try {
+			const parsedUnknown = typeof savedSettings === "string" ? JSON.parse(savedSettings) : savedSettings;
+			if (!isSettingsRecord(parsedUnknown)) return settings;
+			const parsed = parsedUnknown;
+			settings.higherTier = filterModeFromSaved(parsed, "higherTier", "hideTierRestricted", defaultSettings.higherTier);
+			settings.outOfStock = filterModeFromSaved(parsed, "outOfStock", "hideOutOfStock", defaultSettings.outOfStock);
+			settings.claimed = filterModeFromSaved(parsed, "claimed", "hideClaimed", defaultSettings.claimed);
+			settings.closedGiveaways = filterModeFromSaved(parsed, "closedGiveaways", "hideClosedGiveaways", defaultSettings.closedGiveaways);
+			settings.enteredGiveaways = isFilterMode(parsed.enteredGiveaways) ? parsed.enteredGiveaways : defaultSettings.enteredGiveaways;
+			if (typeof parsed.autoSyncTier === "boolean") settings.autoSyncTier = parsed.autoSyncTier;
+			if (parsed.userTier !== void 0) {
+				const tierValue = Number(parsed.userTier);
+				if (!Number.isNaN(tierValue)) settings.userTier = tierValue;
+			}
+		} catch (error) {
+			console.error("Error parsing saved settings:", error);
+			return defaultSettings;
+		}
+		return settings;
+	}
+	async function saveSettings(settings) {
+		const newSettings = {
+			...await getSettings(),
+			...settings
+		};
+		await _GM.setValue("filterSettings", JSON.stringify(newSettings));
+	}
+	function extractTier(text) {
+		const match = /Tier\s*(\d+)/i.exec(text);
+		if (match?.[1]) return Number(match[1]);
+	}
+	function readPageUserTier() {
+		const arpTier = globalThis.arp_tier;
+		if (typeof arpTier === "number" && !Number.isNaN(arpTier)) return arpTier;
+		const tierImg = document.querySelector("img[src*=\"/images/content/tier-tags/\"]");
+		if (!tierImg) return;
+		const tierMatch = /tier-tags\/(\d+)\.png/.exec(tierImg.src);
+		if (!tierMatch?.[1]) return;
+		const userTier = Number(tierMatch[1]);
+		return Number.isNaN(userTier) ? void 0 : userTier;
+	}
+	async function checkAndStoreTier() {
+		const userTier = readPageUserTier();
+		if (userTier === void 0) return;
+		await saveSettings({ userTier });
+		console.log("Stored user tier:", userTier);
+	}
+	var FILTER_STYLE_ID = "alienware-filter-styles";
+	var FILTER_DIM_CLASS = "awa-filter-dimmed";
+	var FILTER_STATE_ATTR = "data-awa-filter";
+	function parseTimestamp(value) {
+		const normalized = value.includes("T") ? value : value.replace(" ", "T");
+		const ms = Date.parse(normalized);
+		return Number.isNaN(ms) ? void 0 : ms;
+	}
+	function isGiveawayClosed(giveaway) {
+		const timeElement = giveaway.querySelector(".community-giveaways__listing-row__time");
+		const timeText = (timeElement?.textContent ?? "").replaceAll(/\s+/g, " ").trim();
+		if (/\bclosed\b/i.test(timeText)) return true;
+		const closeStamp = timeElement?.querySelector(".timeago-future")?.getAttribute("title");
+		if (!closeStamp) return false;
+		const closeMs = parseTimestamp(closeStamp);
+		return closeMs !== void 0 && closeMs <= Date.now();
+	}
+	function isGiveawayEntered(giveaway) {
+		return /you have entered this giveaway/i.test(giveaway.textContent ?? "");
+	}
+	function combineFilterMode(current, mode, isMatching) {
+		if (!isMatching || mode === "off") return current;
+		if (mode === "hide" || current === "hide") return "hide";
+		return "dim";
+	}
+	function marketplaceFilterTarget(item) {
+		return item.closest("[class*=\"marketplace-product-block-\"]") ?? item;
+	}
+	function applyFilterEffect(target, effect) {
+		const previous = target.getAttribute(FILTER_STATE_ATTR);
+		if (effect === "none") {
+			if (previous === "hide") target.style.removeProperty("display");
+			target.classList.remove(FILTER_DIM_CLASS);
+			target.removeAttribute(FILTER_STATE_ATTR);
+			return;
+		}
+		target.setAttribute(FILTER_STATE_ATTR, effect);
+		target.classList.toggle(FILTER_DIM_CLASS, effect === "dim");
+		if (effect === "hide") {
+			target.style.display = "none";
+			return;
+		}
+		if (previous === "hide") target.style.removeProperty("display");
+	}
+	function marketplaceFilterEffect(item, settings, userTier) {
+		const text = item.textContent || "";
+		const normalizedText = text.toLowerCase();
+		let effect = "none";
+		effect = combineFilterMode(effect, settings.outOfStock, normalizedText.includes("out of stock") || item.dataset.productInStock === "false");
+		effect = combineFilterMode(effect, settings.claimed, normalizedText.includes("claimed"));
+		const tierNumber = extractTier(text);
+		effect = combineFilterMode(effect, settings.higherTier, tierNumber !== void 0 && tierNumber > userTier);
+		return effect;
+	}
+	function giveawayFilterEffect(giveaway, settings, userTier) {
+		let effect = "none";
+		effect = combineFilterMode(effect, settings.closedGiveaways, isGiveawayClosed(giveaway));
+		effect = combineFilterMode(effect, settings.enteredGiveaways, isGiveawayEntered(giveaway));
+		const tierNumber = extractTier(giveaway.querySelector(".community-giveaways__listing-row__tier")?.textContent ?? "");
+		effect = combineFilterMode(effect, settings.higherTier, tierNumber !== void 0 && tierNumber > userTier);
+		return effect;
+	}
+	async function filterGiveaways() {
+		const settings = await getSettings();
+		const userTier = settings.userTier ?? 99;
+		document.querySelectorAll(".community-giveaways__listing__row").forEach((giveaway) => {
+			applyFilterEffect(giveaway, giveawayFilterEffect(giveaway, settings, userTier));
+		});
+	}
+	async function filterMarketplace() {
+		const settings = await getSettings();
+		const userTier = settings.userTier ?? 99;
+		document.querySelectorAll([
+			".product-card.marketplace-product",
+			".pointer.marketplace-game-small",
+			".pointer.marketplace-game-large"
+		].join(", ")).forEach((item) => {
+			applyFilterEffect(marketplaceFilterTarget(item), marketplaceFilterEffect(item, settings, userTier));
+		});
+	}
+	function ensureFilterStyles() {
+		if (document.querySelector(`#${FILTER_STYLE_ID}`)) return;
+		const style = document.createElement("style");
+		style.id = FILTER_STYLE_ID;
+		style.textContent = `
+        .${FILTER_DIM_CLASS} {
+          opacity: 0.4 !important;
+          filter: grayscale(0.55);
+        }
+      `;
+		(document.head ?? document.documentElement).append(style);
+	}
+	function watchPageFilters() {
+		const currentPath = location.pathname;
+		if (currentPath === "/community-giveaways") {
+			new MutationObserver(() => {
+				filterGiveaways();
+			}).observe(document.body, {
+				childList: true,
+				subtree: true
+			});
+			filterGiveaways();
+			return;
+		}
+		if (currentPath.startsWith("/marketplace")) {
+			new MutationObserver(() => {
+				filterMarketplace();
+			}).observe(document.body, {
+				childList: true,
+				subtree: true
+			});
+			filterMarketplace();
+		}
+	}
+	function buildSettingsMenuStyles() {
+		return `
+      <style>
+        #alienware-filter-settings-backdrop {
+          display: none;
+          position: fixed;
+          inset: 0;
+          background: rgba(0, 0, 0, 0.72);
+          z-index: 10000;
+        }
+        #alienware-filter-settings {
+          display: none;
+          position: fixed;
+          top: 50%;
+          left: 50%;
+          transform: translate(-50%, -50%);
+          background: #1a1a1a !important;
+          background-color: #1a1a1a !important;
+          opacity: 1 !important;
+          color: #fff;
+          padding: 20px;
+          border-radius: 8px;
+          border: 1px solid #333;
+          z-index: 10001;
+          min-width: 320px;
+          max-width: min(460px, 94vw);
+          box-shadow: 0 12px 40px rgba(0, 0, 0, 0.85);
+          isolation: isolate;
+        }
+        #settings-title {
+          color: #fff;
+          font-size: 1.5em;
+          font-weight: bold;
+          margin-bottom: 15px;
+        }
+        #manualSetTier {
+          color: white;
+          padding: 2px;
+          text-align: center;
+        }
+        #manualSetTier:disabled {
+          color: grey;
+        }
+        .section-heading {
+          color: #00bc8c;
+          font-size: 1.1em;
+          margin-bottom: 10px;
+          font-weight: bold;
+        }
+        .setting {
+          margin-bottom: 10px;
+          margin-left: 15px;
+        }
+        .setting-row {
+          display: flex;
+          align-items: center;
+          justify-content: space-between;
+          gap: 12px;
+        }
+        .setting-row .settingsLabel {
+          display: inline;
+          margin-bottom: 0;
+          flex: 1;
+        }
+        .awa-filter-mode {
+          background: #111;
+          color: #fff;
+          border: 1px solid #555;
+          border-radius: 4px;
+          padding: 3px 6px;
+          min-width: 5.2em;
+        }
+        .settingsLabel {
+          color: #fff;
+          display: block;
+          margin-bottom: 5px;
+        }
+        #saveFilterSettings {
+          background: #00bc8c;
+          color: #fff;
+          border: none;
+          padding: 5px 15px;
+          border-radius: 4px;
+          cursor: pointer;
+        }
+        #closeFilterSettings {
+          background: #e74c3c;
+          color: #fff;
+          border: none;
+          padding: 5px 15px;
+          border-radius: 4px;
+          margin-left: 10px;
+          cursor: pointer;
+        }
+        .sr-only {
+          position: absolute;
+          width: 1px;
+          height: 1px;
+          padding: 0;
+          margin: -1px;
+          overflow: hidden;
+          clip: rect(0, 0, 0, 0);
+          border: 0;
+        }
+      </style>
+    `;
+	}
+	function buildFilterModeOptions(mode) {
+		return [
+			["off", "Show"],
+			["dim", "Dim"],
+			["hide", "Hide"]
+		].map(([value, label]) => `<option value="${value}" ${mode === value ? "selected" : ""}>${label}</option>`).join("");
+	}
+	function buildFilterModeRow(id, label, description, mode) {
+		return `
+                <div class="setting setting-row">
+                  <label class="settingsLabel" for="${id}">${label}</label>
+                  <select id="${id}" class="awa-filter-mode" aria-describedby="${id}Desc">
+                    ${buildFilterModeOptions(mode)}
+                  </select>
+                  <span id="${id}Desc" class="sr-only">${description}</span>
+                </div>`;
+	}
+	function buildGlobalSettingsSection(settings) {
+		const isHigherTierOff = settings.higherTier === "off";
+		return `
+            <div class="settings-section" style="margin-bottom: 20px">
+              <div role="heading" aria-level="2" class="section-heading">
+                Global Settings
+              </div>
+              <div
+                class="settings-group"
+                role="group"
+                aria-label="Global Filter Options">
+                ${buildFilterModeRow("higherTier", "Higher Tier Content", "Show, dim, or hide content that requires a higher tier than yours", settings.higherTier)}
+                <div class="setting">
+                  <label class="settingsLabel">
+                    <input type="checkbox" id="autoSyncTier" ${isHigherTierOff ? "disabled" : ""} ${settings.autoSyncTier ? "checked" : ""}
+                    aria-describedby="autoSyncTierDesc"> Auto Sync Tier
+                  </label>
+                  <span id="autoSyncTierDesc" class="sr-only"
+                    >If checked, tier restrictions will be automatically synced from
+                    your profile</span
+                  >
+                </div>
+                <div class="setting">
+                  <label class="settingsLabel">
+                    User tier:
+                    <input id="manualSetTier" type="text" inputmode="numeric" pattern="[0-9]*" size="1" maxlength="2" ${isHigherTierOff || settings.autoSyncTier ? "disabled" : ""} value="${settings.userTier || ""}"
+                    aria-describedby="manualSetTierDesc">
+                  </label>
+                  <span id="manualSetTierDesc" class="sr-only">
+                    The user tier that is used to filter content on the site</span>
+                </div>
+              </div>
+            </div>`;
+	}
+	function buildMarketplaceSettingsSection(settings) {
+		return `
+            <div class="settings-section" style="margin-bottom: 20px">
+              <div role="heading" aria-level="2" class="section-heading">
+                Marketplace &amp; Game Vault
+              </div>
+              <div
+                class="settings-group"
+                role="group"
+                aria-label="Marketplace Options">
+                ${buildFilterModeRow("outOfStock", "Out of Stock Items", "Show, dim, or hide marketplace items that are out of stock", settings.outOfStock)}
+                ${buildFilterModeRow("claimed", "Claimed Items", "Show, dim, or hide marketplace items you have already claimed", settings.claimed)}
+              </div>
+            </div>`;
+	}
+	function buildGiveawaysSettingsSection(settings) {
+		return `
+            <div class="settings-section" style="margin-bottom: 20px">
+              <div role="heading" aria-level="2" class="section-heading">
+                Community Giveaways
+              </div>
+              <div
+                class="settings-group"
+                role="group"
+                aria-label="Community Giveaway Options">
+                ${buildFilterModeRow("closedGiveaways", "Closed Giveaways", "Show, dim, or hide giveaways that have ended", settings.closedGiveaways)}
+                ${buildFilterModeRow("enteredGiveaways", "Entered Giveaways", "Show, dim, or hide giveaways you have already entered", settings.enteredGiveaways)}
+              </div>
+            </div>`;
+	}
+	function buildSettingsMenuHTML(settings) {
+		return `
+      <div id="alienware-filter-settings-backdrop" style="display: none" hidden></div>
+      <div
+        id="alienware-filter-settings"
+        role="dialog"
+        aria-labelledby="settings-title"
+        aria-modal="true"
+        hidden
+        style="display: none">
+        <div role="document">
+          <div id="settings-title" role="heading" aria-level="1">Filter Settings</div>
+          <form>
+            ${buildGlobalSettingsSection(settings)}
+            ${buildMarketplaceSettingsSection(settings)}
+            ${buildGiveawaysSettingsSection(settings)}
+            <div style="text-align: right">
+              <button id="saveFilterSettings" type="submit">Save</button>
+              <button id="closeFilterSettings" type="button">Close</button>
+            </div>
+          </form>
+        </div>
+      </div>
+      ${buildSettingsMenuStyles()}
+    `;
+	}
+	function isCheckboxChecked(id) {
+		return document.querySelector(`#${id}`)?.checked ?? false;
+	}
+	function getFilterSettingsModal() {
+		return document.querySelector("#alienware-filter-settings") ?? void 0;
+	}
+	function getFilterSettingsBackdrop() {
+		return document.querySelector("#alienware-filter-settings-backdrop") ?? void 0;
+	}
+	function setFilterSettingsOpen(isOpen) {
+		const modal = getFilterSettingsModal();
+		if (!modal) return;
+		const backdrop = getFilterSettingsBackdrop();
+		modal.style.display = isOpen ? "block" : "none";
+		modal.hidden = !isOpen;
+		if (backdrop) {
+			backdrop.style.display = isOpen ? "block" : "none";
+			backdrop.hidden = !isOpen;
+		}
+	}
+	function readFilterModeFromForm(id, fallback) {
+		const value = document.querySelector(`#${id}`)?.value;
+		return isFilterMode(value) ? value : fallback;
+	}
+	function readSettingsFromForm() {
+		const isAutoSyncTier = isCheckboxChecked("autoSyncTier");
+		const higherTier = readFilterModeFromForm("higherTier", defaultSettings.higherTier);
+		return {
+			higherTier,
+			autoSyncTier: isAutoSyncTier,
+			outOfStock: readFilterModeFromForm("outOfStock", defaultSettings.outOfStock),
+			claimed: readFilterModeFromForm("claimed", defaultSettings.claimed),
+			closedGiveaways: readFilterModeFromForm("closedGiveaways", defaultSettings.closedGiveaways),
+			enteredGiveaways: readFilterModeFromForm("enteredGiveaways", defaultSettings.enteredGiveaways),
+			...!isAutoSyncTier && higherTier !== "off" && { userTier: Number(document.querySelector("#manualSetTier")?.value) }
+		};
+	}
+	function bindSettingsMenuFocusTrap(modal) {
+		modal.addEventListener("keydown", (event) => {
+			if (event.key !== "Tab") return;
+			const focusableElements = [...modal.querySelectorAll("button, input, select")];
+			const firstFocusable = focusableElements[0];
+			const lastFocusable = focusableElements.at(-1);
+			if (firstFocusable === void 0 || lastFocusable === void 0) return;
+			if (event.shiftKey) {
+				if (document.activeElement === firstFocusable) {
+					lastFocusable.focus();
+					event.preventDefault();
+				}
+			} else if (document.activeElement === lastFocusable) {
+				firstFocusable.focus();
+				event.preventDefault();
+			}
+		});
+	}
+	function syncTierInputState() {
+		const higherTier = readFilterModeFromForm("higherTier", defaultSettings.higherTier);
+		const autoSync = document.querySelector("#autoSyncTier");
+		const manualTier = document.querySelector("#manualSetTier");
+		const isHigherTierOff = higherTier === "off";
+		if (autoSync) autoSync.disabled = isHigherTierOff;
+		if (manualTier) manualTier.disabled = isHigherTierOff || (autoSync?.checked ?? true);
+	}
+	function bindSettingsMenuEvents(modal) {
+		document.querySelector("#higherTier")?.addEventListener("change", () => {
+			syncTierInputState();
+		});
+		document.querySelector("#autoSyncTier")?.addEventListener("change", () => {
+			syncTierInputState();
+		});
+		document.querySelector("#saveFilterSettings")?.addEventListener("click", (event) => {
+			event.preventDefault();
+			saveSettings(readSettingsFromForm());
+			setFilterSettingsOpen(false);
+			location.reload();
+		});
+		document.querySelector("#closeFilterSettings")?.addEventListener("click", () => {
+			setFilterSettingsOpen(false);
+		});
+		getFilterSettingsBackdrop()?.addEventListener("click", () => {
+			setFilterSettingsOpen(false);
+		});
+		document.addEventListener("keydown", (event) => {
+			if (event.key === "Escape" && modal.style.display === "block") setFilterSettingsOpen(false);
+		});
+		bindSettingsMenuFocusTrap(modal);
+	}
+	async function createSettingsMenu() {
+		if (document.querySelector("#alienware-filter-settings")) {
+			setFilterSettingsOpen(false);
+			return;
+		}
+		const settings = await getSettings();
+		document.body.insertAdjacentHTML("beforeend", buildSettingsMenuHTML(settings));
+		const modal = getFilterSettingsModal();
+		if (!modal) return;
+		setFilterSettingsOpen(false);
+		bindSettingsMenuEvents(modal);
+	}
+	function addSettingsButton() {
+		const menuList = document.querySelector(".nav-item-mus .dropdown-menu.dropdown-menu-end");
+		if (!menuList || menuList.querySelector("[data-filter-settings-menu]")) return;
+		const settingsItem = document.createElement("a");
+		settingsItem.className = "dropdown-item";
+		settingsItem.href = "#";
+		settingsItem.dataset.filterSettingsMenu = "1";
+		settingsItem.textContent = "Filter Settings";
+		settingsItem.addEventListener("click", (event) => {
+			event.preventDefault();
+			event.stopPropagation();
+			setFilterSettingsOpen(true);
+		});
+		menuList.insertBefore(settingsItem, menuList.lastElementChild);
+	}
+	function watchSettingsButton() {
+		addSettingsButton();
+		if (document.documentElement.dataset.awaFilterMenuWatch === "1") return;
+		document.documentElement.dataset.awaFilterMenuWatch = "1";
+		new MutationObserver(() => {
+			if (!document.querySelector("[data-filter-settings-menu]")) addSettingsButton();
+		}).observe(document.documentElement, {
+			childList: true,
+			subtree: true
+		});
+	}
+	async function initFilters() {
+		ensureFilterStyles();
+		await createSettingsMenu();
+		watchSettingsButton();
+		if ((await getSettings()).autoSyncTier) await checkAndStoreTier();
+		watchPageFilters();
+	}
 	var READING_KEY = "ucfReadingMode";
 	var TABLES_KEY = "ucfClassicTables";
 	var STYLE_ID = "awa-ucf-reading-mode-styles";
@@ -7701,175 +8237,6 @@
 		mountActionButton(state);
 		observeForRerender();
 	}
-	var DEFAULT_USER_TIER = 99;
-	var FILTER_STYLE_ID = "alienware-filter-styles";
-	var FILTER_DIM_CLASS = "awa-filter-dimmed";
-	var FILTER_STATE_ATTR = "data-awa-filter";
-	var defaultSettings = {
-		higherTier: "hide",
-		autoSyncTier: true,
-		outOfStock: "hide",
-		claimed: "hide",
-		closedGiveaways: "hide",
-		enteredGiveaways: "hide"
-	};
-	var FILTER_MODES = new Set([
-		"off",
-		"dim",
-		"hide"
-	]);
-	function isFilterMode(value) {
-		return typeof value === "string" && FILTER_MODES.has(value);
-	}
-	function isSettingsRecord(value) {
-		return typeof value === "object" && value !== null;
-	}
-	function filterModeFromSaved(parsed, modeKey, legacyHideKey, fallback) {
-		if (isFilterMode(parsed[modeKey])) return parsed[modeKey];
-		const legacyHide = parsed[legacyHideKey];
-		if (typeof legacyHide === "boolean") return legacyHide ? "hide" : "off";
-		return fallback;
-	}
-	async function getSettings() {
-		const savedSettings = await _GM.getValue("filterSettings");
-		const settings = { ...defaultSettings };
-		if (!savedSettings) return settings;
-		try {
-			const parsedUnknown = typeof savedSettings === "string" ? JSON.parse(savedSettings) : savedSettings;
-			if (!isSettingsRecord(parsedUnknown)) return settings;
-			const parsed = parsedUnknown;
-			settings.higherTier = filterModeFromSaved(parsed, "higherTier", "hideTierRestricted", defaultSettings.higherTier);
-			settings.outOfStock = filterModeFromSaved(parsed, "outOfStock", "hideOutOfStock", defaultSettings.outOfStock);
-			settings.claimed = filterModeFromSaved(parsed, "claimed", "hideClaimed", defaultSettings.claimed);
-			settings.closedGiveaways = filterModeFromSaved(parsed, "closedGiveaways", "hideClosedGiveaways", defaultSettings.closedGiveaways);
-			settings.enteredGiveaways = isFilterMode(parsed.enteredGiveaways) ? parsed.enteredGiveaways : defaultSettings.enteredGiveaways;
-			if (typeof parsed.autoSyncTier === "boolean") settings.autoSyncTier = parsed.autoSyncTier;
-			if (parsed.userTier !== void 0) {
-				const tierValue = Number(parsed.userTier);
-				if (!Number.isNaN(tierValue)) settings.userTier = tierValue;
-			}
-		} catch (error) {
-			console.error("Error parsing saved settings:", error);
-			return defaultSettings;
-		}
-		return settings;
-	}
-	async function saveSettings(settings) {
-		const newSettings = {
-			...await getSettings(),
-			...settings
-		};
-		await _GM.setValue("filterSettings", JSON.stringify(newSettings));
-	}
-	function extractTier(text) {
-		const match = /Tier\s*(\d+)/i.exec(text);
-		if (match?.[1]) return Number(match[1]);
-	}
-	function parseTimestamp(value) {
-		const normalized = value.includes("T") ? value : value.replace(" ", "T");
-		const ms = Date.parse(normalized);
-		return Number.isNaN(ms) ? void 0 : ms;
-	}
-	function isGiveawayClosed(giveaway) {
-		const timeElement = giveaway.querySelector(".community-giveaways__listing-row__time");
-		const timeText = (timeElement?.textContent ?? "").replaceAll(/\s+/g, " ").trim();
-		if (/\bclosed\b/i.test(timeText)) return true;
-		const closeStamp = timeElement?.querySelector(".timeago-future")?.getAttribute("title");
-		if (!closeStamp) return false;
-		const closeMs = parseTimestamp(closeStamp);
-		return closeMs !== void 0 && closeMs <= Date.now();
-	}
-	function readPageUserTier() {
-		const arpTier = globalThis.arp_tier;
-		if (typeof arpTier === "number" && !Number.isNaN(arpTier)) return arpTier;
-		const tierImg = document.querySelector("img[src*=\"/images/content/tier-tags/\"]");
-		if (!tierImg) return;
-		const tierMatch = /tier-tags\/(\d+)\.png/.exec(tierImg.src);
-		if (!tierMatch?.[1]) return;
-		const userTier = Number(tierMatch[1]);
-		return Number.isNaN(userTier) ? void 0 : userTier;
-	}
-	async function checkAndStoreTier() {
-		const userTier = readPageUserTier();
-		if (userTier === void 0) return;
-		await saveSettings({ userTier });
-		console.log("Stored user tier:", userTier);
-	}
-	function isGiveawayEntered(giveaway) {
-		return /you have entered this giveaway/i.test(giveaway.textContent ?? "");
-	}
-	function combineFilterMode(current, mode, isMatching) {
-		if (!isMatching || mode === "off") return current;
-		if (mode === "hide" || current === "hide") return "hide";
-		return "dim";
-	}
-	function marketplaceFilterTarget(item) {
-		return item.closest("[class*=\"marketplace-product-block-\"]") ?? item;
-	}
-	function applyFilterEffect(target, effect) {
-		const previous = target.getAttribute(FILTER_STATE_ATTR);
-		if (effect === "none") {
-			if (previous === "hide") target.style.removeProperty("display");
-			target.classList.remove(FILTER_DIM_CLASS);
-			target.removeAttribute(FILTER_STATE_ATTR);
-			return;
-		}
-		target.setAttribute(FILTER_STATE_ATTR, effect);
-		target.classList.toggle(FILTER_DIM_CLASS, effect === "dim");
-		if (effect === "hide") {
-			target.style.display = "none";
-			return;
-		}
-		if (previous === "hide") target.style.removeProperty("display");
-	}
-	function marketplaceFilterEffect(item, settings, userTier) {
-		const text = item.textContent || "";
-		const normalizedText = text.toLowerCase();
-		let effect = "none";
-		effect = combineFilterMode(effect, settings.outOfStock, normalizedText.includes("out of stock") || item.dataset.productInStock === "false");
-		effect = combineFilterMode(effect, settings.claimed, normalizedText.includes("claimed"));
-		const tierNumber = extractTier(text);
-		effect = combineFilterMode(effect, settings.higherTier, tierNumber !== void 0 && tierNumber > userTier);
-		return effect;
-	}
-	function giveawayFilterEffect(giveaway, settings, userTier) {
-		let effect = "none";
-		effect = combineFilterMode(effect, settings.closedGiveaways, isGiveawayClosed(giveaway));
-		effect = combineFilterMode(effect, settings.enteredGiveaways, isGiveawayEntered(giveaway));
-		const tierNumber = extractTier(giveaway.querySelector(".community-giveaways__listing-row__tier")?.textContent ?? "");
-		effect = combineFilterMode(effect, settings.higherTier, tierNumber !== void 0 && tierNumber > userTier);
-		return effect;
-	}
-	async function filterGiveaways() {
-		const settings = await getSettings();
-		const userTier = settings.userTier ?? DEFAULT_USER_TIER;
-		document.querySelectorAll(".community-giveaways__listing__row").forEach((giveaway) => {
-			applyFilterEffect(giveaway, giveawayFilterEffect(giveaway, settings, userTier));
-		});
-	}
-	async function filterMarketplace() {
-		const settings = await getSettings();
-		const userTier = settings.userTier ?? DEFAULT_USER_TIER;
-		document.querySelectorAll([
-			".product-card.marketplace-product",
-			".pointer.marketplace-game-small",
-			".pointer.marketplace-game-large"
-		].join(", ")).forEach((item) => {
-			applyFilterEffect(marketplaceFilterTarget(item), marketplaceFilterEffect(item, settings, userTier));
-		});
-	}
-	function ensureFilterStyles() {
-		if (document.querySelector(`#${FILTER_STYLE_ID}`)) return;
-		const style = document.createElement("style");
-		style.id = FILTER_STYLE_ID;
-		style.textContent = `
-        .${FILTER_DIM_CLASS} {
-          opacity: 0.4 !important;
-          filter: grayscale(0.55);
-        }
-      `;
-		(document.head ?? document.documentElement).append(style);
-	}
 	function waitForBody() {
 		if (document.body) return Promise.resolve(document.body);
 		return new Promise((resolve) => {
@@ -7881,368 +8248,8 @@
 			observer.observe(document.documentElement, { childList: true });
 		});
 	}
-	function buildSettingsMenuStyles() {
-		return `
-      <style>
-        #alienware-filter-settings-backdrop {
-          display: none;
-          position: fixed;
-          inset: 0;
-          background: rgba(0, 0, 0, 0.72);
-          z-index: 10000;
-        }
-        #alienware-filter-settings {
-          display: none;
-          position: fixed;
-          top: 50%;
-          left: 50%;
-          transform: translate(-50%, -50%);
-          background: #1a1a1a !important;
-          background-color: #1a1a1a !important;
-          opacity: 1 !important;
-          color: #fff;
-          padding: 20px;
-          border-radius: 8px;
-          border: 1px solid #333;
-          z-index: 10001;
-          min-width: 320px;
-          max-width: min(460px, 94vw);
-          box-shadow: 0 12px 40px rgba(0, 0, 0, 0.85);
-          isolation: isolate;
-        }
-        #settings-title {
-          color: #fff;
-          font-size: 1.5em;
-          font-weight: bold;
-          margin-bottom: 15px;
-        }
-        #manualSetTier {
-          color: white;
-          padding: 2px;
-          text-align: center;
-        }
-        #manualSetTier:disabled {
-          color: grey;
-        }
-        .section-heading {
-          color: #00bc8c;
-          font-size: 1.1em;
-          margin-bottom: 10px;
-          font-weight: bold;
-        }
-        .setting {
-          margin-bottom: 10px;
-          margin-left: 15px;
-        }
-        .setting-row {
-          display: flex;
-          align-items: center;
-          justify-content: space-between;
-          gap: 12px;
-        }
-        .setting-row .settingsLabel {
-          display: inline;
-          margin-bottom: 0;
-          flex: 1;
-        }
-        .awa-filter-mode {
-          background: #111;
-          color: #fff;
-          border: 1px solid #555;
-          border-radius: 4px;
-          padding: 3px 6px;
-          min-width: 5.2em;
-        }
-        .settingsLabel {
-          color: #fff;
-          display: block;
-          margin-bottom: 5px;
-        }
-        #saveFilterSettings {
-          background: #00bc8c;
-          color: #fff;
-          border: none;
-          padding: 5px 15px;
-          border-radius: 4px;
-          cursor: pointer;
-        }
-        #closeFilterSettings {
-          background: #e74c3c;
-          color: #fff;
-          border: none;
-          padding: 5px 15px;
-          border-radius: 4px;
-          margin-left: 10px;
-          cursor: pointer;
-        }
-        .sr-only {
-          position: absolute;
-          width: 1px;
-          height: 1px;
-          padding: 0;
-          margin: -1px;
-          overflow: hidden;
-          clip: rect(0, 0, 0, 0);
-          border: 0;
-        }
-      </style>
-    `;
-	}
-	function buildFilterModeOptions(mode) {
-		return [
-			["off", "Show"],
-			["dim", "Dim"],
-			["hide", "Hide"]
-		].map(([value, label]) => `<option value="${value}" ${mode === value ? "selected" : ""}>${label}</option>`).join("");
-	}
-	function buildFilterModeRow(id, label, description, mode) {
-		return `
-                <div class="setting setting-row">
-                  <label class="settingsLabel" for="${id}">${label}</label>
-                  <select id="${id}" class="awa-filter-mode" aria-describedby="${id}Desc">
-                    ${buildFilterModeOptions(mode)}
-                  </select>
-                  <span id="${id}Desc" class="sr-only">${description}</span>
-                </div>`;
-	}
-	function buildGlobalSettingsSection(settings) {
-		const isHigherTierOff = settings.higherTier === "off";
-		return `
-            <div class="settings-section" style="margin-bottom: 20px">
-              <div role="heading" aria-level="2" class="section-heading">
-                Global Settings
-              </div>
-              <div
-                class="settings-group"
-                role="group"
-                aria-label="Global Filter Options">
-                ${buildFilterModeRow("higherTier", "Higher Tier Content", "Show, dim, or hide content that requires a higher tier than yours", settings.higherTier)}
-                <div class="setting">
-                  <label class="settingsLabel">
-                    <input type="checkbox" id="autoSyncTier" ${isHigherTierOff ? "disabled" : ""} ${settings.autoSyncTier ? "checked" : ""}
-                    aria-describedby="autoSyncTierDesc"> Auto Sync Tier
-                  </label>
-                  <span id="autoSyncTierDesc" class="sr-only"
-                    >If checked, tier restrictions will be automatically synced from
-                    your profile</span
-                  >
-                </div>
-                <div class="setting">
-                  <label class="settingsLabel">
-                    User tier:
-                    <input id="manualSetTier" type="text" inputmode="numeric" pattern="[0-9]*" size="1" maxlength="2" ${isHigherTierOff || settings.autoSyncTier ? "disabled" : ""} value="${settings.userTier || ""}"
-                    aria-describedby="manualSetTierDesc">
-                  </label>
-                  <span id="manualSetTierDesc" class="sr-only">
-                    The user tier that is used to filter content on the site</span>
-                </div>
-              </div>
-            </div>`;
-	}
-	function buildMarketplaceSettingsSection(settings) {
-		return `
-            <div class="settings-section" style="margin-bottom: 20px">
-              <div role="heading" aria-level="2" class="section-heading">
-                Marketplace &amp; Game Vault
-              </div>
-              <div
-                class="settings-group"
-                role="group"
-                aria-label="Marketplace Options">
-                ${buildFilterModeRow("outOfStock", "Out of Stock Items", "Show, dim, or hide marketplace items that are out of stock", settings.outOfStock)}
-                ${buildFilterModeRow("claimed", "Claimed Items", "Show, dim, or hide marketplace items you have already claimed", settings.claimed)}
-              </div>
-            </div>`;
-	}
-	function buildGiveawaysSettingsSection(settings) {
-		return `
-            <div class="settings-section" style="margin-bottom: 20px">
-              <div role="heading" aria-level="2" class="section-heading">
-                Community Giveaways
-              </div>
-              <div
-                class="settings-group"
-                role="group"
-                aria-label="Community Giveaway Options">
-                ${buildFilterModeRow("closedGiveaways", "Closed Giveaways", "Show, dim, or hide giveaways that have ended", settings.closedGiveaways)}
-                ${buildFilterModeRow("enteredGiveaways", "Entered Giveaways", "Show, dim, or hide giveaways you have already entered", settings.enteredGiveaways)}
-              </div>
-            </div>`;
-	}
-	function buildSettingsMenuHTML(settings) {
-		return `
-      <div id="alienware-filter-settings-backdrop" style="display: none" hidden></div>
-      <div
-        id="alienware-filter-settings"
-        role="dialog"
-        aria-labelledby="settings-title"
-        aria-modal="true"
-        hidden
-        style="display: none">
-        <div role="document">
-          <div id="settings-title" role="heading" aria-level="1">Filter Settings</div>
-          <form>
-            ${buildGlobalSettingsSection(settings)}
-            ${buildMarketplaceSettingsSection(settings)}
-            ${buildGiveawaysSettingsSection(settings)}
-            <div style="text-align: right">
-              <button id="saveFilterSettings" type="submit">Save</button>
-              <button id="closeFilterSettings" type="button">Close</button>
-            </div>
-          </form>
-        </div>
-      </div>
-      ${buildSettingsMenuStyles()}
-    `;
-	}
-	function isCheckboxChecked(id) {
-		return document.querySelector(`#${id}`)?.checked ?? false;
-	}
-	function getFilterSettingsModal() {
-		return document.querySelector("#alienware-filter-settings") ?? void 0;
-	}
-	function getFilterSettingsBackdrop() {
-		return document.querySelector("#alienware-filter-settings-backdrop") ?? void 0;
-	}
-	function setFilterSettingsOpen(isOpen) {
-		const modal = getFilterSettingsModal();
-		if (!modal) return;
-		const backdrop = getFilterSettingsBackdrop();
-		modal.style.display = isOpen ? "block" : "none";
-		modal.hidden = !isOpen;
-		if (backdrop) {
-			backdrop.style.display = isOpen ? "block" : "none";
-			backdrop.hidden = !isOpen;
-		}
-	}
-	function readFilterModeFromForm(id, fallback) {
-		const value = document.querySelector(`#${id}`)?.value;
-		return isFilterMode(value) ? value : fallback;
-	}
-	function readSettingsFromForm() {
-		const isAutoSyncTier = isCheckboxChecked("autoSyncTier");
-		const higherTier = readFilterModeFromForm("higherTier", defaultSettings.higherTier);
-		return {
-			higherTier,
-			autoSyncTier: isAutoSyncTier,
-			outOfStock: readFilterModeFromForm("outOfStock", defaultSettings.outOfStock),
-			claimed: readFilterModeFromForm("claimed", defaultSettings.claimed),
-			closedGiveaways: readFilterModeFromForm("closedGiveaways", defaultSettings.closedGiveaways),
-			enteredGiveaways: readFilterModeFromForm("enteredGiveaways", defaultSettings.enteredGiveaways),
-			...!isAutoSyncTier && higherTier !== "off" && { userTier: Number(document.querySelector("#manualSetTier")?.value) }
-		};
-	}
-	function bindSettingsMenuFocusTrap(modal) {
-		modal.addEventListener("keydown", (event) => {
-			if (event.key !== "Tab") return;
-			const focusableElements = [...modal.querySelectorAll("button, input, select")];
-			const firstFocusable = focusableElements[0];
-			const lastFocusable = focusableElements.at(-1);
-			if (firstFocusable === void 0 || lastFocusable === void 0) return;
-			if (event.shiftKey) {
-				if (document.activeElement === firstFocusable) {
-					lastFocusable.focus();
-					event.preventDefault();
-				}
-			} else if (document.activeElement === lastFocusable) {
-				firstFocusable.focus();
-				event.preventDefault();
-			}
-		});
-	}
-	function syncTierInputState() {
-		const higherTier = readFilterModeFromForm("higherTier", defaultSettings.higherTier);
-		const autoSync = document.querySelector("#autoSyncTier");
-		const manualTier = document.querySelector("#manualSetTier");
-		const isHigherTierOff = higherTier === "off";
-		if (autoSync) autoSync.disabled = isHigherTierOff;
-		if (manualTier) manualTier.disabled = isHigherTierOff || (autoSync?.checked ?? true);
-	}
-	function bindSettingsMenuEvents(modal) {
-		document.querySelector("#higherTier")?.addEventListener("change", () => {
-			syncTierInputState();
-		});
-		document.querySelector("#autoSyncTier")?.addEventListener("change", () => {
-			syncTierInputState();
-		});
-		document.querySelector("#saveFilterSettings")?.addEventListener("click", (event) => {
-			event.preventDefault();
-			saveSettings(readSettingsFromForm());
-			setFilterSettingsOpen(false);
-			location.reload();
-		});
-		document.querySelector("#closeFilterSettings")?.addEventListener("click", () => {
-			setFilterSettingsOpen(false);
-		});
-		getFilterSettingsBackdrop()?.addEventListener("click", () => {
-			setFilterSettingsOpen(false);
-		});
-		document.addEventListener("keydown", (event) => {
-			if (event.key === "Escape" && modal.style.display === "block") setFilterSettingsOpen(false);
-		});
-		bindSettingsMenuFocusTrap(modal);
-	}
-	async function createSettingsMenu() {
-		if (document.querySelector("#alienware-filter-settings")) {
-			setFilterSettingsOpen(false);
-			return;
-		}
-		const settings = await getSettings();
-		document.body.insertAdjacentHTML("beforeend", buildSettingsMenuHTML(settings));
-		const modal = getFilterSettingsModal();
-		if (!modal) return;
-		setFilterSettingsOpen(false);
-		bindSettingsMenuEvents(modal);
-	}
-	function addSettingsButton() {
-		const menuList = document.querySelector(".nav-item-mus .dropdown-menu.dropdown-menu-end");
-		if (!menuList || menuList.querySelector("[data-filter-settings-menu]")) return;
-		const settingsItem = document.createElement("a");
-		settingsItem.className = "dropdown-item";
-		settingsItem.href = "#";
-		settingsItem.dataset.filterSettingsMenu = "1";
-		settingsItem.textContent = "Filter Settings";
-		settingsItem.addEventListener("click", (event) => {
-			event.preventDefault();
-			event.stopPropagation();
-			setFilterSettingsOpen(true);
-		});
-		menuList.insertBefore(settingsItem, menuList.lastElementChild);
-	}
-	function watchSettingsButton() {
-		addSettingsButton();
-		if (document.documentElement.dataset.awaFilterMenuWatch === "1") return;
-		document.documentElement.dataset.awaFilterMenuWatch = "1";
-		new MutationObserver(() => {
-			if (!document.querySelector("[data-filter-settings-menu]")) addSettingsButton();
-		}).observe(document.documentElement, {
-			childList: true,
-			subtree: true
-		});
-	}
-	var currentPath = location.pathname;
-	ensureFilterStyles();
 	initArtifactOptimizer();
 	await(waitForBody());
-	await(createSettingsMenu());
-	watchSettingsButton();
+	await(initFilters());
 	await(initUcfReadingMode());
-	if ((await(getSettings())).autoSyncTier) await(checkAndStoreTier());
-	if (currentPath === "/community-giveaways") {
-		new MutationObserver(() => {
-			filterGiveaways();
-		}).observe(document.body, {
-			childList: true,
-			subtree: true
-		});
-		await(filterGiveaways());
-	} else if (currentPath.startsWith("/marketplace")) {
-		new MutationObserver(() => {
-			filterMarketplace();
-		}).observe(document.body, {
-			childList: true,
-			subtree: true
-		});
-		await(filterMarketplace());
-	}
 })();

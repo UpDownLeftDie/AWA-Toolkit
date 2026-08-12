@@ -1,0 +1,32 @@
+{
+  "cSpell.words": [
+    "ASCE",
+    "Alienware",
+    "alienwarearena",
+    "cooldown",
+    "cooldowns",
+    "gamevault",
+    "Megumin",
+    "newmodal",
+    "offerheader",
+    "pagecontent",
+    "steamcommunity",
+    "steampowered",
+    "tampermonkey",
+    "unequip",
+    "userscript",
+    "userscripts",
+    "violentmonkey"
+  ],
+  "biome.enabled": false,
+  "eslint.run": "onType",
+  "eslint.validate": [
+    "javascript",
+    "javascriptreact",
+    "typescript",
+    "typescriptreact"
+  ],
+  "search.exclude": {
+    "dist": true
+  }
+}
