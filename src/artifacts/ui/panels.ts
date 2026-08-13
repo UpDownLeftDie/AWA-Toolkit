@@ -35,6 +35,7 @@ import {
   renderCredits,
   renderHydrateBanner,
   renderModalSkeleton,
+  renderPanelError,
   renderPanelSkeleton,
   renderResultBody,
   renderSectionDivider,
@@ -558,49 +559,61 @@ async function refreshPanelFromLivePage(
   paint(live, false);
 }
 
+function formatPanelLoadError(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
+
 async function fillPanelFromCacheThenHydrate(
   panel: HTMLElement,
   generation: number,
   paint: (data: GatheredData, isHydrating: boolean) => void,
   options: { force?: boolean } = {},
 ): Promise<void> {
-  const isForce = options.force === true;
+  try {
+    const isForce = options.force === true;
 
-  // Force Refresh: skip the stale cache paint so lock icons from Showroom
-  // replace GM leftovers in one shot.
-  if (isForce) {
-    const cached =
-      gatheredCache.current ?? (await gatherData({ remote: false }));
+    // Force Refresh: skip the stale cache paint so lock icons from Showroom
+    // replace GM leftovers in one shot.
+    if (isForce) {
+      const cached =
+        gatheredCache.current ?? (await gatherData({ remote: false }));
+      if (!isPanelGenerationCurrent(panel, generation)) {
+        return;
+      }
+      paint(cached, true);
+      const hydrated = await hydrateGatheredData({ force: true });
+      if (!isPanelGenerationCurrent(panel, generation)) {
+        return;
+      }
+      paint(hydrated, false);
+      return;
+    }
+
+    const cached = await gatherData({ remote: false });
     if (!isPanelGenerationCurrent(panel, generation)) {
       return;
     }
-    paint(cached, true);
-    const hydrated = await hydrateGatheredData({ force: true });
+    const shouldHydrate = requiresBackgroundHydrate(cached, options);
+    paint(cached, shouldHydrate);
+
+    if (!shouldHydrate) {
+      await refreshPanelFromLivePage(panel, generation, (data, isHydrating) => {
+        paint(data, isHydrating);
+      });
+      return;
+    }
+    const hydrated = await hydrateGatheredData(options);
     if (!isPanelGenerationCurrent(panel, generation)) {
       return;
     }
     paint(hydrated, false);
-    return;
+  } catch (error) {
+    console.error('[AWA Toolkit] Failed to load recommendations', error);
+    if (!isPanelGenerationCurrent(panel, generation)) {
+      return;
+    }
+    replaceInlinePanelBody(panel, renderPanelError(formatPanelLoadError(error)));
   }
-
-  const cached = await gatherData({ remote: false });
-  if (!isPanelGenerationCurrent(panel, generation)) {
-    return;
-  }
-  const shouldHydrate = requiresBackgroundHydrate(cached, options);
-  paint(cached, shouldHydrate);
-
-  if (!shouldHydrate) {
-    await refreshPanelFromLivePage(panel, generation, (data, isHydrating) => {
-      paint(data, isHydrating);
-    });
-    return;
-  }
-  const hydrated = await hydrateGatheredData(options);
-  if (!isPanelGenerationCurrent(panel, generation)) {
-    return;
-  }
-  paint(hydrated, false);
 }
 
 function renderShowroomEquipActions(result: OptimizerResult): string {

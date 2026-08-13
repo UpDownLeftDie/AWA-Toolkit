@@ -44,7 +44,7 @@ export function msUntilUtcMidnight(now = new Date()): number {
 }
 
 export function utcResetDeadlineLabel(now = new Date()): string {
-  return `${formatMs(msUntilUtcMidnight(now))} left until 00:00 UTC reset`;
+  return `${formatMs(msUntilUtcMidnight(now))} left`;
 }
 
 export function sortArtifactsForDisplay<T extends { displayName: string }>(

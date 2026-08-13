@@ -1,5 +1,6 @@
 import { nudgeStuckSlotLocks } from './api';
 import { applyAsceCommunityHours } from './asce';
+import { lastDiscordPollPostAt } from './data';
 import {
   loadSnapshot,
   resolveShowroomUrl,
@@ -11,6 +12,7 @@ import { syncSlotLocksFromScrape } from './settings';
 import {
   applyArpLogActivityCaps,
   applyBattlePassEndFromDocument,
+  applyDailyQuestsFromDocument,
   applyGameVaultDocument,
   applyRedeemableArpFromDocument,
   applySteamFreeToPlayResolution,
@@ -333,12 +335,19 @@ function areSlotLocksFresh(snapshot: ArtifactSnapshot | undefined): boolean {
   return isScrapedWithin(snapshot.scrapedAt, SLOT_LOCK_STALE_MS);
 }
 
-function isCapsFresh(state: SiteState | undefined): boolean {
+function isCapsFresh(
+  state: SiteState | undefined,
+  now = new Date(),
+): boolean {
   if (!state) {
     return false;
   }
-  const updatedAt = Date.parse(state.updatedAt);
-  if (Number.isNaN(updatedAt) || Date.now() - updatedAt > STALE_MS) {
+  if (!isScrapedWithin(state.updatedAt, STALE_MS)) {
+    return false;
+  }
+  // Twitch / calendar / dailies / time-on-site all reset at 00:00 UTC — a
+  // scrape from before today can't reflect that.
+  if (!isScrapedSinceUtcMidnight(state.updatedAt, now)) {
     return false;
   }
   const isCapsUnknown = Object.values(state.caps).every(
@@ -398,23 +407,81 @@ function isScrapedWithin(
   return Date.now() - at < maxAgeMs;
 }
 
-function isArpLogFresh(state: SiteState | undefined): boolean {
-  return isScrapedWithin(state?.arpLog?.scrapedAt, ARP_LOG_STALE_MS);
+function utcDayStartMs(now = new Date()): number {
+  return Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate());
 }
 
-function isCommunityEventFresh(state: SiteState | undefined): boolean {
-  const event = state?.communityEvent;
-  if (!event?.isLive) {
-    // No live event cached — refresh with Control Center cadence.
-    return isCapsFresh(state);
+/**
+ * Everything tied to a daily 00:00 UTC reset (activity caps, ARP-log-driven
+ * claims, most Control Center widgets) is stale by definition if the last
+ * scrape happened before today's UTC midnight — even when it is inside the
+ * general TTL. Return false in that case so hydrate always covers the
+ * current UTC day.
+ */
+function isScrapedSinceUtcMidnight(
+  scrapedAt: string | undefined,
+  now = new Date(),
+): boolean {
+  if (!scrapedAt) {
+    return false;
   }
-  const at = Date.parse(event.scrapedAt);
+  const at = Date.parse(scrapedAt);
   if (Number.isNaN(at)) {
     return false;
   }
+  return at >= utcDayStartMs(now);
+}
+
+/**
+ * ARP Log is the only signal for Discord Poll votes and same-day Daily Login
+ * Calendar claims, so any scrape from before the current UTC day — or before
+ * the most recent weekday 16:00 UTC poll post — cannot see today's earn even
+ * if it is within the general 6h TTL. Treat those as stale so a hydrate
+ * always covers at least the current daily and poll cycles.
+ *
+ * An empty `recent` also counts as stale: an empty scrape can only mean "we
+ * never actually saw the log" (a fresh page shell, an iframe that returned
+ * before rows painted, a session miss) — never trust it to keep us from
+ * refetching. `mergeArpLogScrape` stamps such scrapes with an epoch sentinel
+ * so `isScrapedWithin` already fails, but check length explicitly in case a
+ * future writer forgets that convention.
+ */
+function isArpLogFresh(
+  state: SiteState | undefined,
+  now = new Date(),
+): boolean {
+  const arpLog = state?.arpLog;
+  if (!arpLog || arpLog.recent.length === 0) {
+    return false;
+  }
+  const scrapedAt = arpLog.scrapedAt;
+  if (!isScrapedWithin(scrapedAt, ARP_LOG_STALE_MS)) {
+    return false;
+  }
+  if (!isScrapedSinceUtcMidnight(scrapedAt, now)) {
+    return false;
+  }
+  const scrapedAtMs = Date.parse(scrapedAt);
+  return scrapedAtMs >= lastDiscordPollPostAt(now).getTime();
+}
+
+function isCommunityEventFresh(
+  state: SiteState | undefined,
+  now = new Date(),
+): boolean {
+  const event = state?.communityEvent;
+  if (!event?.isLive) {
+    // No live event cached — refresh with Control Center cadence.
+    return isCapsFresh(state, now);
+  }
   const ttl =
     event.pendingArp > 0 ? COMMUNITY_EVENT_PENDING_STALE_MS : STALE_MS;
-  return Date.now() - at < ttl;
+  if (!isScrapedWithin(event.scrapedAt, ttl)) {
+    return false;
+  }
+  // Personal community hours reset at 00:00 UTC — a scrape from before
+  // today can't reflect today's playtime toward the next unlock.
+  return isScrapedSinceUtcMidnight(event.scrapedAt, now);
 }
 
 async function persistShowroomSnapshot(
@@ -708,6 +775,7 @@ function applyControlCenterDocument(
     scrapeControlCenterCapsFromDocument(controlDocument),
   );
   applySteamQuestsFromDocument(next, controlDocument);
+  applyDailyQuestsFromDocument(next, controlDocument);
   applyWatchTwitchProgress(next, controlDocument);
   applyBattlePassEndFromDocument(next, controlDocument);
 }

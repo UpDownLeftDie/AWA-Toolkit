@@ -248,6 +248,26 @@ export function scrapeArpLogFromDocument(document_: Document): ArpLogState {
 }
 
 /**
+ * Sentinel `scrapedAt` for a scrape we don't trust as "seen the log". Any
+ * empty scrape lands here so `isArpLogFresh` always treats it as stale and
+ * the next open retries instead of coasting on a fake-fresh stamp.
+ */
+const ARP_LOG_UNSEEN_SCRAPED_AT = new Date(0).toISOString();
+
+function mergeArpLogScrapedAt(
+  scraped: ArpLogState,
+  previous: ArpLogState,
+): string {
+  if (scraped.recent.length > 0) {
+    return scraped.scrapedAt;
+  }
+  if (previous.recent.length > 0) {
+    return previous.scrapedAt;
+  }
+  return ARP_LOG_UNSEEN_SCRAPED_AT;
+}
+
+/**
  * Merge a fresh ARP Log scrape with whatever's cached.
  *
  * The background fetch requests an explicit `from`/`to` window, but a user
@@ -257,12 +277,22 @@ export function scrapeArpLogFromDocument(document_: Document): ArpLogState {
  * already captured. Entries have no stable id, so rows are deduped on
  * (date, action, arp) — the same identity a repeat scrape of the same
  * underlying row would produce.
+ *
+ * An empty scrape never advances `scrapedAt`. In the fresh-install case
+ * (no previous log) a fetch that came back as a page shell would otherwise
+ * stamp `{ scrapedAt: now, recent: [] }` and coast for the whole 6h TTL,
+ * hiding a Discord Poll vote cast right after. The sentinel epoch stamp
+ * keeps the merged state defined (so callers don't have to null-check)
+ * while ensuring `isArpLogFresh` always retries next open.
  */
 export function mergeArpLogScrape(
   scraped: ArpLogState,
   previous: ArpLogState | undefined,
 ): ArpLogState {
   if (!previous) {
+    if (scraped.recent.length === 0) {
+      return { ...scraped, scrapedAt: ARP_LOG_UNSEEN_SCRAPED_AT };
+    }
     return scraped;
   }
   const seen = new Set<string>();
@@ -281,12 +311,9 @@ export function mergeArpLogScrape(
   const redeemableArp = scraped.redeemableArp ?? previous.redeemableArp;
   const lifetimeArp = scraped.lifetimeArp ?? previous.lifetimeArp;
   const todayDelta = scraped.todayDelta ?? previous.todayDelta;
-  // Empty row list is usually "page not painted yet", not a real empty log.
-  // Keep the previous scrapedAt so a failed visit cannot hide a later fetch.
-  const scrapedAt =
-    scraped.recent.length === 0 && previous.recent.length > 0
-      ? previous.scrapedAt
-      : scraped.scrapedAt;
+  // Empty scrape means "page not painted yet" — keep previous scrapedAt if
+  // we have one, or fall back to the unseen sentinel so we retry next open.
+  const scrapedAt = mergeArpLogScrapedAt(scraped, previous);
   return {
     scrapedAt,
     ...(redeemableArp !== undefined && { redeemableArp }),

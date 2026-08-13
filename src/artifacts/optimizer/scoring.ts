@@ -232,10 +232,8 @@ function scoreWindowActivities(
     }
   }
 
-  if (
-    isEnabled('dailyCalendar') &&
-    (isNextUtcResetInLock || isActivityAvailable(caps, 'dailyCalendar'))
-  ) {
+  // Auto-claims on visit; ARP log marks today capped. Count the next day.
+  if (isEnabled('dailyCalendar')) {
     flatSum += addDailyCategory(
       breakdown,
       'dailyCalendar',

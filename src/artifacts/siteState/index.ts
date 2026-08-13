@@ -31,6 +31,7 @@ import {
   scrapeCommunityEventFromDocument,
   scrapeLiveCommunityEventBanner,
 } from './communityEvent';
+import { applyDailyQuestsFromDocument } from './dailyQuests';
 import {
   applyGameVaultDocument,
   scrapeUserArpTierFromDocument,
@@ -117,6 +118,7 @@ function applyControlCenterPage(next: SiteState): void {
   }
   Object.assign(next.caps, scrapeControlCenterCaps());
   applySteamQuestsFromDocument(next, document);
+  applyDailyQuestsFromDocument(next, document);
   applyWatchTwitchFromDocument(next, document);
   applyBattlePassEndFromDocument(next, document);
   const banner = scrapeLiveCommunityEventBanner(document);
@@ -435,6 +437,17 @@ export {
   waitForControlCenterDocument,
 } from './caps';
 export { utcDateString } from './shared';
+export type {
+  DailyQuestKind,
+  DailyQuestRow,
+  DailyQuestsState,
+} from './dailyQuests';
+export {
+  applyDailyQuestsFromDocument,
+  dailyQuestsCapFromRows,
+  remainingDailyQuestRows,
+  scrapeDailyQuestRowsFromDocument,
+} from './dailyQuests';
 export type {
   SteamPlayEligibility,
   SteamQuestRow,

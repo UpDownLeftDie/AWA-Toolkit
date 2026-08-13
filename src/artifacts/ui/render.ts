@@ -39,6 +39,13 @@ function renderSkeletonBars(): string {
   ).join('');
 }
 
+export function renderPanelError(message: string): string {
+  return `
+    <div class="ao-heading">Artifact Optimizer</div>
+    <div class="ao-note">${escapeHtml(message)}</div>
+  `;
+}
+
 export function renderPanelSkeleton(
   message = 'Loading recommendations…',
 ): string {

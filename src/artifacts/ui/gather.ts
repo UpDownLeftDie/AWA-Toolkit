@@ -1,3 +1,4 @@
+import { GM } from '$';
 import {
   applyAsceCommunityHours,
   didRefreshAsceCommunityHours,
@@ -61,6 +62,14 @@ function loadCachedOrRemoteSnapshot(
   return loadSnapshot();
 }
 
+function assertGmStorage(): void {
+  if (typeof GM?.getValue !== 'function') {
+    throw new TypeError(
+      'GM storage is unavailable. For pnpm run dev, install the userscript served at http://localhost:3000 (named server:AWA Toolkit). A custom stub that only @requires that file does not get @grant, so recommendations never load.',
+    );
+  }
+}
+
 export async function gatherData(options?: {
   /**
   When true, fetch/open Showroom & site pages if cached data is missing/stale.
@@ -76,6 +85,7 @@ export async function gatherData(options?: {
   siteState: SiteState;
   result: OptimizerResult;
 }> {
+  assertGmStorage();
   const isRemote = options?.remote ?? true;
   // Force Refresh always re-fetches; scrapes merge into cached state (ASCE
   // hours, samples, eligibility) rather than replacing blindly.

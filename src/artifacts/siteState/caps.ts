@@ -8,6 +8,10 @@ import {
   utcDateString,
 } from './shared';
 import {
+  dailyQuestsCapFromRows,
+  scrapeDailyQuestRowsFromDocument,
+} from './dailyQuests';
+import {
   scrapeSteamQuestRowsFromDocument,
   steamQuestsCapFromRows,
 } from './steamQuests';
@@ -367,6 +371,12 @@ function readDailyQuestsCap(body: string): CapStatus | undefined {
 function readDailyQuestsCapFromDocument(
   document_: Document,
 ): CapStatus | undefined {
+  const fromRows = dailyQuestsCapFromRows(
+    scrapeDailyQuestRowsFromDocument(document_),
+  );
+  if (fromRows) {
+    return fromRows;
+  }
   return readCapFromCardOrText(
     document_,
     /^Daily Quests$/i,

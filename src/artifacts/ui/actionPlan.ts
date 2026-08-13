@@ -2,7 +2,6 @@ import {
   ArtifactEffectType,
   BASE_ACTIVITY,
   getArtifactById,
-  isUtcWeekday,
   msUntilNextDiscordPollPost,
   TIER_LABELS,
 } from '../data';
@@ -29,6 +28,7 @@ import {
   hasVotedCurrentDiscordPoll,
   isActivityAvailable,
   isActivityPending,
+  remainingDailyQuestRows,
   remainingSteamQuestRows,
   type SiteState,
   twitchWatchRemainingMs,
@@ -234,10 +234,6 @@ const ACTIVITY_TODO_RULES: readonly ActivityTodoRule[] = [
     isDue: (caps) => isActivityPending(caps, 'dailyQuests'),
   },
   {
-    key: 'dailyCalendar',
-    isDue: (caps) => isActivityAvailable(caps, 'dailyCalendar'),
-  },
-  {
     key: 'watchTwitch',
     isDue: (caps) => isActivityAvailable(caps, 'watchTwitch'),
   },
@@ -419,9 +415,6 @@ function comboBonusForActivity(
     case 'watchTwitch': {
       return combo.watchTwitchFlat;
     }
-    case 'dailyCalendar': {
-      return combo.dailyCalendarFlat;
-    }
     case 'discordPoll': {
       return combo.discordPollFlat;
     }
@@ -492,6 +485,63 @@ function discordPollActivityLabel(
   return `Vote Discord Poll${options.beforeSwap ? ' before swapping' : ''}${bonusPart}`;
 }
 
+function steamQuestCountLabel(count: number): string {
+  if (count === 1) {
+    return '1 Steam Quest';
+  }
+  if (count > 1) {
+    return `${count} Steam Quests`;
+  }
+  return 'Steam Quest(s)';
+}
+
+function steamQuestsActivityLabel(
+  bonus: number,
+  options: {
+    beforeSwap: boolean;
+    pendingCount: number;
+  },
+): string {
+  const bonusPart = bonus > 0 ? ` (+${bonus} equipped bonus)` : '';
+  const beforePart = options.beforeSwap ? ' before swapping' : '';
+  return `Complete ${steamQuestCountLabel(options.pendingCount)}${beforePart}${bonusPart}`;
+}
+
+function dailyQuestCountLabel(
+  pending: ReadonlyArray<{ kind: 'daily' | 'weekend' }>,
+): string {
+  const count = pending.length;
+  if (count === 0) {
+    return 'Daily Quests';
+  }
+  const daily = pending.filter((quest) => quest.kind === 'daily').length;
+  const weekend = pending.filter((quest) => quest.kind === 'weekend').length;
+  if (daily > 0 && weekend > 0) {
+    return count === 2
+      ? 'Daily and Weekend Quests'
+      : `${count} Daily and Weekend Quests`;
+  }
+  if (weekend > 0) {
+    return count === 1 ? 'Weekend Quest' : `${count} Weekend Quests`;
+  }
+  return count === 1 ? 'Daily Quest' : `${count} Daily Quests`;
+}
+
+function dailyQuestsActivityLabel(
+  pending: ReadonlyArray<{ kind: 'daily' | 'weekend' }>,
+  options: {
+    beforeSwap: boolean;
+    utcDeadline: boolean;
+  },
+): string {
+  const beforePart = options.beforeSwap ? ' before swapping' : '';
+  const questsName = dailyQuestCountLabel(pending);
+  if (options.utcDeadline) {
+    return `Complete ${questsName} (${utcResetDeadlineLabel()})`;
+  }
+  return `Complete ${questsName}${beforePart}`;
+}
+
 function activityLabel(
   key: ActivityKey,
   bonus: number,
@@ -501,29 +551,26 @@ function activityLabel(
     phase: ActivityPhase;
     waitMs: number;
     watchRemainingMs: number;
+    steamQuestCount?: number;
+    dailyQuestPending?: ReadonlyArray<{ kind: 'daily' | 'weekend' }>;
   },
 ): string {
-  const bonusPart = bonus > 0 ? ` (+${bonus} equipped bonus)` : '';
   const beforePart = options.beforeSwap ? ' before swapping' : '';
   switch (key) {
     case 'steamQuests': {
-      return `Complete Steam Quests (equip bonus before starting)${beforePart}${bonusPart}`;
+      return steamQuestsActivityLabel(bonus, {
+        beforeSwap: options.beforeSwap,
+        pendingCount: options.steamQuestCount ?? 0,
+      });
     }
     case 'watchTwitch': {
       return twitchActivityLabel(options);
     }
-    case 'dailyCalendar': {
-      return options.utcDeadline
-        ? `Claim Daily Login Calendar before 00:00 UTC (${utcResetDeadlineLabel()})${bonusPart}`
-        : `Claim Daily Login Calendar${beforePart}${bonusPart}`;
-    }
     case 'dailyQuests': {
-      const questsName = isUtcWeekday(new Date())
-        ? 'Daily quest(s)'
-        : 'Weekend quest(s)';
-      return options.utcDeadline
-        ? `Complete ${questsName} (${utcResetDeadlineLabel()})`
-        : `Complete ${questsName}${beforePart}`;
+      return dailyQuestsActivityLabel(options.dailyQuestPending ?? [], {
+        beforeSwap: options.beforeSwap,
+        utcDeadline: options.utcDeadline,
+      });
     }
     case 'discordPoll': {
       return discordPollActivityLabel(bonus, options);
@@ -577,10 +624,6 @@ function activityWindowArp(
       base = BASE_ACTIVITY.watchTwitchBasePerDay;
       break;
     }
-    case 'dailyCalendar': {
-      base = BASE_ACTIVITY.dailyCalendarBasePerDay;
-      break;
-    }
     case 'dailyQuests': {
       base = BASE_ACTIVITY.dailyQuestBase;
       break;
@@ -627,7 +670,7 @@ function resolveUtcDailyPhase(options: {
     return 'afterNow';
   }
   const bestArp = activityWindowArp(best, key);
-  // Quests/calendar are quick: wait if the better set unlocks before midnight.
+  // Quests are quick: wait if the better set unlocks before midnight.
   // Twitch waits only if the recommended set's sit (base cap + Twitch flat,
   // 1 ARP/min) still fits before 00:00 UTC.
   if (!needsSwap || !canEquipBeforeReset || bestArp <= currentArp) {
@@ -782,6 +825,44 @@ function activityTodoUrgency(options: {
   });
 }
 
+function steamQuestsTodoExtras(
+  siteState: SiteState,
+  bonus: number,
+): { count: number; reasons?: ActionTodoReason[] } {
+  const pending = remainingSteamQuestRows(siteState);
+  const reasons: ActionTodoReason[] = [];
+  if (bonus > 0) {
+    reasons.push({ text: 'Equip bonus before starting' });
+  }
+  const pendingNames = pending
+    .map((quest) => quest.name)
+    .filter((name) => name.length > 0);
+  if (pendingNames.length > 0) {
+    reasons.push({ text: pendingNames.join(', ') });
+  }
+  if (pending.some((quest) => quest.libraryPending === true)) {
+    reasons.push({ text: STEAM_LIBRARY_PENDING_HINT });
+  }
+  if (reasons.length === 0) {
+    return { count: pending.length };
+  }
+  return { count: pending.length, reasons };
+}
+
+function dailyQuestsTodoExtras(siteState: SiteState): {
+  pending: ReturnType<typeof remainingDailyQuestRows>;
+  reasons?: ActionTodoReason[];
+} {
+  const pending = remainingDailyQuestRows(siteState);
+  const pendingNames = pending
+    .map((quest) => quest.name)
+    .filter((name) => name.length > 0);
+  if (pendingNames.length === 0) {
+    return { pending };
+  }
+  return { pending };
+}
+
 function buildActivityTodo(options: {
   key: ActivityKey;
   phase: ActivityPhase;
@@ -814,6 +895,12 @@ function buildActivityTodo(options: {
     bestBonus,
     afterNowBonus,
   );
+  const steamQuests =
+    key === 'steamQuests'
+      ? steamQuestsTodoExtras(siteState, bonusForText)
+      : undefined;
+  const dailyQuests =
+    key === 'dailyQuests' ? dailyQuestsTodoExtras(siteState) : undefined;
   const todo: ActionTodo = {
     text: activityLabel(key, bonusForText, {
       beforeSwap: phase === 'before' && needsSwap && currentBonus > 0,
@@ -821,6 +908,8 @@ function buildActivityTodo(options: {
       phase,
       waitMs,
       watchRemainingMs,
+      ...(steamQuests && { steamQuestCount: steamQuests.count }),
+      ...(dailyQuests && { dailyQuestPending: dailyQuests.pending }),
     }),
     urgency: activityTodoUrgency({
       key,
@@ -843,23 +932,10 @@ function buildActivityTodo(options: {
     if (twitchReason) {
       todo.reasons = [twitchReason];
     }
-  } else if (key === 'steamQuests') {
-    const pending = remainingSteamQuestRows(siteState);
-    const pendingNames = pending
-      .map((quest) => quest.name)
-      .filter((name) => name.length > 0);
-    const reasons: ActionTodoReason[] = [];
-    if (pendingNames.length > 0) {
-      reasons.push({ text: pendingNames.join(', ') });
-    }
-    if (pending.some((quest) => quest.libraryPending === true)) {
-      reasons.push({
-        text: STEAM_LIBRARY_PENDING_HINT,
-      });
-    }
-    if (reasons.length > 0) {
-      todo.reasons = reasons;
-    }
+  } else if (steamQuests?.reasons) {
+    todo.reasons = steamQuests.reasons;
+  } else if (dailyQuests?.reasons) {
+    todo.reasons = dailyQuests.reasons;
   }
 
   const isUtcUrgent = isUtcDaily && msUntilUtcMidnight() <= 2 * 3_600_000;
@@ -899,13 +975,10 @@ function utcResetTodoRank(todo: ActionTodo): number {
   if (/(Daily|Weekend) quest/i.test(todo.text)) {
     return 0;
   }
-  if (/Daily Login Calendar/i.test(todo.text)) {
+  if (/Watch Twitch/i.test(todo.text)) {
     return 1;
   }
-  if (/Watch Twitch/i.test(todo.text)) {
-    return 2;
-  }
-  return 3;
+  return 2;
 }
 
 function sortTodosByUtcDeadline(items: ActionTodo[]): ActionTodo[] {
@@ -992,9 +1065,7 @@ function buildSequencedActivityTodos(
     const currentBonus = comboBonusForActivity(current, rule.key);
     const bestBonus = comboBonusForActivity(best, rule.key);
     const afterNowBonus = comboBonusForActivity(afterNow ?? current, rule.key);
-    const isUtcDaily = ['watchTwitch', 'dailyCalendar', 'dailyQuests'].includes(
-      rule.key,
-    );
+    const isUtcDaily = ['watchTwitch', 'dailyQuests'].includes(rule.key);
     const isExpiresBeforeUnlock =
       isUtcDaily && !canEquipBeforeReset && waitMs > 0;
     const phase = resolveActivityPhase({
@@ -1153,15 +1224,16 @@ function collectEquipReasons(
       text: flatBonusReason(stats.discordPollFlat, 'Discord Poll', waitMs),
     });
   }
-  pushFlatEquipReason(
-    reasons,
-    stats.dailyCalendarFlat,
-    waitMs,
-    isActivityAvailable(caps, 'dailyCalendar'),
-    isNextUtcResetInLock,
-    'Daily Calendar',
-    'Daily Calendar after 00:00 UTC',
-  );
+  // Auto-claims on visit; ARP log marks today capped. Count the next day.
+  if (stats.dailyCalendarFlat > 0) {
+    reasons.push({
+      text: flatBonusReason(
+        stats.dailyCalendarFlat,
+        "Tomorrow's Daily Calendar ",
+        waitMs,
+      ),
+    });
+  }
   if (waitMs > 0 && isArtifactsShowroomPage()) {
     reasons.push({
       text: 'Still stuck after Refresh? Upgrade a maxed artifact manually (Warrior Script) — 0 fragments',

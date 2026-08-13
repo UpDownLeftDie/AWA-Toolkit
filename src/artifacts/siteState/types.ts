@@ -2,6 +2,7 @@ import type { ArpLogState } from './arpLog';
 import type { BattlePassState } from './battlePass';
 import type { WatchTwitchProgress } from './caps';
 import type { CommunityEventState } from './communityEvent';
+import type { DailyQuestsState } from './dailyQuests';
 import type { GameVaultItem } from './gameVault';
 import type { SteamQuestsState } from './steamQuests';
 
@@ -43,4 +44,5 @@ export interface SiteState {
   communityEvent?: CommunityEventState;
   watchTwitch?: WatchTwitchProgress;
   steamQuests?: SteamQuestsState;
+  dailyQuests?: DailyQuestsState;
 }
