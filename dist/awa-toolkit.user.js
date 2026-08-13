@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         AWA Toolkit
 // @namespace    https://github.com/UpDownLeftDie/AWA-Toolkit
-// @version      2.0.6
+// @version      2.0.7
 // @author       jaredcat
 // @description  Artifact Optimizer, Control Center tasks, giveaway/vault filters, and UCF reading mode
 // @license      AGPL-3.0-or-later
@@ -13,6 +13,7 @@
 // @connect      store.steampowered.com
 // @connect      raw.githubusercontent.com
 // @grant        GM.getValue
+// @grant        GM.openInTab
 // @grant        GM.setValue
 // @grant        GM_xmlhttpRequest
 // @run-at       document-start
@@ -475,7 +476,8 @@
 		pendingVaultPurchaseArp: 0,
 		manualArtifacts: [],
 		preferScraped: true,
-		slotCooldowns: []
+		slotCooldowns: [],
+		preferredTwitchStreamers: []
 	};
 	function isPartialSettings(value) {
 		return typeof value === "object" && !!value;
@@ -509,6 +511,26 @@
 			if (parsed.vaultDiscountDismissedCycle) settings.vaultDiscountDismissedCycle = parsed.vaultDiscountDismissedCycle;
 			else delete settings.vaultDiscountDismissedCycle;
 		}
+		if (Array.isArray(parsed.preferredTwitchStreamers)) settings.preferredTwitchStreamers = parsePreferredTwitchStreamers(parsed.preferredTwitchStreamers.filter((item) => typeof item === "string").join("\n"));
+	}
+	function twitchLoginFromInput(value) {
+		let text = value.trim();
+		if (!text) return "";
+		text = text.replace(/^https?:\/\//i, "");
+		text = text.replace(/^(www\.)?twitch\.tv\//i, "");
+		text = text.replace(/^@/, "");
+		return (text.split(/[/?#]/, 1)[0] ?? "").trim().toLowerCase();
+	}
+	function parsePreferredTwitchStreamers(raw) {
+		const logins = [];
+		const seen = new Set();
+		for (const token of raw.split(/[\n,]+/)) {
+			const login = twitchLoginFromInput(token);
+			if (!login || seen.has(login)) continue;
+			seen.add(login);
+			logins.push(login);
+		}
+		return logins;
 	}
 	async function getArtifactSettings() {
 		const raw = await _GM.getValue(SETTINGS_KEY);
@@ -516,7 +538,8 @@
 			...defaultArtifactSettings,
 			activities: { ...DEFAULT_ACTIVITIES },
 			manualArtifacts: [],
-			slotCooldowns: []
+			slotCooldowns: [],
+			preferredTwitchStreamers: []
 		};
 		if (!raw) return settings;
 		try {
@@ -5055,6 +5078,7 @@
 			})
 		};
 		if (key === "watchTwitch") {
+			todo.openTwitchStream = true;
 			const twitchReason = twitchArpReason({
 				phase,
 				waitMs,
@@ -5622,6 +5646,7 @@
 	function renderTodoActionButton(todo) {
 		if (todo.upgradeInstanceId !== void 0) return `<button type="button" class="ao-upgrade-btn" data-id="${todo.upgradeInstanceId}">Upgrade</button>`;
 		if (todo.claimBattlePass === true) return `<button type="button" class="ao-claim-btn"${todo.claimBattlePassSkipArp === true ? " data-skip-arp=\"1\"" : ""}>Claim all</button>`;
+		if (todo.openTwitchStream === true) return "<button type=\"button\" class=\"ao-twitch-btn\">Open stream</button>";
 		return "";
 	}
 	function isCautionTodo(todo) {
@@ -6458,7 +6483,8 @@
       padding-top: 1px;
     }
     .ao-todo-item > .ao-upgrade-btn,
-    .ao-todo-item > .ao-claim-btn {
+    .ao-todo-item > .ao-claim-btn,
+    .ao-todo-item > .ao-twitch-btn {
       flex: 0 0 auto;
       padding: 4px 10px;
       font-size: 13px !important;
@@ -6552,7 +6578,8 @@
     }
     input[type="number"],
     input[type="text"],
-    select {
+    select,
+    textarea.ao-textarea {
       width: 90px;
       margin-left: 6px;
       padding: 2px 4px;
@@ -6562,6 +6589,13 @@
       border-radius: 3px;
       caret-color: #fff;
       font-size: 14px !important;
+    }
+    textarea.ao-textarea {
+      display: block;
+      width: calc(100% - 8px);
+      min-height: 72px;
+      margin: 6px 0 6px 8px;
+      resize: vertical;
     }
     select {
       width: auto;
@@ -6819,6 +6853,147 @@
 	function bindClaimAllButtons(root) {
 		for (const button of root.querySelectorAll(".ao-claim-btn")) button.addEventListener("click", () => {
 			handleClaimAllBattlePass({ shouldSkipArpBoosts: button.dataset.skipArp === "1" });
+		});
+	}
+	var QUESTS_PATH = "/quests";
+	var TWITCH_HOST = /(^|\.)twitch\.tv$/i;
+	function twitchLoginFromHref(href) {
+		try {
+			const url = new URL(href, location.origin);
+			if (!TWITCH_HOST.test(url.hostname)) return;
+			const login = url.pathname.replace(/^\//, "").split("/", 1)[0];
+			if (!login) return;
+			return login.toLowerCase();
+		} catch {
+			return;
+		}
+	}
+	function headingGroup(text) {
+		const label = text.replaceAll(/\s+/g, " ").trim();
+		if (/^hive\b/i.test(label)) return "hive";
+		if (/^nexus\b/i.test(label)) return "nexus";
+		if (/^partners?\b/i.test(label)) return "partner";
+	}
+	function streamFromRow(row, group) {
+		const link = row.querySelector("a[href*=\"twitch.tv\"]");
+		const login = twitchLoginFromHref(link?.getAttribute("href") ?? "");
+		if (!login) return;
+		const details = row.querySelector(".quest-list__quest-details");
+		const nameText = [...details?.children ?? []].find((child) => !child.classList.contains("small"))?.textContent ?? row.querySelector("img")?.getAttribute("alt") ?? link?.textContent;
+		const title = details?.querySelector(".small")?.textContent?.replaceAll(/\s+/g, " ").trim() ?? "";
+		return {
+			login,
+			displayName: nameText?.replaceAll(/\s+/g, " ").trim() || login,
+			title,
+			url: `https://www.twitch.tv/${login}`,
+			group
+		};
+	}
+	function scrapeLiveTwitchStreams(document_) {
+		const card = findActivityCard(document_, /^Watch Twitch$/i);
+		if (!card) return [];
+		const body = card.querySelector(".user-profile__card-body") ?? card;
+		const streams = [];
+		const seen = new Set();
+		let group = "partner";
+		for (const node of body.querySelectorAll(".card-table-heading, .card-table-row")) {
+			if (node.classList.contains("card-table-heading")) {
+				group = headingGroup(node.textContent ?? "") ?? group;
+				continue;
+			}
+			const stream = streamFromRow(node, group);
+			if (!stream || seen.has(stream.login)) continue;
+			seen.add(stream.login);
+			streams.push(stream);
+		}
+		return streams;
+	}
+	function pickRandom(items) {
+		if (items.length === 0) return;
+		const bytes = new Uint32Array(1);
+		crypto.getRandomValues(bytes);
+		return items[(bytes[0] ?? 0) % items.length];
+	}
+	function hasDropsInTitle(stream) {
+		return /drops/i.test(stream.title);
+	}
+	function isDoubleArp(stream) {
+		return stream.group === "hive" || stream.group === "nexus";
+	}
+	function isPreferredMatch(stream, preferredLogin) {
+		if (stream.login === preferredLogin) return true;
+		return stream.displayName.replaceAll(/\s+/g, "").toLowerCase() === preferredLogin;
+	}
+	function pickFromPool(streams, reason, isMatch) {
+		const stream = pickRandom(streams.filter((candidate) => isMatch(candidate)));
+		if (!stream) return;
+		return {
+			stream,
+			reason
+		};
+	}
+	function pickTwitchStream(streams, preferredLogins) {
+		if (streams.length === 0) return;
+		for (const preferred of preferredLogins) {
+			const stream = streams.find((candidate) => isPreferredMatch(candidate, preferred));
+			if (stream) return {
+				stream,
+				reason: "preferred"
+			};
+		}
+		return pickFromPool(streams, "doubleArpDrops", (stream) => isDoubleArp(stream) && hasDropsInTitle(stream)) ?? pickFromPool(streams, "doubleArp", isDoubleArp) ?? pickFromPool(streams, "drops", hasDropsInTitle) ?? pickFromPool(streams, "random", () => true);
+	}
+	function doubleArpGroupLabel(stream) {
+		return stream.group === "nexus" ? "Nexus" : "Hive";
+	}
+	function pickReasonLabel(pick) {
+		if (pick.reason === "preferred") return "preferred";
+		if (pick.reason === "doubleArpDrops") return `${doubleArpGroupLabel(pick.stream)}, 2x ARP, drops`;
+		if (pick.reason === "doubleArp") return `${doubleArpGroupLabel(pick.stream)}, 2x ARP`;
+		if (pick.reason === "drops") return "drops";
+		return "random";
+	}
+	function isQuestsPage() {
+		let path = location.pathname;
+		while (path.endsWith("/") && path.length > 1) path = path.slice(0, -1);
+		return path.endsWith("/quests") && !path.includes("/steam/quests");
+	}
+	async function loadTwitchStreamsDocument() {
+		if (isQuestsPage()) return document;
+		try {
+			const response = await fetch(QUESTS_PATH, { headers: { Accept: "text/html" } });
+			if (!response.ok) return;
+			return new DOMParser().parseFromString(await response.text(), "text/html");
+		} catch (error) {
+			console.warn("[AWA Toolkit] Failed to fetch Twitch streams", error);
+			return;
+		}
+	}
+	async function handleOpenTwitchStream() {
+		const settings = await getArtifactSettings();
+		const questsDocument = await loadTwitchStreamsDocument();
+		if (!questsDocument) {
+			await showAoAlert("Could not load the Quests page to find live Twitch streams.");
+			return;
+		}
+		const pick = pickTwitchStream(scrapeLiveTwitchStreams(questsDocument), settings.preferredTwitchStreamers);
+		if (!pick) {
+			await showAoAlert("No live participating Twitch streams were listed. Try again when someone is online.");
+			return;
+		}
+		showAoToast(`Opening ${pick.stream.displayName} (${pickReasonLabel(pick)})`);
+		await _GM.openInTab(pick.stream.url, { active: true });
+	}
+	function bindOpenTwitchButtons(root) {
+		for (const button of root.querySelectorAll(".ao-twitch-btn")) button.addEventListener("click", () => {
+			if (button.disabled) return;
+			button.disabled = true;
+			const previous = button.textContent;
+			button.textContent = "Picking…";
+			handleOpenTwitchStream().finally(() => {
+				button.disabled = false;
+				button.textContent = previous ?? "Open stream";
+			});
 		});
 	}
 	function isControlCenterPage() {
@@ -7250,6 +7425,9 @@
         Manual fragment override (blank = scraped):
         <input type="number" id="ao-manual-frags" min="0" step="1" value="${settings.manualFragments ?? ""}" placeholder="auto"/>
       </div>
+      <div class="ao-heading">Preferred Twitch streamers</div>
+      <div class="ao-muted">One login per line. Live preferred channels open first (top to bottom). If none are live: random Hive/Nexus with "drops" in the title, then any Hive/Nexus, then any "drops" title, then a random remaining stream.</div>
+      <textarea id="ao-preferred-twitch" class="ao-textarea" rows="4" placeholder="ludwig">${escapeHtml(settings.preferredTwitchStreamers.join("\n"))}</textarea>
       <div class="ao-heading">Manual artifacts</div>
       <div class="ao-muted">Only needed if auto-scrape fails.</div>
       <div class="ao-row">
@@ -7289,6 +7467,8 @@
 		}
 		const parsedFrags = Number(fragsRaw);
 		if (fragsRaw.trim() !== "" && !Number.isNaN(parsedFrags)) patch.manualFragments = parsedFrags;
+		const twitchInput = root.querySelector("#ao-preferred-twitch");
+		if (twitchInput) patch.preferredTwitchStreamers = parsePreferredTwitchStreamers(twitchInput.value);
 		await saveArtifactSettings(patch);
 	}
 	async function confirmAndApplyLoadout(result, settings) {
@@ -7464,6 +7644,7 @@
 		});
 		bindUpgradeButtons(root, onChanged);
 		bindClaimAllButtons(root);
+		bindOpenTwitchButtons(root);
 		bindVaultDiscountActions(root, onChanged);
 	}
 	function bindUpgradeButtons(root, onChanged) {
@@ -7894,6 +8075,7 @@
 		});
 		bindUpgradeButtons(panelTree(panel), async () => {});
 		bindClaimAllButtons(panelTree(panel));
+		bindOpenTwitchButtons(panelTree(panel));
 		bindVaultDiscountActions(panelTree(panel), () => {
 			injectControlCenterPanel({ force: true });
 		});

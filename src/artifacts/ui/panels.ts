@@ -29,6 +29,7 @@ import {
   bindClaimAllButtons,
   consumePendingBattlePassClaimAll,
 } from './battlePassClaim';
+import { bindOpenTwitchButtons } from './twitchPick';
 import { showAoToast } from './dialog';
 import {
   gatheredCache,
@@ -755,6 +756,7 @@ function paintControlCenterPanel(
   // onChanged resolves, so refreshing it here too would just double-fetch.
   bindUpgradeButtons(panelTree(panel), async () => {});
   bindClaimAllButtons(panelTree(panel));
+  bindOpenTwitchButtons(panelTree(panel));
   bindVaultDiscountActions(panelTree(panel), () => {
     void injectControlCenterPanel({ force: true });
   });

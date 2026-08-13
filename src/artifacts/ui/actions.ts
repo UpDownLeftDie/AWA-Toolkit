@@ -8,10 +8,12 @@ import {
 import { applySnapshotUpgrade, isArtifactsShowroomPage } from '../scraper';
 import {
   getArtifactSettings,
+  parsePreferredTwitchStreamers,
   saveArtifactSettings,
   type ArtifactOptimizerSettings,
 } from '../settings';
 import { bindClaimAllButtons } from './battlePassClaim';
+import { bindOpenTwitchButtons } from './twitchPick';
 import { didConfirmAoDialog, showAoAlert, showAoToast } from './dialog';
 import { isControlCenterPage } from './gather';
 import {
@@ -64,6 +66,14 @@ export async function persistFormSettings(root: ParentNode): Promise<void> {
   const parsedFrags = Number(fragsRaw);
   if (fragsRaw.trim() !== '' && !Number.isNaN(parsedFrags)) {
     patch.manualFragments = parsedFrags;
+  }
+  const twitchInput = root.querySelector<HTMLTextAreaElement>(
+    '#ao-preferred-twitch',
+  );
+  if (twitchInput) {
+    patch.preferredTwitchStreamers = parsePreferredTwitchStreamers(
+      twitchInput.value,
+    );
   }
   await saveArtifactSettings(patch);
 }
@@ -432,6 +442,7 @@ export function bindDynamicBody(
 
   bindUpgradeButtons(root, onChanged);
   bindClaimAllButtons(root);
+  bindOpenTwitchButtons(root);
   bindVaultDiscountActions(root, onChanged);
 }
 

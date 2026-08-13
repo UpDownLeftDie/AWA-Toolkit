@@ -606,6 +606,9 @@ export function renderResultBody(
           settings.manualFragments ?? ''
         }" placeholder="auto"/>
       </div>
+      <div class="ao-heading">Preferred Twitch streamers</div>
+      <div class="ao-muted">One login per line. Live preferred channels open first (top to bottom). If none are live: random Hive/Nexus with "drops" in the title, then any Hive/Nexus, then any "drops" title, then a random remaining stream.</div>
+      <textarea id="ao-preferred-twitch" class="ao-textarea" rows="4" placeholder="ludwig">${escapeHtml(settings.preferredTwitchStreamers.join('\n'))}</textarea>
       <div class="ao-heading">Manual artifacts</div>
       <div class="ao-muted">Only needed if auto-scrape fails.</div>
       <div class="ao-row">

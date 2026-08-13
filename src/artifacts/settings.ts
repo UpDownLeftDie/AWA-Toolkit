@@ -62,6 +62,10 @@ export interface ArtifactOptimizerSettings {
   Skip Game Vault discount recs for this rotation (`gameVaultCycleId`).
   */
   vaultDiscountDismissedCycle?: string;
+  /**
+  Twitch logins to open first when picking a Watch Twitch stream (list order).
+  */
+  preferredTwitchStreamers: string[];
 }
 
 const DEFAULT_ACTIVITIES: Record<ActivityKey, ActivityToggle> = {
@@ -80,6 +84,7 @@ export const defaultArtifactSettings: ArtifactOptimizerSettings = {
   manualArtifacts: [],
   preferScraped: true,
   slotCooldowns: [],
+  preferredTwitchStreamers: [],
 };
 
 function isPartialSettings(
@@ -150,6 +155,45 @@ function applyParsedSettings(
       delete settings.vaultDiscountDismissedCycle;
     }
   }
+  if (Array.isArray(parsed.preferredTwitchStreamers)) {
+    const rawLogins = parsed.preferredTwitchStreamers.filter(
+      (item): item is string => typeof item === 'string',
+    );
+    settings.preferredTwitchStreamers =
+      parsePreferredTwitchStreamers(rawLogins.join('\n'));
+  }
+}
+
+/**
+ * Normalize a typed Twitch login / URL to a lowercase channel login.
+ */
+export function twitchLoginFromInput(value: string): string {
+  let text = value.trim();
+  if (!text) {
+    return '';
+  }
+  text = text.replace(/^https?:\/\//i, '');
+  text = text.replace(/^(www\.)?twitch\.tv\//i, '');
+  text = text.replace(/^@/, '');
+  const login = text.split(/[/?#]/, 1)[0] ?? '';
+  return login.trim().toLowerCase();
+}
+
+/**
+ * One login per line (commas also split). Duplicates are dropped, order kept.
+ */
+export function parsePreferredTwitchStreamers(raw: string): string[] {
+  const logins: string[] = [];
+  const seen = new Set<string>();
+  for (const token of raw.split(/[\n,]+/)) {
+    const login = twitchLoginFromInput(token);
+    if (!login || seen.has(login)) {
+      continue;
+    }
+    seen.add(login);
+    logins.push(login);
+  }
+  return logins;
 }
 
 export async function getArtifactSettings(): Promise<ArtifactOptimizerSettings> {
@@ -160,6 +204,7 @@ export async function getArtifactSettings(): Promise<ArtifactOptimizerSettings> 
     activities: { ...DEFAULT_ACTIVITIES },
     manualArtifacts: [],
     slotCooldowns: [],
+    preferredTwitchStreamers: [],
   };
 
   if (!raw) {

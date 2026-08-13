@@ -339,7 +339,8 @@ function buildPanelShadowCss(variant: PanelShadowVariant): string {
       padding-top: 1px;
     }
     .ao-todo-item > .ao-upgrade-btn,
-    .ao-todo-item > .ao-claim-btn {
+    .ao-todo-item > .ao-claim-btn,
+    .ao-todo-item > .ao-twitch-btn {
       flex: 0 0 auto;
       padding: 4px 10px;
       font-size: 13px !important;
@@ -433,7 +434,8 @@ function buildPanelShadowCss(variant: PanelShadowVariant): string {
     }
     input[type="number"],
     input[type="text"],
-    select {
+    select,
+    textarea.ao-textarea {
       width: 90px;
       margin-left: 6px;
       padding: 2px 4px;
@@ -443,6 +445,13 @@ function buildPanelShadowCss(variant: PanelShadowVariant): string {
       border-radius: 3px;
       caret-color: #fff;
       font-size: 14px !important;
+    }
+    textarea.ao-textarea {
+      display: block;
+      width: calc(100% - 8px);
+      min-height: 72px;
+      margin: 6px 0 6px 8px;
+      resize: vertical;
     }
     select {
       width: auto;

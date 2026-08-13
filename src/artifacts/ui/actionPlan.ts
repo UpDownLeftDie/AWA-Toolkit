@@ -149,6 +149,10 @@ export interface ActionTodo {
   */
   claimBattlePassSkipArp?: boolean;
   /**
+  Watch Twitch step — renders an Open stream button that picks a live channel.
+  */
+  openTwitchStream?: boolean;
+  /**
   Final list order — phases still decide wording / swap sequencing metadata.
   */
   urgency?: ActionTodoUrgency;
@@ -983,6 +987,7 @@ function buildActivityTodo(options: {
   };
 
   if (key === 'watchTwitch') {
+    todo.openTwitchStream = true;
     const twitchReason = twitchArpReason({
       phase,
       waitMs,
@@ -2123,6 +2128,9 @@ function renderTodoActionButton(todo: ActionTodo): string {
     const skipArp =
       todo.claimBattlePassSkipArp === true ? ' data-skip-arp="1"' : '';
     return `<button type="button" class="ao-claim-btn"${skipArp}>Claim all</button>`;
+  }
+  if (todo.openTwitchStream === true) {
+    return '<button type="button" class="ao-twitch-btn">Open stream</button>';
   }
   return '';
 }
