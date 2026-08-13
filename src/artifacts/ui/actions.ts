@@ -1,12 +1,17 @@
 import { applyLoadout, upgradeArtifact } from '../api';
 import type { ArtifactTier } from '../data';
 import type { OptimizerResult, ScoredCombo } from '../optimizer';
+import {
+  confirmShowroomLoadout,
+  resyncShowroomSnapshot,
+} from '../remoteScrape';
 import { applySnapshotUpgrade, isArtifactsShowroomPage } from '../scraper';
 import {
   getArtifactSettings,
   saveArtifactSettings,
   type ArtifactOptimizerSettings,
 } from '../settings';
+import { bindClaimAllButtons } from './battlePassClaim';
 import { didConfirmAoDialog, showAoAlert, showAoToast } from './dialog';
 import { isControlCenterPage } from './gather';
 import {
@@ -18,8 +23,12 @@ import {
   type ArtifactSlot,
   type LoadoutChangePlan,
 } from './loadoutPlan';
+import {
+  injectControlCenterPanel,
+  injectShowroomPanel,
+  reloadOptimizerFromCache,
+} from './panels';
 import { bindVaultDiscountActions } from './render';
-import { injectControlCenterPanel, injectShowroomPanel } from './panels';
 
 export async function persistFormSettings(root: ParentNode): Promise<void> {
   const settings = await getArtifactSettings();
@@ -102,11 +111,42 @@ export async function confirmAndApplyCombo(
       position: a.equippedPosition as ArtifactSlot,
     }));
 
-  const { allOk, results } = await applyLoadout(
+  const { allOk, results, applied } = await applyLoadout(
     resolved.now,
     currentlyEquipped,
   );
-  notifyLoadoutResult(allOk, results, label);
+  if (allOk) {
+    if (applied.length > 0) {
+      await confirmShowroomLoadout(applied);
+    }
+    notifyLoadoutResult(true, results, label);
+    return;
+  }
+  if (applied.length > 0) {
+    await confirmShowroomLoadout(applied);
+    notifyLoadoutResult(false, results, label);
+    return;
+  }
+  const { snapshot, didChange } = await resyncShowroomSnapshot();
+  await reloadOptimizerFromCache();
+  const isAlreadyOn =
+    snapshot !== undefined &&
+    resolved.now.every((target) =>
+      snapshot.artifacts.some(
+        (artifact) =>
+          artifact.instanceId === target.artifactId &&
+          artifact.equippedPosition === target.position,
+      ),
+    );
+  if (isAlreadyOn) {
+    showAoToast('Those artifacts were already equipped. Recommendations updated.');
+    return;
+  }
+  if (didChange) {
+    showAoToast('Showroom was out of date. Recommendations updated.');
+    return;
+  }
+  notifyLoadoutResult(false, results, label);
 }
 
 function namedLoadout(
@@ -391,6 +431,7 @@ export function bindDynamicBody(
   }
 
   bindUpgradeButtons(root, onChanged);
+  bindClaimAllButtons(root);
   bindVaultDiscountActions(root, onChanged);
 }
 

@@ -18,6 +18,7 @@ import type { ArtifactOptimizerSettings } from '../settings';
 import {
   type ActivityKey,
   battlePassClaimableArp,
+  battlePassReadyNonArp,
   battlePassRemainingMs,
   breakDownCommunityEventPending,
   canEarnCommunityEventArp,
@@ -33,6 +34,7 @@ import {
   type SiteState,
   twitchWatchRemainingMs,
 } from '../siteState';
+import { shouldShowBattlePassClaimAll } from '../siteState/battlePass';
 import { describeWaitingCommunityArpLine } from '../siteState/communityEvent';
 import { STEAM_LIBRARY_PENDING_HINT } from '../steamApp';
 import {
@@ -138,6 +140,14 @@ export interface ActionTodo {
   Affordable META upgrade — renders a confirm+Upgrade button on this step.
   */
   upgradeInstanceId?: number;
+  /**
+  Ready Battle Pass rewards — renders a Claim all button on this step.
+  */
+  claimBattlePass?: boolean;
+  /**
+  Leave ARP Boosts unclaimed (All-ARP% wait). Claim cosmetics/fragments only.
+  */
+  claimBattlePassSkipArp?: boolean;
   /**
   Final list order — phases still decide wording / swap sequencing metadata.
   */
@@ -305,6 +315,21 @@ function pushCommunityEventTodo(
   todos.push(todo);
 }
 
+function battlePassClaimCountLabel(readyAll: number, readyArp: number): string {
+  if (readyArp <= 0) {
+    return readyAll === 1
+      ? '1 Battle Pass reward'
+      : `${readyAll} Battle Pass rewards`;
+  }
+  if (readyAll === readyArp) {
+    return readyArp === 1
+      ? '1 Battle Pass ARP Boost'
+      : `${readyArp} Battle Pass ARP Boosts`;
+  }
+  const boosts = readyArp === 1 ? '1 ARP Boost' : `${readyArp} ARP Boosts`;
+  return `${readyAll} Battle Pass rewards (${boosts})`;
+}
+
 function pushBattlePassTodo(
   todos: ActionTodo[],
   siteState: SiteState,
@@ -321,10 +346,11 @@ function pushBattlePassTodo(
     seasonEndsBeforeAllArp?: boolean;
   },
 ): void {
-  const readyArp = battlePassClaimableArp(siteState.battlePass);
-  if (readyArp <= 0) {
+  const readyAll = siteState.battlePass?.readyToClaim ?? 0;
+  if (readyAll <= 0) {
     return;
   }
+  const readyArp = battlePassClaimableArp(siteState.battlePass);
 
   const {
     ownsAllArp,
@@ -332,14 +358,32 @@ function pushBattlePassTodo(
     afterAllArpEquipped = false,
     seasonEndsBeforeAllArp = false,
   } = options;
-  const countLabel =
-    readyArp === 1
-      ? '1 Battle Pass ARP Boost'
-      : `${readyArp} Battle Pass ARP Boosts`;
+  const shouldWaitForAllArpSwap =
+    ownsAllArp && !hasAllArpEquipped && !seasonEndsBeforeAllArp;
+  const shouldShowClaimAll = shouldShowBattlePassClaimAll(
+    siteState.battlePass,
+    shouldWaitForAllArpSwap,
+  );
+  const countLabel = battlePassClaimCountLabel(readyAll, readyArp);
+
+  if (readyArp <= 0) {
+    todos.push({
+      text: `Claim ${countLabel}`,
+      claimBattlePass: shouldShowClaimAll,
+      urgency: {
+        kind: 'action',
+        readyAtMs: 0,
+        durationMs: 0,
+        chain: 'before',
+      },
+    });
+    return;
+  }
 
   if (hasAllArpEquipped) {
     todos.push({
       text: `Claim ${countLabel} now — All-ARP% is equipped`,
+      claimBattlePass: shouldShowClaimAll,
       urgency: {
         kind: 'action',
         readyAtMs: 0,
@@ -356,6 +400,7 @@ function pushBattlePassTodo(
     const todo: ActionTodo = {
       tone: 'warn',
       text: `Claim ${countLabel} now — Battle Pass ends before All-ARP% can be equipped`,
+      claimBattlePass: shouldShowClaimAll,
       urgency: actionUrgency({
         kind: 'action',
         readyAtMs: 0,
@@ -373,9 +418,23 @@ function pushBattlePassTodo(
   }
 
   if (ownsAllArp) {
+    const nonArp = battlePassReadyNonArp(siteState.battlePass);
+    if (nonArp > 0) {
+      todos.push({
+        text: `Claim ${battlePassClaimCountLabel(nonArp, 0)} now — leave ARP Boosts until All-ARP% is on`,
+        claimBattlePass: true,
+        claimBattlePassSkipArp: true,
+        urgency: {
+          kind: 'action',
+          readyAtMs: 0,
+          durationMs: 0,
+          chain: 'before',
+        },
+      });
+    }
     if (afterAllArpEquipped) {
       todos.push({
-        text: `Claim ${countLabel} after All-ARP% is on`,
+        text: `Claim ${battlePassClaimCountLabel(readyArp, readyArp)} after All-ARP% is on`,
         urgency: {
           kind: 'schedule',
           readyAtMs: 0,
@@ -390,6 +449,7 @@ function pushBattlePassTodo(
 
   todos.push({
     text: `Claim ${countLabel}`,
+    claimBattlePass: shouldShowClaimAll,
     urgency: {
       kind: 'action',
       readyAtMs: 0,
@@ -2055,11 +2115,16 @@ function renderActionTodoBody(todo: ActionTodo): string {
   return parts.join('');
 }
 
-function renderTodoUpgradeButton(todo: ActionTodo): string {
-  if (todo.upgradeInstanceId === undefined) {
-    return '';
+function renderTodoActionButton(todo: ActionTodo): string {
+  if (todo.upgradeInstanceId !== undefined) {
+    return `<button type="button" class="ao-upgrade-btn" data-id="${todo.upgradeInstanceId}">Upgrade</button>`;
   }
-  return `<button type="button" class="ao-upgrade-btn" data-id="${todo.upgradeInstanceId}">Upgrade</button>`;
+  if (todo.claimBattlePass === true) {
+    const skipArp =
+      todo.claimBattlePassSkipArp === true ? ' data-skip-arp="1"' : '';
+    return `<button type="button" class="ao-claim-btn"${skipArp}>Claim all</button>`;
+  }
+  return '';
 }
 
 function isCautionTodo(todo: ActionTodo): boolean {
@@ -2088,7 +2153,7 @@ export function renderActionPlanContents(todos: ActionTodo[]): string {
   const items = steps
     .map((todo, index) => {
       const toneClass = actionTodoToneClass(todo.tone);
-      return `<li class="ao-todo-item${toneClass}"><span class="ao-todo-index">${index + 1}.</span><div class="ao-todo-text">${renderActionTodoBody(todo)}</div>${renderTodoUpgradeButton(todo)}</li>`;
+      return `<li class="ao-todo-item${toneClass}"><span class="ao-todo-index">${index + 1}.</span><div class="ao-todo-text">${renderActionTodoBody(todo)}</div>${renderTodoActionButton(todo)}</li>`;
     })
     .join('');
   const listHtml =

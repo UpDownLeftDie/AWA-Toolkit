@@ -69,6 +69,11 @@ Showroom lock icons are cheap to re-check; keep this short so a second
 Refresh after an unlock is not stuck on a stale snapshot.
 */
 const FORCE_REFRESH_COOLDOWN_MS = 5 * 1000;
+/**
+Showroom HTML can lag a successful /change-user-artifacts POST. Retry once
+before giving up and marking the snapshot stale for the post-reload hydrate.
+*/
+const EQUIP_CONFIRM_RETRY_MS = 750;
 const BATTLE_PASS_STALE_MS = 60 * 60 * 1000;
 /**
 Live event page refresh for personal hours / awards. Community-hour rate
@@ -546,6 +551,129 @@ async function scrapeShowroomAfterLockNudge(
     return existing;
   }
   return persistShowroomSnapshot(loaded, showroomPath, existing);
+}
+
+function hasSnapshotLoadout(
+  snapshot: ArtifactSnapshot,
+  applied: ReadonlyArray<{ artifactId: number; position: 1 | 2 | 3 }>,
+): boolean {
+  return applied.every((target) =>
+    snapshot.artifacts.some(
+      (artifact) =>
+        artifact.instanceId === target.artifactId &&
+        artifact.equippedPosition === target.position,
+    ),
+  );
+}
+
+async function fetchShowroomSnapshot(): Promise<ArtifactSnapshot | undefined> {
+  const existing = await loadSnapshot();
+  const showroomPath = resolveShowroomUrl(existing?.username);
+  const loaded = await loadRemotePage(showroomPath);
+  if (!loaded) {
+    return;
+  }
+  const snapshot = scrapeShowroomFromDocument(
+    loaded.document,
+    pathnameFromUrl(loaded.url, showroomPath),
+  );
+  if (snapshot.artifacts.length === 0) {
+    return;
+  }
+  return snapshot;
+}
+
+async function persistConfirmedShowroomSnapshot(
+  snapshot: ArtifactSnapshot,
+): Promise<void> {
+  await saveSnapshot(snapshot);
+  await syncSlotLocksFromScrape(snapshot.slotLocks ?? {});
+}
+
+async function invalidateSnapshotFreshness(): Promise<void> {
+  const snapshot = await loadSnapshot();
+  if (!snapshot) {
+    return;
+  }
+  await saveSnapshot({
+    ...snapshot,
+    scrapedAt: new Date(0).toISOString(),
+  });
+}
+
+function equippedSignature(snapshot: ArtifactSnapshot): string {
+  const equipped = snapshot.artifacts
+    .filter((artifact) => artifact.equippedPosition !== undefined)
+    .map(
+      (artifact) =>
+        `${artifact.instanceId}:${artifact.equippedPosition}:${artifact.slotLocked === true ? '1' : '0'}`,
+    )
+    .toSorted((left, right) => left.localeCompare(right));
+  const locks = ([1, 2, 3] as const)
+    .map((position) => (snapshot.slotLocks?.[position] === true ? '1' : '0'))
+    .join('');
+  return `${equipped.join(',')}|${locks}`;
+}
+
+/**
+ * Re-read Showroom after AWA rejects an equip. Persist whatever is actually
+ * equipped/locked — the rejection means our cache was wrong.
+ */
+export async function resyncShowroomSnapshot(): Promise<{
+  snapshot: ArtifactSnapshot | undefined;
+  didChange: boolean;
+}> {
+  const previous = await loadSnapshot();
+  const previousSig = previous ? equippedSignature(previous) : '';
+  let snapshot = await fetchShowroomSnapshot();
+  if (snapshot && equippedSignature(snapshot) === previousSig) {
+    await delay(EQUIP_CONFIRM_RETRY_MS);
+    snapshot = (await fetchShowroomSnapshot()) ?? snapshot;
+  }
+  if (!snapshot) {
+    await invalidateSnapshotFreshness();
+    return { snapshot: undefined, didChange: false };
+  }
+  const didChange = equippedSignature(snapshot) !== previousSig;
+  if (didChange) {
+    await persistConfirmedShowroomSnapshot(snapshot);
+  } else {
+    await invalidateSnapshotFreshness();
+  }
+  return { snapshot, didChange };
+}
+
+/**
+ * Re-read Showroom after a successful equip and persist only when the new
+ * pieces are actually in those slots. Does not invent equipped state.
+ */
+export async function confirmShowroomLoadout(
+  applied: ReadonlyArray<{ artifactId: number; position: 1 | 2 | 3 }>,
+): Promise<void> {
+  if (applied.length === 0) {
+    return;
+  }
+
+  const didConfirm = async (): Promise<boolean> => {
+    const snapshot = await fetchShowroomSnapshot();
+    if (!snapshot) {
+      return false;
+    }
+    if (!hasSnapshotLoadout(snapshot, applied)) {
+      return false;
+    }
+    await persistConfirmedShowroomSnapshot(snapshot);
+    return true;
+  };
+
+  if (await didConfirm()) {
+    return;
+  }
+  await delay(EQUIP_CONFIRM_RETRY_MS);
+  if (await didConfirm()) {
+    return;
+  }
+  await invalidateSnapshotFreshness();
 }
 
 export async function ensureArtifactSnapshot(

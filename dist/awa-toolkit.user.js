@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         AWA Toolkit
 // @namespace    https://github.com/UpDownLeftDie/AWA-Toolkit
-// @version      2.0.5
+// @version      2.0.6
 // @author       jaredcat
 // @description  Artifact Optimizer, Control Center tasks, giveaway/vault filters, and UCF reading mode
 // @license      AGPL-3.0-or-later
@@ -404,8 +404,20 @@
 		state.recent = fromTable.length > 0 ? fromTable : scrapeArpLogRowsFromText(body);
 		return state;
 	}
+	var ARP_LOG_UNSEEN_SCRAPED_AT = new Date(0).toISOString();
+	function mergeArpLogScrapedAt(scraped, previous) {
+		if (scraped.recent.length > 0) return scraped.scrapedAt;
+		if (previous.recent.length > 0) return previous.scrapedAt;
+		return ARP_LOG_UNSEEN_SCRAPED_AT;
+	}
 	function mergeArpLogScrape(scraped, previous) {
-		if (!previous) return scraped;
+		if (!previous) {
+			if (scraped.recent.length === 0) return {
+				...scraped,
+				scrapedAt: ARP_LOG_UNSEEN_SCRAPED_AT
+			};
+			return scraped;
+		}
 		const seen = new Set();
 		const recent = [];
 		for (const entry of [...scraped.recent, ...previous.recent]) {
@@ -419,11 +431,281 @@
 		const lifetimeArp = scraped.lifetimeArp ?? previous.lifetimeArp;
 		const todayDelta = scraped.todayDelta ?? previous.todayDelta;
 		return {
-			scrapedAt: scraped.recent.length === 0 && previous.recent.length > 0 ? previous.scrapedAt : scraped.scrapedAt,
+			scrapedAt: mergeArpLogScrapedAt(scraped, previous),
 			...redeemableArp !== void 0 && { redeemableArp },
 			...lifetimeArp !== void 0 && { lifetimeArp },
 			...todayDelta !== void 0 && { todayDelta },
 			recent
+		};
+	}
+	var SETTINGS_KEY = "artifactOptimizerSettings";
+	var COOLDOWN_MS = 864e5;
+	var DEFAULT_ACTIVITIES = {
+		timeOnSite: {
+			enabled: true,
+			frequency: 1
+		},
+		steamQuests: {
+			enabled: true,
+			frequency: 1
+		},
+		watchTwitch: {
+			enabled: true,
+			frequency: 1
+		},
+		dailyCalendar: {
+			enabled: true,
+			frequency: 1
+		},
+		discordPoll: {
+			enabled: true,
+			frequency: 1
+		},
+		dailyQuests: {
+			enabled: true,
+			frequency: 1
+		},
+		steamCommunityEvent: {
+			enabled: true,
+			frequency: 1
+		}
+	};
+	var defaultArtifactSettings = {
+		activities: { ...DEFAULT_ACTIVITIES },
+		pendingVaultPurchaseArp: 0,
+		manualArtifacts: [],
+		preferScraped: true,
+		slotCooldowns: []
+	};
+	function isPartialSettings(value) {
+		return typeof value === "object" && !!value;
+	}
+	function mergeActivities(base, incoming) {
+		if (!incoming) return base;
+		const legacy = incoming;
+		const next = { ...base };
+		if (legacy.communityEvent && !legacy.dailyQuests) next.dailyQuests = {
+			enabled: legacy.communityEvent.enabled,
+			frequency: typeof legacy.communityEvent.frequency === "number" ? legacy.communityEvent.frequency : 1
+		};
+		for (const key of Object.keys(DEFAULT_ACTIVITIES)) {
+			const value = incoming[key];
+			if (!value) continue;
+			next[key] = {
+				enabled: value.enabled,
+				frequency: typeof value.frequency === "number" ? value.frequency : 1
+			};
+		}
+		return next;
+	}
+	function applyParsedSettings(settings, parsed) {
+		settings.activities = mergeActivities(settings.activities, parsed.activities);
+		if (typeof parsed.pendingVaultPurchaseArp === "number") settings.pendingVaultPurchaseArp = parsed.pendingVaultPurchaseArp;
+		if (typeof parsed.manualFragments === "number") settings.manualFragments = parsed.manualFragments;
+		if (Array.isArray(parsed.manualArtifacts)) settings.manualArtifacts = parsed.manualArtifacts;
+		if (typeof parsed.preferScraped === "boolean") settings.preferScraped = parsed.preferScraped;
+		if (Array.isArray(parsed.slotCooldowns)) settings.slotCooldowns = parsed.slotCooldowns;
+		if (typeof parsed.vaultDiscountDismissedCycle === "string") {
+			if (parsed.vaultDiscountDismissedCycle) settings.vaultDiscountDismissedCycle = parsed.vaultDiscountDismissedCycle;
+			else delete settings.vaultDiscountDismissedCycle;
+		}
+	}
+	async function getArtifactSettings() {
+		const raw = await _GM.getValue(SETTINGS_KEY);
+		const settings = {
+			...defaultArtifactSettings,
+			activities: { ...DEFAULT_ACTIVITIES },
+			manualArtifacts: [],
+			slotCooldowns: []
+		};
+		if (!raw) return settings;
+		try {
+			const parsedUnknown = typeof raw === "string" ? JSON.parse(raw) : raw;
+			if (!isPartialSettings(parsedUnknown)) return settings;
+			applyParsedSettings(settings, parsedUnknown);
+		} catch (error) {
+			console.error("[Artifact Optimizer] Error parsing settings:", error);
+		}
+		return settings;
+	}
+	async function saveArtifactSettings(patch) {
+		const previous = await getArtifactSettings();
+		const next = {
+			...previous,
+			...patch,
+			activities: patch.activities ? {
+				...previous.activities,
+				...patch.activities
+			} : previous.activities
+		};
+		await _GM.setValue(SETTINGS_KEY, JSON.stringify(next));
+		return next;
+	}
+	function findCooldownEntry(settings, position) {
+		return settings.slotCooldowns.find((entry) => entry.position === position);
+	}
+	function isShowroomSlotLocked(position, options = {}) {
+		if (options.equippedSlotLocked === true) return true;
+		if (options.equippedSlotLocked === false) return false;
+		return options.slotLocks?.[position] === true;
+	}
+	function showroomCooldownRemainingMs(settings, position, options = {}) {
+		if (!isShowroomSlotLocked(position, options)) return 0;
+		return cooldownRemainingMs(settings, position, options.now);
+	}
+	function cooldownRemainingMs(settings, position, now = Date.now()) {
+		const entry = findCooldownEntry(settings, position);
+		if (!entry) return 0;
+		const changedAt = Date.parse(entry.changedAt);
+		if (Number.isNaN(changedAt)) return 0;
+		return Math.max(0, COOLDOWN_MS - (now - changedAt));
+	}
+	async function recordSlotChange(position, artifactInstanceId) {
+		const rest = (await getArtifactSettings()).slotCooldowns.filter((entry) => entry.position !== position);
+		const entry = {
+			position,
+			changedAt: new Date().toISOString()
+		};
+		if (artifactInstanceId !== void 0) entry.artifactInstanceId = artifactInstanceId;
+		rest.push(entry);
+		await saveArtifactSettings({ slotCooldowns: rest });
+	}
+	var SLOT_POSITIONS = [
+		1,
+		2,
+		3
+	];
+	function isCompleteSlotLockMap(slotLocks) {
+		return SLOT_POSITIONS.every((position) => typeof slotLocks[position] === "boolean");
+	}
+	async function syncSlotLocksFromScrape(slotLocks, now = Date.now()) {
+		const previous = (await getArtifactSettings()).slotCooldowns;
+		const next = [];
+		for (const position of SLOT_POSITIONS) {
+			if (slotLocks[position] !== true) continue;
+			const existing = previous.find((entry) => entry.position === position);
+			if (existing) {
+				next.push(existing);
+				continue;
+			}
+			next.push({
+				position,
+				changedAt: new Date(now).toISOString(),
+				estimated: true
+			});
+		}
+		if (!isCompleteSlotLockMap(slotLocks)) {
+			for (const entry of previous) if (slotLocks[entry.position] !== false && next.every((row) => row.position === entry.position)) next.push(entry);
+		}
+		if (JSON.stringify(previous) !== JSON.stringify(next)) await saveArtifactSettings({ slotCooldowns: next });
+	}
+	async function postJson(path, body) {
+		try {
+			const response = await fetch(path, {
+				method: "POST",
+				headers: {
+					"Content-Type": "application/x-www-form-urlencoded; charset=UTF-8",
+					Accept: "application/json, text/javascript, */*; q=0.01",
+					"X-Requested-With": "XMLHttpRequest"
+				},
+				body: JSON.stringify(body)
+			});
+			const text = await response.text();
+			let parsed;
+			try {
+				parsed = JSON.parse(text);
+			} catch {
+				parsed = void 0;
+			}
+			if (!response.ok) {
+				const result = {
+					ok: false,
+					status: response.status,
+					error: parsed?.message ?? `Request failed (${response.status})`
+				};
+				if (parsed?.message) result.message = parsed.message;
+				return result;
+			}
+			if (parsed?.success === false) {
+				const result = {
+					ok: false,
+					status: response.status,
+					error: parsed.message ?? "Request rejected (slot may be on 24h cooldown or already set)."
+				};
+				if (parsed.message) result.message = parsed.message;
+				return result;
+			}
+			const result = {
+				ok: true,
+				status: response.status
+			};
+			if (parsed?.message) result.message = parsed.message;
+			return result;
+		} catch (error) {
+			return {
+				ok: false,
+				status: 0,
+				error: error instanceof Error ? error.message : "Network error"
+			};
+		}
+	}
+	async function equipArtifact(artifactId, position) {
+		const result = await postJson("/change-user-artifacts", {
+			artifactId,
+			position
+		});
+		if (result.ok) await recordSlotChange(position, artifactId);
+		return result;
+	}
+	async function upgradeArtifact(artifactId) {
+		return postJson("/upgrade-user-artifact", { artifactId });
+	}
+	async function claimBattlePassReward(path, body = {}) {
+		return postJson(path, body);
+	}
+	function pickStuckLockNudgeTarget(artifacts) {
+		const maxed = artifacts.filter((artifact) => artifact.maxLevel || artifact.upgradeCost === 0);
+		if (maxed.length === 0) return;
+		const target = maxed.find((artifact) => /warrior script/i.test(artifact.displayName)) ?? maxed[0];
+		if (!target) return;
+		return {
+			instanceId: target.instanceId,
+			displayName: target.displayName
+		};
+	}
+	async function nudgeStuckSlotLocks(artifacts) {
+		const target = pickStuckLockNudgeTarget(artifacts);
+		if (!target) {
+			console.info("[Artifact Optimizer] Stuck-lock nudge skipped — no maxed 0-frag artifact");
+			return;
+		}
+		const result = await upgradeArtifact(target.instanceId);
+		console.info("[Artifact Optimizer] Stuck-lock nudge", {
+			name: target.displayName,
+			id: target.instanceId,
+			ok: result.ok,
+			message: result.message ?? result.error
+		});
+		return result;
+	}
+	async function applyLoadout(targets, currentlyEquipped) {
+		const results = [];
+		const applied = [];
+		for (const target of targets) {
+			if (currentlyEquipped.some((c) => c.artifactId === target.artifactId && c.position === target.position)) continue;
+			const equipResult = await equipArtifact(target.artifactId, target.position);
+			results.push(equipResult);
+			if (!equipResult.ok) return {
+				results,
+				allOk: false,
+				applied
+			};
+			applied.push(target);
+		}
+		return {
+			results,
+			allOk: results.every((result) => result.ok),
+			applied
 		};
 	}
 	function scrapeBattlePassFromDocument(document_) {
@@ -492,17 +774,14 @@
 	function countBattlePassClaims(document_) {
 		const popups = document_.querySelectorAll(".bp-popup[data-milestone-id]");
 		if (popups.length > 0) {
-			const seen = new Set();
 			let readyToClaim = 0;
 			let readyToClaimArp = 0;
 			for (const popup of popups) {
 				if (!(popup instanceof HTMLElement)) continue;
-				const id = popup.dataset.milestoneId ?? "";
-				if (!id || seen.has(id)) continue;
-				seen.add(id);
-				if (!popup.querySelector(".bp-popup__claim-btn")) continue;
-				readyToClaim += 1;
-				if (isBattlePassArpRewardTitle(popup.querySelector(".bp-popup__title")?.textContent?.trim() ?? "")) readyToClaimArp += 1;
+				const claimCount = popup.querySelectorAll(".bp-popup__claim-btn").length;
+				if (claimCount === 0) continue;
+				readyToClaim += claimCount;
+				if (isBattlePassArpRewardTitle(popup.querySelector(".bp-popup__title")?.textContent?.trim() ?? "")) readyToClaimArp += claimCount;
 			}
 			return {
 				readyToClaim,
@@ -519,8 +798,272 @@
 		if (/ARP\s*Boost/i.test(title)) return true;
 		return /^\d[\d,]*\s*ARP$/i.test(title.trim());
 	}
+	function battlePassPopupTitle(popup) {
+		return popup.querySelector(".bp-popup__title")?.textContent?.trim() ?? "";
+	}
+	function isArpClaimPopup(popup) {
+		return isBattlePassArpRewardTitle(battlePassPopupTitle(popup));
+	}
+	function listBattlePassClaimButtons(document_ = document, options = {}) {
+		const shouldSkipArpBoosts = options.shouldSkipArpBoosts === true;
+		const popups = document_.querySelectorAll(".bp-popup[data-milestone-id]");
+		const items = [];
+		for (const popup of popups) {
+			if (!(popup instanceof HTMLElement)) continue;
+			if (shouldSkipArpBoosts && isArpClaimPopup(popup)) continue;
+			for (const button of popup.querySelectorAll(".bp-popup__claim-btn")) if (button instanceof HTMLElement) items.push({
+				button,
+				popup
+			});
+		}
+		return items;
+	}
+	function delay$1(ms) {
+		return new Promise((resolve) => {
+			setTimeout(resolve, ms);
+		});
+	}
+	async function waitWhile(isWaiting, timeoutMs, intervalMs = 100) {
+		const startedAt = Date.now();
+		while (isWaiting() && Date.now() - startedAt < timeoutMs) await delay$1(intervalMs);
+	}
+	var claimEndpointCache = {};
+	function jsonishId(value) {
+		return /^\d+$/.test(value) ? Number(value) : value;
+	}
+	function datasetRecord(element) {
+		const record = {};
+		for (const [key, value] of Object.entries(element.dataset)) {
+			if (value === void 0 || value === "") continue;
+			record[key] = jsonishId(value);
+		}
+		return record;
+	}
+	function endpointFromHref(raw) {
+		let path = raw.trim();
+		try {
+			const url = new URL(path, location.origin);
+			if (url.origin !== location.origin) return;
+			path = `${url.pathname}${url.search}`;
+		} catch {
+			return;
+		}
+		if (!/battle-pass/i.test(path) || !/claim/i.test(path)) return;
+		const hasIdInPath = /\/\d+\/?$/.test(urlPathname(path));
+		return {
+			path: hasIdInPath ? path.replace(/\/\d+\/?$/, "") : path,
+			hasIdInPath,
+			idParameter: "milestoneId"
+		};
+	}
+	function urlPathname(path) {
+		const q = path.indexOf("?");
+		return q === -1 ? path : path.slice(0, q);
+	}
+	function firstClaimEndpoint(candidates) {
+		for (const candidate of candidates) {
+			if (!candidate) continue;
+			const endpoint = endpointFromHref(candidate);
+			if (endpoint) return endpoint;
+		}
+	}
+	function endpointFromClaimMarkup(document_) {
+		for (const item of listBattlePassClaimButtons(document_)) {
+			const endpoint = firstClaimEndpoint([
+				item.button.getAttribute("href") ?? void 0,
+				item.button.getAttribute("formaction") ?? void 0,
+				item.button.dataset.url,
+				item.button.dataset.href,
+				item.button.dataset.action,
+				item.popup.dataset.url,
+				item.popup.dataset.href,
+				item.popup.dataset.claimUrl
+			]);
+			if (endpoint) return endpoint;
+		}
+	}
+	function endpointFromScripts(source) {
+		const concat = /['"](\/(?:control-center\/)?battle-pass\/[^'"]*claim[^'"]*)['"]\s*\+/i.exec(source);
+		if (concat?.[1]) return {
+			path: concat[1].replace(/\/$/, ""),
+			hasIdInPath: true,
+			idParameter: "milestoneId"
+		};
+		const quoted = /['"](\/(?:control-center\/)?battle-pass\/[^'"]*claim[^'"]*)['"]/i.exec(source);
+		if (!quoted?.[1]) return;
+		const path = quoted[1];
+		const hasIdInPath = /\/\d+\/?$/.test(urlPathname(path)) || /\$\{|\{id\}|\{milestone/i.test(path);
+		const parameterMatch = /(?:milestoneId|milestone_id|rewardId)\s*:/i.exec(source);
+		const idParameter = /rewardId/i.test(parameterMatch?.[0] ?? "") ? "rewardId" : "milestoneId";
+		return {
+			path: hasIdInPath ? path.replace(/\/\d+\/?$/, "").replace(/\/$/, "") : path,
+			hasIdInPath,
+			idParameter
+		};
+	}
+	function collectInlineScriptText(document_) {
+		return [...document_.querySelectorAll("script:not([src])")].map((script) => script.textContent ?? "").join("\n");
+	}
+	function endpointFromJquery(document_) {
+		const readEvents = document_.defaultView?.jQuery?._data;
+		if (typeof readEvents !== "function") return;
+		const roots = [...document_.querySelectorAll(".bp-popup__claim-btn"), document_];
+		if (document_.body) roots.push(document_.body);
+		for (const root of roots) {
+			const found = endpointFromScripts((readEvents(root, "events")?.click ?? []).map((entry) => String(entry.handler ?? "")).join("\n"));
+			if (found) return found;
+		}
+	}
+	async function discoverBattlePassClaimEndpoint(document_) {
+		if (claimEndpointCache.value) return claimEndpointCache.value;
+		const found = endpointFromClaimMarkup(document_) ?? endpointFromScripts(collectInlineScriptText(document_)) ?? endpointFromJquery(document_);
+		if (found) {
+			claimEndpointCache.value = found;
+			return found;
+		}
+		const sources = [...document_.querySelectorAll("script[src]")].map((script) => script.getAttribute("src")).filter((source) => Boolean(source)).filter((source) => /battle|pass|control-center|app|main|site/i.test(source)).slice(0, 8);
+		for (const source of sources) try {
+			const url = new URL(source, location.origin);
+			if (url.origin !== location.origin) continue;
+			const fromFile = endpointFromScripts(await (await fetch(url.href)).text());
+			if (fromFile) {
+				claimEndpointCache.value = fromFile;
+				return fromFile;
+			}
+		} catch {}
+	}
+	function resolveClaimPath(endpoint, milestoneId) {
+		if (!endpoint.hasIdInPath) return endpoint.path;
+		const trimmed = endpoint.path.replace(/\/$/, "");
+		if (trimmed.endsWith(`/${milestoneId}`)) return trimmed;
+		return `${trimmed}/${milestoneId}`;
+	}
+	function resolveClaimBody(endpoint, popup, button) {
+		const body = {
+			...datasetRecord(popup),
+			...datasetRecord(button)
+		};
+		const milestoneId = popup.dataset.milestoneId;
+		if (milestoneId && body[endpoint.idParameter] === void 0) body[endpoint.idParameter] = jsonishId(milestoneId);
+		return body;
+	}
+	async function claimTargetsViaApi(document_, items) {
+		const endpoint = await discoverBattlePassClaimEndpoint(document_);
+		if (!endpoint) return 0;
+		const seen = new Set();
+		let claimed = 0;
+		for (const item of items) {
+			const milestoneId = item.popup.dataset.milestoneId ?? "";
+			const key = `${milestoneId}:${JSON.stringify(datasetRecord(item.popup))}`;
+			if (!milestoneId || seen.has(key)) continue;
+			seen.add(key);
+			if (!(await claimBattlePassReward(resolveClaimPath(endpoint, milestoneId), resolveClaimBody(endpoint, item.popup, item.button))).ok) continue;
+			claimed += 1;
+			await delay$1(200);
+		}
+		return claimed;
+	}
+	async function clickRemainingClaimButtons(document_, options = {}) {
+		const attempted = new WeakSet();
+		let claimed = 0;
+		while (claimed < 40) {
+			const next = listBattlePassClaimButtons(document_, options).find((item) => item.button.isConnected && !attempted.has(item.button));
+			if (!next) break;
+			attempted.add(next.button);
+			const { button, popup } = next;
+			button.click();
+			claimed += 1;
+			await waitWhile(() => button.isConnected && popup.contains(button), 4e3);
+			await delay$1(200);
+		}
+		return claimed;
+	}
+	var BATTLE_PASS_PATH$1 = "/control-center/battle-pass/1";
+	async function openHiddenBattlePassFrame() {
+		return new Promise((resolve) => {
+			const iframe = document.createElement("iframe");
+			iframe.setAttribute("aria-hidden", "true");
+			iframe.style.cssText = "position:fixed;width:1px;height:1px;left:-9999px;top:0;opacity:0;pointer-events:none;border:0";
+			const finish = (frame) => {
+				iframe.removeEventListener("load", onLoad);
+				iframe.removeEventListener("error", onError);
+				resolve(frame);
+			};
+			const timer = setTimeout(() => {
+				iframe.remove();
+				finish(void 0);
+			}, 15e3);
+			const onError = () => {
+				clearTimeout(timer);
+				iframe.remove();
+				finish(void 0);
+			};
+			const onLoad = () => {
+				clearTimeout(timer);
+				(async () => {
+					const document_ = iframe.contentDocument;
+					if (!document_) {
+						iframe.remove();
+						finish(void 0);
+						return;
+					}
+					const started = Date.now();
+					while (Date.now() - started < 8e3 && !isBattlePassDocumentReady(document_)) await delay$1(250);
+					finish(iframe);
+				})();
+			};
+			iframe.addEventListener("load", onLoad);
+			iframe.addEventListener("error", onError);
+			document.body.append(iframe);
+			iframe.src = BATTLE_PASS_PATH$1;
+		});
+	}
+	async function claimOnDocument(document_, options = {}) {
+		const viaApi = await claimTargetsViaApi(document_, listBattlePassClaimButtons(document_, options));
+		await waitWhile(() => listBattlePassClaimButtons(document_, options).length > 0, 2e3);
+		let remaining = listBattlePassClaimButtons(document_, options).length;
+		let viaClick = 0;
+		if (remaining > 0) {
+			viaClick = await clickRemainingClaimButtons(document_, options);
+			await waitWhile(() => listBattlePassClaimButtons(document_, options).length > 0, 1500);
+			remaining = listBattlePassClaimButtons(document_, options).length;
+		}
+		return {
+			claimed: viaApi + viaClick,
+			remaining
+		};
+	}
+	async function claimAllBattlePassRewards(options = {}) {
+		if (location.pathname.includes("/battle-pass")) return claimOnDocument(document, options);
+		const frame = await openHiddenBattlePassFrame();
+		const document_ = frame?.contentDocument;
+		if (!document_ || !isBattlePassDocumentReady(document_)) {
+			frame?.remove();
+			return {
+				claimed: 0,
+				remaining: 0,
+				needsBattlePassPage: true
+			};
+		}
+		try {
+			return await claimOnDocument(document_, options);
+		} finally {
+			frame.remove();
+		}
+	}
 	function battlePassClaimableArp(battlePass) {
 		return battlePass?.readyToClaimArp ?? 0;
+	}
+	function battlePassReadyNonArp(battlePass) {
+		const ready = battlePass?.readyToClaim ?? 0;
+		return Math.max(0, ready - battlePassClaimableArp(battlePass));
+	}
+	function shouldSkipArpInBattlePassClaimAll(battlePass, shouldWaitForAllArpSwap) {
+		return shouldWaitForAllArpSwap && battlePassClaimableArp(battlePass) > 0;
+	}
+	function shouldShowBattlePassClaimAll(battlePass, shouldWaitForAllArpSwap) {
+		if (battlePassReadyNonArp(battlePass) > 0) return true;
+		return (battlePass?.readyToClaim ?? 0) > 0 && !shouldWaitForAllArpSwap;
 	}
 	function scrapeBattlePass() {
 		if (!location.pathname.includes("/battle-pass")) return;
@@ -994,6 +1537,50 @@
 			effectUnit: "cosmetic"
 		},
 		{
+			id: "the-fractured-lilly",
+			category: "Precious Gems",
+			tierNames: [
+				"The Fractured Lilly",
+				void 0,
+				void 0,
+				void 0,
+				void 0,
+				void 0
+			],
+			effects: [
+				0,
+				void 0,
+				void 0,
+				void 0,
+				void 0,
+				void 0
+			],
+			effectType: "None",
+			effectUnit: "flat"
+		},
+		{
+			id: "the-veiled-thorn",
+			category: "Weapon",
+			tierNames: [
+				"The Veiled Thorn",
+				void 0,
+				void 0,
+				void 0,
+				void 0,
+				void 0
+			],
+			effects: [
+				0,
+				void 0,
+				void 0,
+				void 0,
+				void 0,
+				void 0
+			],
+			effectType: "None",
+			effectUnit: "flat"
+		},
+		{
 			id: "audio-archive-stone",
 			category: "Clothing",
 			tierNames: [
@@ -1084,7 +1671,11 @@
 		{
 			id: "braxtine-garden",
 			name: "Braxtine Garden",
-			memberIds: ["the-black-rose"],
+			memberIds: [
+				"the-black-rose",
+				"the-crimsom-t",
+				"the-nebula-c"
+			],
 			effects: [{
 				type: "AllArpPct",
 				value: 5,
@@ -1093,8 +1684,7 @@
 				type: "TimeOnSite",
 				value: 100,
 				unit: "flat"
-			}],
-			unconfirmed: true
+			}]
 		}
 	];
 	var BASE_ACTIVITY = {
@@ -1280,7 +1870,7 @@
 		const reward = Number(amountToken);
 		return Number.isFinite(reward) && reward > 0 ? reward : void 0;
 	}
-	function pathnameFromHref(href) {
+	function pathnameFromHref$1(href) {
 		if (!href) return;
 		try {
 			return new URL(href, "https://na.alienwarearena.com").pathname;
@@ -1314,7 +1904,7 @@
 		if (!name) return;
 		const rewardArp = parseSteamQuestRewardArp((id ? card.querySelector(`#control-center__steam-quest-reward-${id}`) : void 0)?.textContent ?? row.textContent ?? "");
 		if (rewardArp === void 0) return;
-		const href = pathnameFromHref(questLink?.getAttribute("href") ?? void 0);
+		const href = pathnameFromHref$1(questLink?.getAttribute("href") ?? void 0);
 		return buildSteamQuestRow({
 			name,
 			rewardArp,
@@ -1330,7 +1920,7 @@
 		const rewardArp = parseSteamQuestRewardArp(row.textContent ?? "");
 		if (rewardArp === void 0) return;
 		const statusCell = [...row.querySelectorAll("td")].find((cell) => steamQuestStatusFromText(cell.textContent ?? ""));
-		const href = pathnameFromHref(questLink?.getAttribute("href") ?? void 0);
+		const href = pathnameFromHref$1(questLink?.getAttribute("href") ?? void 0);
 		return buildSteamQuestRow({
 			name,
 			rewardArp,
@@ -1962,6 +2552,94 @@
 		if (progress.communityHoursCap !== void 0) state.communityHoursCap = progress.communityHoursCap;
 		return state;
 	}
+	var DAILY_QUEST_STATUS_SELECTORS = [
+		"[id^=\"control-center__daily-quest-status-\"]",
+		"[id^=\"control-center__daily-quests-status-\"]",
+		"[id^=\"control-center__weekend-quest-status-\"]",
+		"[id^=\"control-center__quest-status-\"]"
+	];
+	var HEADER_NAME = /^(incomplete|complete|status|game|quest|quests|reward|arp)$/i;
+	function dailyQuestStatusFromText(text) {
+		const trimmed = text.trim();
+		if (/^complete$/i.test(trimmed)) return "complete";
+		if (/^incomplete$/i.test(trimmed)) return "incomplete";
+	}
+	function dailyQuestKind(name, href) {
+		return /weekend/i.test(`${name} ${href ?? ""}`) ? "weekend" : "daily";
+	}
+	function pathnameFromHref(href) {
+		if (!href) return;
+		try {
+			return new URL(href, "https://na.alienwarearena.com").pathname;
+		} catch {
+			return href.startsWith("/") ? href : void 0;
+		}
+	}
+	function questNameFromRow(row) {
+		const name = ([...row.querySelectorAll("a")].find((link) => {
+			const href = link.getAttribute("href") ?? "";
+			return /\/quests\//i.test(href) && !/\/steam\/quests\//i.test(href);
+		})?.textContent ?? row.querySelector("a")?.textContent ?? [...row.querySelectorAll("td")].find((cell) => {
+			const text = cell.textContent?.replaceAll(/\s+/g, " ").trim() ?? "";
+			return text.length > 0 && !dailyQuestStatusFromText(text);
+		})?.textContent)?.replaceAll(/\s+/g, " ").trim();
+		if (!name || HEADER_NAME.test(name)) return;
+		return name;
+	}
+	function statusTextFromRow(row) {
+		return [...row.querySelectorAll("td, th, span, div")].find((cell) => dailyQuestStatusFromText(cell.textContent ?? ""))?.textContent?.trim() ?? "";
+	}
+	function buildDailyQuestRow(row, statusText) {
+		const name = questNameFromRow(row);
+		const status = dailyQuestStatusFromText(statusText);
+		if (!name || !status) return;
+		const href = pathnameFromHref(row.querySelector("a")?.getAttribute("href") ?? void 0);
+		const parsed = {
+			name,
+			status,
+			kind: dailyQuestKind(name, href)
+		};
+		if (href) parsed.href = href;
+		return parsed;
+	}
+	function parseDailyQuestRowFromStatusCell(statusCell) {
+		const row = statusCell.closest("tr") ?? statusCell.parentElement;
+		if (!row) return;
+		return buildDailyQuestRow(row, statusCell.textContent?.trim() ?? "");
+	}
+	function parseDailyQuestRowFromTableRow(row) {
+		return buildDailyQuestRow(row, statusTextFromRow(row));
+	}
+	function scrapeDailyQuestRowsFromDocument(document_) {
+		const card = findActivityCard(document_, /^Daily Quests$/i);
+		if (!card) return [];
+		const fromStatusIds = [];
+		for (const selector of DAILY_QUEST_STATUS_SELECTORS) fromStatusIds.push(...[...card.querySelectorAll(selector)].map((cell) => parseDailyQuestRowFromStatusCell(cell)).filter((row) => row !== void 0));
+		if (fromStatusIds.length > 0) return fromStatusIds;
+		const tableRows = [...card.querySelectorAll("tr")].map((row) => parseDailyQuestRowFromTableRow(row)).filter((row) => row !== void 0);
+		if (tableRows.length > 0) return tableRows;
+		return [...card.querySelectorAll("li")].map((row) => parseDailyQuestRowFromTableRow(row)).filter((row) => row !== void 0);
+	}
+	function dailyQuestsCapFromRows(quests) {
+		if (quests.length === 0) return;
+		return remainingDailyQuestRowsFromList(quests).length > 0 ? "available" : "capped";
+	}
+	function remainingDailyQuestRowsFromList(quests) {
+		return quests.filter((quest) => quest.status === "incomplete");
+	}
+	function remainingDailyQuestRows(siteState) {
+		return remainingDailyQuestRowsFromList(siteState.dailyQuests?.quests ?? []);
+	}
+	function applyDailyQuestsFromDocument(next, document_) {
+		const scraped = scrapeDailyQuestRowsFromDocument(document_);
+		if (scraped.length === 0) return;
+		next.dailyQuests = {
+			scrapedAt: new Date().toISOString(),
+			quests: scraped
+		};
+		const cap = dailyQuestsCapFromRows(scraped);
+		if (cap) next.caps.dailyQuests = cap;
+	}
 	function readTimeOnSiteCap(body) {
 		const tosBlock = /Time on Site[\s\S]{0,200}?Max ARP per day:\s*(\d+)[\s\S]{0,80}?Earned ARP:\s*(\d+)/i.exec(body);
 		if (!tosBlock?.[1] || !tosBlock[2]) return;
@@ -2102,6 +2780,8 @@
 		if (/\bComplete\b/i.test(section[1])) return "capped";
 	}
 	function readDailyQuestsCapFromDocument(document_) {
+		const fromRows = dailyQuestsCapFromRows(scrapeDailyQuestRowsFromDocument(document_));
+		if (fromRows) return fromRows;
 		return readCapFromCardOrText(document_, /^Daily Quests$/i, readDailyQuestsCap);
 	}
 	function readDailyCalendarCap(body) {
@@ -2380,6 +3060,7 @@
 		if (!isControlCenterDocumentReady(document)) return;
 		Object.assign(next.caps, scrapeControlCenterCaps());
 		applySteamQuestsFromDocument(next, document);
+		applyDailyQuestsFromDocument(next, document);
 		applyWatchTwitchFromDocument(next, document);
 		applyBattlePassEndFromDocument(next, document);
 		if (scrapeLiveCommunityEventBanner(document)) {
@@ -2794,167 +3475,6 @@
 		const next = state.communityEvent;
 		if (!next) return false;
 		return asceEventSignature(next) !== before;
-	}
-	var SETTINGS_KEY = "artifactOptimizerSettings";
-	var COOLDOWN_MS = 864e5;
-	var DEFAULT_ACTIVITIES = {
-		timeOnSite: {
-			enabled: true,
-			frequency: 1
-		},
-		steamQuests: {
-			enabled: true,
-			frequency: 1
-		},
-		watchTwitch: {
-			enabled: true,
-			frequency: 1
-		},
-		dailyCalendar: {
-			enabled: true,
-			frequency: 1
-		},
-		discordPoll: {
-			enabled: true,
-			frequency: 1
-		},
-		dailyQuests: {
-			enabled: true,
-			frequency: 1
-		},
-		steamCommunityEvent: {
-			enabled: true,
-			frequency: 1
-		}
-	};
-	var defaultArtifactSettings = {
-		activities: { ...DEFAULT_ACTIVITIES },
-		pendingVaultPurchaseArp: 0,
-		manualArtifacts: [],
-		preferScraped: true,
-		slotCooldowns: []
-	};
-	function isPartialSettings(value) {
-		return typeof value === "object" && !!value;
-	}
-	function mergeActivities(base, incoming) {
-		if (!incoming) return base;
-		const legacy = incoming;
-		const next = { ...base };
-		if (legacy.communityEvent && !legacy.dailyQuests) next.dailyQuests = {
-			enabled: legacy.communityEvent.enabled,
-			frequency: typeof legacy.communityEvent.frequency === "number" ? legacy.communityEvent.frequency : 1
-		};
-		for (const key of Object.keys(DEFAULT_ACTIVITIES)) {
-			const value = incoming[key];
-			if (!value) continue;
-			next[key] = {
-				enabled: value.enabled,
-				frequency: typeof value.frequency === "number" ? value.frequency : 1
-			};
-		}
-		return next;
-	}
-	function applyParsedSettings(settings, parsed) {
-		settings.activities = mergeActivities(settings.activities, parsed.activities);
-		if (typeof parsed.pendingVaultPurchaseArp === "number") settings.pendingVaultPurchaseArp = parsed.pendingVaultPurchaseArp;
-		if (typeof parsed.manualFragments === "number") settings.manualFragments = parsed.manualFragments;
-		if (Array.isArray(parsed.manualArtifacts)) settings.manualArtifacts = parsed.manualArtifacts;
-		if (typeof parsed.preferScraped === "boolean") settings.preferScraped = parsed.preferScraped;
-		if (Array.isArray(parsed.slotCooldowns)) settings.slotCooldowns = parsed.slotCooldowns;
-		if (typeof parsed.vaultDiscountDismissedCycle === "string") {
-			if (parsed.vaultDiscountDismissedCycle) settings.vaultDiscountDismissedCycle = parsed.vaultDiscountDismissedCycle;
-			else delete settings.vaultDiscountDismissedCycle;
-		}
-	}
-	async function getArtifactSettings() {
-		const raw = await _GM.getValue(SETTINGS_KEY);
-		const settings = {
-			...defaultArtifactSettings,
-			activities: { ...DEFAULT_ACTIVITIES },
-			manualArtifacts: [],
-			slotCooldowns: []
-		};
-		if (!raw) return settings;
-		try {
-			const parsedUnknown = typeof raw === "string" ? JSON.parse(raw) : raw;
-			if (!isPartialSettings(parsedUnknown)) return settings;
-			applyParsedSettings(settings, parsedUnknown);
-		} catch (error) {
-			console.error("[Artifact Optimizer] Error parsing settings:", error);
-		}
-		return settings;
-	}
-	async function saveArtifactSettings(patch) {
-		const previous = await getArtifactSettings();
-		const next = {
-			...previous,
-			...patch,
-			activities: patch.activities ? {
-				...previous.activities,
-				...patch.activities
-			} : previous.activities
-		};
-		await _GM.setValue(SETTINGS_KEY, JSON.stringify(next));
-		return next;
-	}
-	function findCooldownEntry(settings, position) {
-		return settings.slotCooldowns.find((entry) => entry.position === position);
-	}
-	function isShowroomSlotLocked(position, options = {}) {
-		if (options.equippedSlotLocked === true) return true;
-		if (options.equippedSlotLocked === false) return false;
-		return options.slotLocks?.[position] === true;
-	}
-	function showroomCooldownRemainingMs(settings, position, options = {}) {
-		if (!isShowroomSlotLocked(position, options)) return 0;
-		return cooldownRemainingMs(settings, position, options.now);
-	}
-	function cooldownRemainingMs(settings, position, now = Date.now()) {
-		const entry = findCooldownEntry(settings, position);
-		if (!entry) return 0;
-		const changedAt = Date.parse(entry.changedAt);
-		if (Number.isNaN(changedAt)) return 0;
-		return Math.max(0, COOLDOWN_MS - (now - changedAt));
-	}
-	async function recordSlotChange(position, artifactInstanceId) {
-		const rest = (await getArtifactSettings()).slotCooldowns.filter((entry) => entry.position !== position);
-		const entry = {
-			position,
-			changedAt: new Date().toISOString()
-		};
-		if (artifactInstanceId !== void 0) entry.artifactInstanceId = artifactInstanceId;
-		rest.push(entry);
-		await saveArtifactSettings({ slotCooldowns: rest });
-	}
-	var SLOT_POSITIONS = [
-		1,
-		2,
-		3
-	];
-	function isCompleteSlotLockMap(slotLocks) {
-		return SLOT_POSITIONS.every((position) => typeof slotLocks[position] === "boolean");
-	}
-	async function syncSlotLocksFromScrape(slotLocks, now = Date.now()) {
-		const previous = (await getArtifactSettings()).slotCooldowns;
-		const next = [];
-		for (const position of SLOT_POSITIONS) {
-			if (slotLocks[position] !== true) continue;
-			const existing = previous.find((entry) => entry.position === position);
-			if (existing) {
-				next.push(existing);
-				continue;
-			}
-			next.push({
-				position,
-				changedAt: new Date(now).toISOString(),
-				estimated: true
-			});
-		}
-		if (!isCompleteSlotLockMap(slotLocks)) {
-			for (const entry of previous) if (slotLocks[entry.position] !== false && next.every((row) => row.position === entry.position)) next.push(entry);
-		}
-		if (JSON.stringify(previous) !== JSON.stringify(next)) await saveArtifactSettings({ slotCooldowns: next });
 	}
 	var SNAPSHOT_KEY = "artifactSnapshot";
 	function isArtifactSnapshot(value) {
@@ -3415,7 +3935,7 @@
 			if (isActivityPending(caps, "steamQuests")) flatSum += scoreSteamQuestBases(breakdown, bonuses, freq("steamQuests"), remainingSteamQuestRewards(siteState));
 			else if (isResetInWearWindow(msUntilNextSteamQuestWeek())) flatSum += scoreSteamQuestBases(breakdown, bonuses, freq("steamQuests"), [...B.steamQuestBases]);
 		}
-		if (isEnabled("dailyCalendar") && (isNextUtcResetInLock || isActivityAvailable(caps, "dailyCalendar"))) flatSum += addDailyCategory(breakdown, "dailyCalendar", B.dailyCalendarBasePerDay, bonuses.dailyCalendar, B.days, freq("dailyCalendar"));
+		if (isEnabled("dailyCalendar")) flatSum += addDailyCategory(breakdown, "dailyCalendar", B.dailyCalendarBasePerDay, bonuses.dailyCalendar, B.days, freq("dailyCalendar"));
 		flatSum += scoreSecondaryActivities(breakdown, bonuses, context, isEnabled, freq);
 		return {
 			flatSum,
@@ -3959,7 +4479,7 @@
 		return Math.max(0, next - now.getTime());
 	}
 	function utcResetDeadlineLabel(now = new Date()) {
-		return `${formatMs(msUntilUtcMidnight(now))} left until 00:00 UTC reset`;
+		return `${formatMs(msUntilUtcMidnight(now))} left`;
 	}
 	function sortArtifactsForDisplay(artifacts) {
 		return artifacts.toSorted((left, right) => left.displayName.localeCompare(right.displayName, void 0, { sensitivity: "base" }));
@@ -3967,6 +4487,10 @@
 	function loadoutLabel(artifacts) {
 		if (!artifacts || artifacts.length === 0) return "—";
 		return sortArtifactsForDisplay(artifacts).map((artifact) => artifact.displayName).join(" + ");
+	}
+	function loadoutSetNames(artifacts) {
+		if (!artifacts || artifacts.length === 0) return [];
+		return activeSets(artifacts.map((artifact) => artifact.familyId)).map((set) => set.name);
 	}
 	function comboLabel(result) {
 		if (!result) return "—";
@@ -4206,10 +4730,6 @@
 			isDue: (caps) => isActivityPending(caps, "dailyQuests")
 		},
 		{
-			key: "dailyCalendar",
-			isDue: (caps) => isActivityAvailable(caps, "dailyCalendar")
-		},
-		{
 			key: "watchTwitch",
 			isDue: (caps) => isActivityAvailable(caps, "watchTwitch")
 		},
@@ -4250,14 +4770,36 @@
 		if (reasons.length > 0) todo.reasons = reasons;
 		todos.push(todo);
 	}
+	function battlePassClaimCountLabel(readyAll, readyArp) {
+		if (readyArp <= 0) return readyAll === 1 ? "1 Battle Pass reward" : `${readyAll} Battle Pass rewards`;
+		if (readyAll === readyArp) return readyArp === 1 ? "1 Battle Pass ARP Boost" : `${readyArp} Battle Pass ARP Boosts`;
+		return `${readyAll} Battle Pass rewards (${readyArp === 1 ? "1 ARP Boost" : `${readyArp} ARP Boosts`})`;
+	}
 	function pushBattlePassTodo(todos, siteState, options) {
+		const readyAll = siteState.battlePass?.readyToClaim ?? 0;
+		if (readyAll <= 0) return;
 		const readyArp = battlePassClaimableArp(siteState.battlePass);
-		if (readyArp <= 0) return;
 		const { ownsAllArp, hasAllArpEquipped, afterAllArpEquipped = false, seasonEndsBeforeAllArp = false } = options;
-		const countLabel = readyArp === 1 ? "1 Battle Pass ARP Boost" : `${readyArp} Battle Pass ARP Boosts`;
+		const shouldWaitForAllArpSwap = ownsAllArp && !hasAllArpEquipped && !seasonEndsBeforeAllArp;
+		const shouldShowClaimAll = shouldShowBattlePassClaimAll(siteState.battlePass, shouldWaitForAllArpSwap);
+		const countLabel = battlePassClaimCountLabel(readyAll, readyArp);
+		if (readyArp <= 0) {
+			todos.push({
+				text: `Claim ${countLabel}`,
+				claimBattlePass: shouldShowClaimAll,
+				urgency: {
+					kind: "action",
+					readyAtMs: 0,
+					durationMs: 0,
+					chain: "before"
+				}
+			});
+			return;
+		}
 		if (hasAllArpEquipped) {
 			todos.push({
 				text: `Claim ${countLabel} now — All-ARP% is equipped`,
+				claimBattlePass: shouldShowClaimAll,
 				urgency: {
 					kind: "action",
 					readyAtMs: 0,
@@ -4273,6 +4815,7 @@
 			const todo = {
 				tone: "warn",
 				text: `Claim ${countLabel} now — Battle Pass ends before All-ARP% can be equipped`,
+				claimBattlePass: shouldShowClaimAll,
 				urgency: actionUrgency({
 					kind: "action",
 					readyAtMs: 0,
@@ -4287,8 +4830,20 @@
 			return;
 		}
 		if (ownsAllArp) {
+			const nonArp = battlePassReadyNonArp(siteState.battlePass);
+			if (nonArp > 0) todos.push({
+				text: `Claim ${battlePassClaimCountLabel(nonArp, 0)} now — leave ARP Boosts until All-ARP% is on`,
+				claimBattlePass: true,
+				claimBattlePassSkipArp: true,
+				urgency: {
+					kind: "action",
+					readyAtMs: 0,
+					durationMs: 0,
+					chain: "before"
+				}
+			});
 			if (afterAllArpEquipped) todos.push({
-				text: `Claim ${countLabel} after All-ARP% is on`,
+				text: `Claim ${battlePassClaimCountLabel(readyArp, readyArp)} after All-ARP% is on`,
 				urgency: {
 					kind: "schedule",
 					readyAtMs: 0,
@@ -4301,6 +4856,7 @@
 		}
 		todos.push({
 			text: `Claim ${countLabel}`,
+			claimBattlePass: shouldShowClaimAll,
 			urgency: {
 				kind: "action",
 				readyAtMs: 0,
@@ -4315,7 +4871,6 @@
 		switch (key) {
 			case "steamQuests": return combo.steamQuestsFlat;
 			case "watchTwitch": return combo.watchTwitchFlat;
-			case "dailyCalendar": return combo.dailyCalendarFlat;
 			case "discordPoll": return combo.discordPollFlat;
 			default: return 0;
 		}
@@ -4339,17 +4894,43 @@
 		if (options.phase === "before") return `Vote Discord Poll now — next post in ${nextPost}${bonusPart}`;
 		return `Vote Discord Poll${options.beforeSwap ? " before swapping" : ""}${bonusPart}`;
 	}
-	function activityLabel(key, bonus, options) {
+	function steamQuestCountLabel(count) {
+		if (count === 1) return "1 Steam Quest";
+		if (count > 1) return `${count} Steam Quests`;
+		return "Steam Quest(s)";
+	}
+	function steamQuestsActivityLabel(bonus, options) {
 		const bonusPart = bonus > 0 ? ` (+${bonus} equipped bonus)` : "";
 		const beforePart = options.beforeSwap ? " before swapping" : "";
+		return `Complete ${steamQuestCountLabel(options.pendingCount)}${beforePart}${bonusPart}`;
+	}
+	function dailyQuestCountLabel(pending) {
+		const count = pending.length;
+		if (count === 0) return "Daily Quests";
+		const daily = pending.filter((quest) => quest.kind === "daily").length;
+		const weekend = pending.filter((quest) => quest.kind === "weekend").length;
+		if (daily > 0 && weekend > 0) return count === 2 ? "Daily and Weekend Quests" : `${count} Daily and Weekend Quests`;
+		if (weekend > 0) return count === 1 ? "Weekend Quest" : `${count} Weekend Quests`;
+		return count === 1 ? "Daily Quest" : `${count} Daily Quests`;
+	}
+	function dailyQuestsActivityLabel(pending, options) {
+		const beforePart = options.beforeSwap ? " before swapping" : "";
+		const questsName = dailyQuestCountLabel(pending);
+		if (options.utcDeadline) return `Complete ${questsName} (${utcResetDeadlineLabel()})`;
+		return `Complete ${questsName}${beforePart}`;
+	}
+	function activityLabel(key, bonus, options) {
+		const beforePart = options.beforeSwap ? " before swapping" : "";
 		switch (key) {
-			case "steamQuests": return `Complete Steam Quests (equip bonus before starting)${beforePart}${bonusPart}`;
+			case "steamQuests": return steamQuestsActivityLabel(bonus, {
+				beforeSwap: options.beforeSwap,
+				pendingCount: options.steamQuestCount ?? 0
+			});
 			case "watchTwitch": return twitchActivityLabel(options);
-			case "dailyCalendar": return options.utcDeadline ? `Claim Daily Login Calendar before 00:00 UTC (${utcResetDeadlineLabel()})${bonusPart}` : `Claim Daily Login Calendar${beforePart}${bonusPart}`;
-			case "dailyQuests": {
-				const questsName = isUtcWeekday(new Date()) ? "Daily quest(s)" : "Weekend quest(s)";
-				return options.utcDeadline ? `Complete ${questsName} (${utcResetDeadlineLabel()})` : `Complete ${questsName}${beforePart}`;
-			}
+			case "dailyQuests": return dailyQuestsActivityLabel(options.dailyQuestPending ?? [], {
+				beforeSwap: options.beforeSwap,
+				utcDeadline: options.utcDeadline
+			});
 			case "discordPoll": return discordPollActivityLabel(bonus, options);
 			case "timeOnSite": return `Earn Time on Site ARP${(options.phase === "after" || options.phase === "afterNow") && bonus > 0 ? " (equip ToS bonus before 5 ARP)" : ""}${beforePart}`;
 			default: return key;
@@ -4367,9 +4948,6 @@
 		switch (key) {
 			case "watchTwitch":
 				base = BASE_ACTIVITY.watchTwitchBasePerDay;
-				break;
-			case "dailyCalendar":
-				base = BASE_ACTIVITY.dailyCalendarBasePerDay;
 				break;
 			case "dailyQuests":
 				base = BASE_ACTIVITY.dailyQuestBase;
@@ -4433,16 +5011,38 @@
 			chain: phaseChain(phase)
 		});
 	}
+	function steamQuestsTodoExtras(siteState, bonus) {
+		const pending = remainingSteamQuestRows(siteState);
+		const reasons = [];
+		if (bonus > 0) reasons.push({ text: "Equip bonus before starting" });
+		const pendingNames = pending.map((quest) => quest.name).filter((name) => name.length > 0);
+		if (pendingNames.length > 0) reasons.push({ text: pendingNames.join(", ") });
+		if (pending.some((quest) => quest.libraryPending === true)) reasons.push({ text: STEAM_LIBRARY_PENDING_HINT });
+		if (reasons.length === 0) return { count: pending.length };
+		return {
+			count: pending.length,
+			reasons
+		};
+	}
+	function dailyQuestsTodoExtras(siteState) {
+		const pending = remainingDailyQuestRows(siteState);
+		if (pending.map((quest) => quest.name).filter((name) => name.length > 0).length === 0) return { pending };
+		return { pending };
+	}
 	function buildActivityTodo(options) {
 		const { key, phase, needsSwap, currentBonus, bestBonus, afterNowBonus, isUtcDaily, waitMs, watchRemainingMs, allArpPct, siteState } = options;
 		const bonusForText = bonusForActivityPhase(phase, currentBonus, bestBonus, afterNowBonus);
+		const steamQuests = key === "steamQuests" ? steamQuestsTodoExtras(siteState, bonusForText) : void 0;
+		const dailyQuests = key === "dailyQuests" ? dailyQuestsTodoExtras(siteState) : void 0;
 		const todo = {
 			text: activityLabel(key, bonusForText, {
 				beforeSwap: phase === "before" && needsSwap && currentBonus > 0,
 				utcDeadline: isUtcDaily,
 				phase,
 				waitMs,
-				watchRemainingMs
+				watchRemainingMs,
+				...steamQuests && { steamQuestCount: steamQuests.count },
+				...dailyQuests && { dailyQuestPending: dailyQuests.pending }
 			}),
 			urgency: activityTodoUrgency({
 				key,
@@ -4462,14 +5062,8 @@
 				allArpPct
 			});
 			if (twitchReason) todo.reasons = [twitchReason];
-		} else if (key === "steamQuests") {
-			const pending = remainingSteamQuestRows(siteState);
-			const pendingNames = pending.map((quest) => quest.name).filter((name) => name.length > 0);
-			const reasons = [];
-			if (pendingNames.length > 0) reasons.push({ text: pendingNames.join(", ") });
-			if (pending.some((quest) => quest.libraryPending === true)) reasons.push({ text: STEAM_LIBRARY_PENDING_HINT });
-			if (reasons.length > 0) todo.reasons = reasons;
-		}
+		} else if (steamQuests?.reasons) todo.reasons = steamQuests.reasons;
+		else if (dailyQuests?.reasons) todo.reasons = dailyQuests.reasons;
 		if (isUtcDaily && msUntilUtcMidnight() <= 72e5) todo.tone = "warn";
 		return todo;
 	}
@@ -4490,9 +5084,8 @@
 	}
 	function utcResetTodoRank(todo) {
 		if (/(Daily|Weekend) quest/i.test(todo.text)) return 0;
-		if (/Daily Login Calendar/i.test(todo.text)) return 1;
-		if (/Watch Twitch/i.test(todo.text)) return 2;
-		return 3;
+		if (/Watch Twitch/i.test(todo.text)) return 1;
+		return 2;
 	}
 	function sortTodosByUtcDeadline(items) {
 		return items.toSorted((left, right) => {
@@ -4528,11 +5121,7 @@
 			const currentBonus = comboBonusForActivity(current, rule.key);
 			const bestBonus = comboBonusForActivity(best, rule.key);
 			const afterNowBonus = comboBonusForActivity(afterNow ?? current, rule.key);
-			const isUtcDaily = [
-				"watchTwitch",
-				"dailyCalendar",
-				"dailyQuests"
-			].includes(rule.key);
+			const isUtcDaily = ["watchTwitch", "dailyQuests"].includes(rule.key);
 			const isExpiresBeforeUnlock = isUtcDaily && !canEquipBeforeReset && waitMs > 0;
 			const phase = resolveActivityPhase({
 				key: rule.key,
@@ -4598,7 +5187,7 @@
 		pushFlatEquipReason(reasons, stats.steamQuestsFlat, waitMs, isSteamDueNow, isResetInWearWindow(msUntilNextSteamQuestWeek(), waitMs), "Steam Quests", "Steam Quests after Monday reset");
 		pushFlatEquipReason(reasons, stats.watchTwitchFlat, waitMs, isActivityAvailable(caps, "watchTwitch"), isNextUtcResetInLock, "Watch Twitch cap", "Watch Twitch cap after 00:00 UTC");
 		if (stats.discordPollFlat > 0 && isActivityPending(caps, "discordPoll")) reasons.push({ text: flatBonusReason(stats.discordPollFlat, "Discord Poll", waitMs) });
-		pushFlatEquipReason(reasons, stats.dailyCalendarFlat, waitMs, isActivityAvailable(caps, "dailyCalendar"), isNextUtcResetInLock, "Daily Calendar", "Daily Calendar after 00:00 UTC");
+		if (stats.dailyCalendarFlat > 0) reasons.push({ text: flatBonusReason(stats.dailyCalendarFlat, "Tomorrow's Daily Calendar ", waitMs) });
 		if (waitMs > 0 && isArtifactsShowroomPage()) reasons.push({ text: "Still stuck after Refresh? Upgrade a maxed artifact manually (Warrior Script) — 0 fragments" });
 		return reasons;
 	}
@@ -5030,12 +5619,16 @@
 		}
 		return parts.join("");
 	}
-	function renderTodoUpgradeButton(todo) {
-		if (todo.upgradeInstanceId === void 0) return "";
-		return `<button type="button" class="ao-upgrade-btn" data-id="${todo.upgradeInstanceId}">Upgrade</button>`;
+	function renderTodoActionButton(todo) {
+		if (todo.upgradeInstanceId !== void 0) return `<button type="button" class="ao-upgrade-btn" data-id="${todo.upgradeInstanceId}">Upgrade</button>`;
+		if (todo.claimBattlePass === true) return `<button type="button" class="ao-claim-btn"${todo.claimBattlePassSkipArp === true ? " data-skip-arp=\"1\"" : ""}>Claim all</button>`;
+		return "";
 	}
 	function isCautionTodo(todo) {
 		return todo.kind === "caution";
+	}
+	function isKeepingCurrentLoadout(todos) {
+		return todos.find((todo) => !isCautionTodo(todo))?.urgency?.chain !== "equip";
 	}
 	function renderActionPlanContents(todos) {
 		const cautions = todos.filter((todo) => isCautionTodo(todo));
@@ -5044,7 +5637,7 @@
 			return `<div class="ao-caution${actionTodoToneClass(todo.tone)}" role="note">${renderActionTodoBody(todo)}</div>`;
 		}).join("");
 		const items = steps.map((todo, index) => {
-			return `<li class="ao-todo-item${actionTodoToneClass(todo.tone)}"><span class="ao-todo-index">${index + 1}.</span><div class="ao-todo-text">${renderActionTodoBody(todo)}</div>${renderTodoUpgradeButton(todo)}</li>`;
+			return `<li class="ao-todo-item${actionTodoToneClass(todo.tone)}"><span class="ao-todo-index">${index + 1}.</span><div class="ao-todo-text">${renderActionTodoBody(todo)}</div>${renderTodoActionButton(todo)}</li>`;
 		}).join("");
 		return `
     <div class="ao-heading">What to do</div>
@@ -5055,111 +5648,512 @@
 	function renderActionPlan(todos) {
 		return `<div id="ao-action-plan">${renderActionPlanContents(todos)}</div>`;
 	}
-	async function postJson(path, body) {
+	var STALE_MS = 216e5;
+	var SLOT_LOCK_STALE_MS = 3e5;
+	var ARP_LOG_STALE_MS = 216e5;
+	var FORCE_REFRESH_COOLDOWN_MS = 5e3;
+	var EQUIP_CONFIRM_RETRY_MS = 750;
+	var BATTLE_PASS_STALE_MS = 36e5;
+	var COMMUNITY_EVENT_PENDING_STALE_MS = STALE_MS;
+	var CONTROL_CENTER_PATH = "/control-center";
+	var BATTLE_PASS_PATH = "/control-center/battle-pass/1";
+	var GAME_VAULT_PATH = "/marketplace/game-vault";
+	var ARP_LOG_PATH = "/account/arp-log";
+	var QUEST_SETUP_PATH = "/steam/questsetup";
+	var ARP_LOG_MAX_ROWS = 300;
+	var ARP_LOG_DEFAULT_DAYS = 7;
+	var ARP_LOG_LIVE_EVENT_DAYS = 14;
+	function resolveArpLogPath(event) {
+		const days = event?.isLive ? ARP_LOG_LIVE_EVENT_DAYS : ARP_LOG_DEFAULT_DAYS;
+		const now = new Date();
+		const from = new Date(now.getTime() - days * 24 * 60 * 60 * 1e3);
+		const toExclusive = new Date(now.getTime() + 864e5);
+		return `${ARP_LOG_PATH}?from=${utcDateString(from)}&to=${utcDateString(toExclusive)}&max=${ARP_LOG_MAX_ROWS}`;
+	}
+	function pathnameFromUrl(url, fallback) {
 		try {
-			const response = await fetch(path, {
-				method: "POST",
-				headers: {
-					"Content-Type": "application/x-www-form-urlencoded; charset=UTF-8",
-					Accept: "application/json, text/javascript, */*; q=0.01",
-					"X-Requested-With": "XMLHttpRequest"
-				},
-				body: JSON.stringify(body)
-			});
-			const text = await response.text();
-			let parsed;
-			try {
-				parsed = JSON.parse(text);
-			} catch {
-				parsed = void 0;
-			}
-			if (!response.ok) {
-				const result = {
-					ok: false,
-					status: response.status,
-					error: parsed?.message ?? `Request failed (${response.status})`
-				};
-				if (parsed?.message) result.message = parsed.message;
-				return result;
-			}
-			if (parsed?.success === false) {
-				const result = {
-					ok: false,
-					status: response.status,
-					error: parsed.message ?? "Request rejected (slot may be on 24h cooldown or already set)."
-				};
-				if (parsed.message) result.message = parsed.message;
-				return result;
-			}
-			const result = {
-				ok: true,
-				status: response.status
-			};
-			if (parsed?.message) result.message = parsed.message;
-			return result;
-		} catch (error) {
-			return {
-				ok: false,
-				status: 0,
-				error: error instanceof Error ? error.message : "Network error"
-			};
+			return new URL(url, location.origin).pathname;
+		} catch {
+			return fallback;
 		}
 	}
-	async function equipArtifact(artifactId, position) {
-		const result = await postJson("/change-user-artifacts", {
-			artifactId,
-			position
-		});
-		if (result.ok) await recordSlotChange(position, artifactId);
-		return result;
-	}
-	async function upgradeArtifact(artifactId) {
-		return postJson("/upgrade-user-artifact", { artifactId });
-	}
-	function pickStuckLockNudgeTarget(artifacts) {
-		const maxed = artifacts.filter((artifact) => artifact.maxLevel || artifact.upgradeCost === 0);
-		if (maxed.length === 0) return;
-		const target = maxed.find((artifact) => /warrior script/i.test(artifact.displayName)) ?? maxed[0];
-		if (!target) return;
-		return {
-			instanceId: target.instanceId,
-			displayName: target.displayName
-		};
-	}
-	async function nudgeStuckSlotLocks(artifacts) {
-		const target = pickStuckLockNudgeTarget(artifacts);
-		if (!target) {
-			console.info("[Artifact Optimizer] Stuck-lock nudge skipped — no maxed 0-frag artifact");
+	async function fetchDocument(path) {
+		try {
+			const response = await fetch(path, { headers: { Accept: "text/html" } });
+			if (!response.ok) {
+				console.warn("[Artifact Optimizer] Failed to fetch", path, response.status);
+				return;
+			}
+			const html = await response.text();
+			return {
+				document: new DOMParser().parseFromString(html, "text/html"),
+				url: response.url || path
+			};
+		} catch (error) {
+			console.warn("[Artifact Optimizer] Fetch error for", path, error);
 			return;
 		}
-		const result = await upgradeArtifact(target.instanceId);
-		console.info("[Artifact Optimizer] Stuck-lock nudge", {
-			name: target.displayName,
-			id: target.instanceId,
-			ok: result.ok,
-			message: result.message ?? result.error
-		});
-		return result;
 	}
-	async function applyLoadout(targets, currentlyEquipped) {
-		const results = [];
-		for (const target of targets) {
-			if (currentlyEquipped.some((c) => c.artifactId === target.artifactId && c.position === target.position)) continue;
-			const equipResult = await equipArtifact(target.artifactId, target.position);
-			results.push(equipResult);
-			if (!equipResult.ok) return {
-				results,
-				allOk: false
+	function delay(ms) {
+		return new Promise((resolve) => {
+			setTimeout(resolve, ms);
+		});
+	}
+	async function waitForCommunityEventHours(document_) {
+		const started = Date.now();
+		while (Date.now() - started < 4e3) {
+			if (document_.querySelector("#personal-hours")?.textContent?.trim()) break;
+			await delay(250);
+		}
+	}
+	async function settleIframePage(iframe, path) {
+		const document_ = iframe.contentDocument ?? void 0;
+		if (!document_) return;
+		if (path.includes("/steam/community-event")) await waitForCommunityEventHours(document_);
+		else if (path.includes("/battle-pass")) await waitForBattlePassUi(document_);
+		else await delay(400);
+		return {
+			document: document_,
+			url: iframe.contentWindow?.location.href ?? path
+		};
+	}
+	async function openPageDocument(path) {
+		return new Promise((resolve) => {
+			const iframe = document.createElement("iframe");
+			iframe.setAttribute("aria-hidden", "true");
+			iframe.style.cssText = "position:fixed;width:1px;height:1px;left:-9999px;top:0;opacity:0;pointer-events:none;border:0";
+			const cleanup = () => {
+				iframe.remove();
+			};
+			const timer = setTimeout(() => {
+				cleanup();
+				resolve(void 0);
+			}, 15e3);
+			iframe.addEventListener("load", () => {
+				clearTimeout(timer);
+				settleIframePage(iframe, path).then((page) => {
+					cleanup();
+					resolve(page);
+				});
+			});
+			iframe.addEventListener("error", () => {
+				clearTimeout(timer);
+				cleanup();
+				resolve(void 0);
+			});
+			document.body.append(iframe);
+			iframe.src = path;
+		});
+	}
+	async function waitForBattlePassUi(document_) {
+		const started = Date.now();
+		while (Date.now() - started < 5e3) {
+			if (isBattlePassDocumentReady(document_)) return;
+			await delay(250);
+		}
+	}
+	function hasPersonalHours(document_) {
+		const domHours = document_.querySelector("#personal-hours")?.textContent?.trim();
+		if (domHours && /\d/.test(domHours)) return true;
+		if (/Your Total Hours:\s*[\d.]+/i.test(document_.body?.textContent ?? "")) return true;
+		const scripts = [...document_.querySelectorAll("script:not([src])")].map((script) => script.textContent ?? "").join("\n");
+		return /personalPlaytime\s*=\s*\d+/i.test(scripts);
+	}
+	function requiresIframeFallback(path, fetched) {
+		if (path.includes("/artifacts") || path.includes("/user-artifacts-room")) return !fetched.body?.querySelector(":scope a.artifact-list-item.change-artifact-modal, :scope .slot img");
+		if (path.includes("/arp-log")) return !isArpLogDocumentReady(fetched);
+		if (path.includes("/battle-pass")) return !isBattlePassDocumentReady(fetched);
+		if (path.includes("/steam/community-event")) return !fetched.querySelector(".carousel-cell") || !hasPersonalHours(fetched);
+		if (/\/steam\/quests\/.+/.test(path)) return !hasSteamPlayEligibilitySignal(fetched);
+		return false;
+	}
+	function hasSteamPlayEligibilitySignal(document_) {
+		if (document_.querySelector(".btn-check-owned-games, .btn-start-quest, .alert-steam, a[href^='steam://']")) return true;
+		if ([...document_.querySelectorAll("a, button")].map((element) => (element.textContent ?? "").replaceAll(/\s+/g, " ").trim()).some((label) => /^(Check Game|Visit Steam|Sync Games|Launch Game)$/i.test(label))) return true;
+		return /completed this quest/i.test(document_.body?.textContent ?? "");
+	}
+	async function loadRemotePage(path) {
+		const fetched = await fetchDocument(path);
+		if (fetched?.document.querySelector("a.artifact-list-item, body")) {
+			if (requiresIframeFallback(path, fetched.document)) return openPageDocument(path);
+			return fetched;
+		}
+		return openPageDocument(path);
+	}
+	async function loadRemoteDocument(path) {
+		return (await loadRemotePage(path))?.document;
+	}
+	function isSnapshotFresh(snapshot) {
+		if (!snapshot || snapshot.artifacts.length === 0) return false;
+		if (!snapshot.slotLocks) return false;
+		const scrapedAt = Date.parse(snapshot.scrapedAt);
+		if (Number.isNaN(scrapedAt)) return false;
+		return Date.now() - scrapedAt < STALE_MS;
+	}
+	function areSlotLocksFresh(snapshot) {
+		if (!snapshot?.slotLocks) return false;
+		return isScrapedWithin(snapshot.scrapedAt, SLOT_LOCK_STALE_MS);
+	}
+	function isCapsFresh(state, now = new Date()) {
+		if (!state) return false;
+		if (!isScrapedWithin(state.updatedAt, STALE_MS)) return false;
+		if (!isScrapedSinceUtcMidnight(state.updatedAt, now)) return false;
+		if (Object.values(state.caps).every((status) => status === "unknown")) return false;
+		if (state.caps.steamQuests === "available" && (state.steamQuests?.quests.length ?? 0) === 0) return false;
+		return true;
+	}
+	function shouldRescrapeBattlePass(state) {
+		const bp = state?.battlePass;
+		if (!bp || typeof bp.readyToClaimArp !== "number") return true;
+		const scrapedAt = Date.parse(bp.scrapedAt ?? "");
+		if (Number.isNaN(scrapedAt)) return true;
+		return Date.now() - scrapedAt > BATTLE_PASS_STALE_MS;
+	}
+	async function refreshBattlePassOnly(next) {
+		const battleDocument = await loadRemoteDocument(BATTLE_PASS_PATH);
+		if (!battleDocument) return;
+		const battlePass = scrapeBattlePassFromDocument(battleDocument);
+		if (battlePass) next.battlePass = mergeBattlePassScrape(battlePass, next.battlePass);
+	}
+	function isScrapedWithin(scrapedAt, maxAgeMs) {
+		if (!scrapedAt) return false;
+		const at = Date.parse(scrapedAt);
+		if (Number.isNaN(at)) return false;
+		return Date.now() - at < maxAgeMs;
+	}
+	function utcDayStartMs(now = new Date()) {
+		return Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate());
+	}
+	function isScrapedSinceUtcMidnight(scrapedAt, now = new Date()) {
+		if (!scrapedAt) return false;
+		const at = Date.parse(scrapedAt);
+		if (Number.isNaN(at)) return false;
+		return at >= utcDayStartMs(now);
+	}
+	function isArpLogFresh(state, now = new Date()) {
+		const arpLog = state?.arpLog;
+		if (!arpLog || arpLog.recent.length === 0) return false;
+		const scrapedAt = arpLog.scrapedAt;
+		if (!isScrapedWithin(scrapedAt, ARP_LOG_STALE_MS)) return false;
+		if (!isScrapedSinceUtcMidnight(scrapedAt, now)) return false;
+		return Date.parse(scrapedAt) >= lastDiscordPollPostAt(now).getTime();
+	}
+	function isCommunityEventFresh(state, now = new Date()) {
+		const event = state?.communityEvent;
+		if (!event?.isLive) return isCapsFresh(state, now);
+		const ttl = event.pendingArp > 0 ? COMMUNITY_EVENT_PENDING_STALE_MS : STALE_MS;
+		if (!isScrapedWithin(event.scrapedAt, ttl)) return false;
+		return isScrapedSinceUtcMidnight(event.scrapedAt, now);
+	}
+	async function persistShowroomSnapshot(loaded, showroomPath, existing) {
+		const snapshot = scrapeShowroomFromDocument(loaded.document, pathnameFromUrl(loaded.url, showroomPath));
+		if (snapshot.artifacts.length > 0) {
+			await saveSnapshot(snapshot);
+			await syncSlotLocksFromScrape(snapshot.slotLocks ?? {});
+			console.info("[Artifact Optimizer] Showroom locks", snapshot.slotLocks, "equipped", snapshot.artifacts.filter((artifact) => artifact.equippedPosition !== void 0).map((artifact) => ({
+				slot: artifact.equippedPosition,
+				name: artifact.displayName,
+				locked: artifact.slotLocked === true
+			})));
+			return snapshot;
+		}
+		if (existing?.slotLocks) await syncSlotLocksFromScrape(existing.slotLocks);
+		return existing;
+	}
+	async function scrapeShowroomAfterLockNudge(showroomPath, existing) {
+		let inventory = existing;
+		if (!inventory?.artifacts.length) {
+			const prelim = await loadRemotePage(showroomPath);
+			if (prelim) inventory = scrapeShowroomFromDocument(prelim.document, pathnameFromUrl(prelim.url, showroomPath));
+		}
+		if (inventory?.artifacts.length) await nudgeStuckSlotLocks(inventory.artifacts);
+		const loaded = await loadRemotePage(showroomPath);
+		if (!loaded) {
+			if (existing?.slotLocks) await syncSlotLocksFromScrape(existing.slotLocks);
+			return existing;
+		}
+		return persistShowroomSnapshot(loaded, showroomPath, existing);
+	}
+	function hasSnapshotLoadout(snapshot, applied) {
+		return applied.every((target) => snapshot.artifacts.some((artifact) => artifact.instanceId === target.artifactId && artifact.equippedPosition === target.position));
+	}
+	async function fetchShowroomSnapshot() {
+		const showroomPath = resolveShowroomUrl((await loadSnapshot())?.username);
+		const loaded = await loadRemotePage(showroomPath);
+		if (!loaded) return;
+		const snapshot = scrapeShowroomFromDocument(loaded.document, pathnameFromUrl(loaded.url, showroomPath));
+		if (snapshot.artifacts.length === 0) return;
+		return snapshot;
+	}
+	async function persistConfirmedShowroomSnapshot(snapshot) {
+		await saveSnapshot(snapshot);
+		await syncSlotLocksFromScrape(snapshot.slotLocks ?? {});
+	}
+	async function invalidateSnapshotFreshness() {
+		const snapshot = await loadSnapshot();
+		if (!snapshot) return;
+		await saveSnapshot({
+			...snapshot,
+			scrapedAt: new Date(0).toISOString()
+		});
+	}
+	function equippedSignature(snapshot) {
+		const equipped = snapshot.artifacts.filter((artifact) => artifact.equippedPosition !== void 0).map((artifact) => `${artifact.instanceId}:${artifact.equippedPosition}:${artifact.slotLocked === true ? "1" : "0"}`).toSorted((left, right) => left.localeCompare(right));
+		const locks = [
+			1,
+			2,
+			3
+		].map((position) => snapshot.slotLocks?.[position] === true ? "1" : "0").join("");
+		return `${equipped.join(",")}|${locks}`;
+	}
+	async function resyncShowroomSnapshot() {
+		const previous = await loadSnapshot();
+		const previousSig = previous ? equippedSignature(previous) : "";
+		let snapshot = await fetchShowroomSnapshot();
+		if (snapshot && equippedSignature(snapshot) === previousSig) {
+			await delay(EQUIP_CONFIRM_RETRY_MS);
+			snapshot = await fetchShowroomSnapshot() ?? snapshot;
+		}
+		if (!snapshot) {
+			await invalidateSnapshotFreshness();
+			return {
+				snapshot: void 0,
+				didChange: false
 			};
 		}
+		const didChange = equippedSignature(snapshot) !== previousSig;
+		if (didChange) await persistConfirmedShowroomSnapshot(snapshot);
+		else await invalidateSnapshotFreshness();
 		return {
-			results,
-			allOk: results.every((r) => r.ok)
+			snapshot,
+			didChange
 		};
+	}
+	async function confirmShowroomLoadout(applied) {
+		if (applied.length === 0) return;
+		const didConfirm = async () => {
+			const snapshot = await fetchShowroomSnapshot();
+			if (!snapshot) return false;
+			if (!hasSnapshotLoadout(snapshot, applied)) return false;
+			await persistConfirmedShowroomSnapshot(snapshot);
+			return true;
+		};
+		if (await didConfirm()) return;
+		await delay(EQUIP_CONFIRM_RETRY_MS);
+		if (await didConfirm()) return;
+		await invalidateSnapshotFreshness();
+	}
+	async function ensureArtifactSnapshot(options = {}) {
+		const existing = await loadSnapshot();
+		const isWantsForce = options.force === true;
+		if (!isWantsForce && isSnapshotFresh(existing) && areSlotLocksFresh(existing)) return existing;
+		const showroomPath = resolveShowroomUrl(existing?.username);
+		if (isWantsForce) return scrapeShowroomAfterLockNudge(showroomPath, existing);
+		const loaded = await loadRemotePage(showroomPath);
+		if (!loaded) {
+			if (existing?.slotLocks) await syncSlotLocksFromScrape(existing.slotLocks);
+			return existing;
+		}
+		const snapshot = await persistShowroomSnapshot(loaded, showroomPath, existing);
+		if (snapshot) return snapshot;
+		if (existing?.slotLocks) await syncSlotLocksFromScrape(existing.slotLocks);
+		return existing;
+	}
+	function markCommunityEventUnavailable(next) {
+		next.caps.steamCommunityEvent = "capped";
+		if (next.communityEvent) next.communityEvent = markCommunityEventEnded(next.communityEvent);
+	}
+	function cachedLiveCommunityEvent(next, banner) {
+		const previous = next.communityEvent;
+		return {
+			scrapedAt: new Date().toISOString(),
+			url: banner.url,
+			isLive: true,
+			personalHours: previous?.personalHours ?? 0,
+			milestones: previous?.milestones ?? [],
+			pendingArp: previous?.pendingArp ?? 0,
+			awardedArp: previous?.awardedArp ?? 0,
+			...previous?.communityHours !== void 0 && { communityHours: previous.communityHours },
+			...previous?.communityHoursCap !== void 0 && { communityHoursCap: previous.communityHoursCap },
+			...previous?.communityHoursSamples && { communityHoursSamples: previous.communityHoursSamples },
+			...previous?.communityHoursSource && { communityHoursSource: previous.communityHoursSource },
+			...banner.title && { title: banner.title },
+			...previous?.playEligibility && { playEligibility: previous.playEligibility }
+		};
+	}
+	async function refreshLiveCommunityEvent(next, controlDocument) {
+		const banner = controlDocument ? scrapeLiveCommunityEventBanner(controlDocument) : void 0;
+		if (!banner) {
+			if (controlDocument === document && !isControlCenterDocumentReady(document)) return;
+			markCommunityEventUnavailable(next);
+			return;
+		}
+		const eventDocument = await loadRemoteDocument(banner.url);
+		if (!eventDocument) {
+			next.caps.steamCommunityEvent = "available";
+			next.communityEvent = cachedLiveCommunityEvent(next, banner);
+			return;
+		}
+		const scraped = scrapeCommunityEventFromDocument(eventDocument, banner.url);
+		if (banner.title && !scraped.title) {
+			const cleaned = banner.title.replaceAll(/\bLIVE\b/gi, "").replace(/Event:\s*[\d./\s-]+/i, "").replaceAll(/\s+/g, " ").trim();
+			if (cleaned) scraped.title = cleaned;
+		}
+		next.communityEvent = mergeCommunityEventScrape(scraped, next.communityEvent, { source: "remote" });
+		next.caps.steamCommunityEvent = next.communityEvent.isLive ? "available" : "capped";
+	}
+	function applyWatchTwitchProgress(next, document_) {
+		const twitch = scrapeWatchTwitchProgressFromDocument(document_, next.watchTwitch);
+		if (twitch) next.watchTwitch = twitch;
+	}
+	function shouldFetchSteamQuestEligibility(quest) {
+		return quest.status !== "complete" && Boolean(quest.href) && !isChooseYourOwnGameQuest(quest) && quest.eligibility !== "eligible" && quest.isFree !== false;
+	}
+	async function enrichSteamQuestRow(quest) {
+		if (!shouldFetchSteamQuestEligibility(quest) || !quest.href) return quest;
+		const questDocument = await loadRemoteDocument(quest.href);
+		if (!questDocument) return quest;
+		const eligibility = scrapeSteamPlayEligibilityFromDocument(questDocument, { href: quest.href });
+		const steamAppId = scrapeSteamAppIdFromDocument(questDocument) ?? quest.steamAppId;
+		const nextQuest = {
+			...quest,
+			eligibility
+		};
+		if (steamAppId !== void 0) nextQuest.steamAppId = steamAppId;
+		return nextQuest;
+	}
+	async function enrichSteamQuestEligibility(next) {
+		const quests = next.steamQuests?.quests;
+		if (!quests || quests.length === 0) return;
+		const updated = await Promise.all(quests.map((quest) => enrichSteamQuestRow(quest)));
+		next.steamQuests = {
+			scrapedAt: new Date().toISOString(),
+			quests: updated
+		};
+		const cap = steamQuestsCapFromRows(updated);
+		if (cap) next.caps.steamQuests = cap;
+	}
+	function isLiveControlCenterPage() {
+		let path = location.pathname;
+		while (path.endsWith("/") && path.length > 1) path = path.slice(0, -1);
+		return path.endsWith("/control-center");
+	}
+	async function loadControlCenterDocument() {
+		if (!isLiveControlCenterPage()) return loadRemoteDocument(CONTROL_CENTER_PATH);
+		if (isControlCenterActivityReady(document)) return document;
+		await waitForControlCenterDocument();
+		if (isControlCenterDocumentReady(document)) return document;
+		return loadRemoteDocument(CONTROL_CENTER_PATH);
+	}
+	function applyControlCenterDocument(next, controlDocument) {
+		const userArpTier = scrapeUserArpTierFromDocument(controlDocument);
+		if (userArpTier !== void 0) next.userArpTier = userArpTier;
+		applyRedeemableArpFromDocument(next, controlDocument);
+		Object.assign(next.caps, scrapeControlCenterCapsFromDocument(controlDocument));
+		applySteamQuestsFromDocument(next, controlDocument);
+		applyDailyQuestsFromDocument(next, controlDocument);
+		applyWatchTwitchProgress(next, controlDocument);
+		applyBattlePassEndFromDocument(next, controlDocument);
+	}
+	async function refreshActivityPages(next) {
+		const [controlDocument, questDocument, battleDocument, vaultDocument] = await Promise.all([
+			loadControlCenterDocument(),
+			loadRemoteDocument(QUEST_SETUP_PATH),
+			loadRemoteDocument(BATTLE_PASS_PATH),
+			loadRemoteDocument(GAME_VAULT_PATH)
+		]);
+		if (controlDocument) applyControlCenterDocument(next, controlDocument);
+		if (questDocument) applyWatchTwitchProgress(next, questDocument);
+		if (battleDocument) {
+			const battlePass = scrapeBattlePassFromDocument(battleDocument);
+			if (battlePass) next.battlePass = mergeBattlePassScrape(battlePass, next.battlePass);
+		}
+		if (vaultDocument) applyGameVaultDocument(next, vaultDocument);
+		await Promise.all([controlDocument ? refreshLiveCommunityEvent(next, controlDocument) : Promise.resolve(), enrichSteamQuestEligibility(next)]);
+	}
+	function applyArpLogReconciliation(next) {
+		next.caps = applyArpLogActivityCaps(next.caps, next.arpLog);
+		if (!next.communityEvent) return;
+		next.communityEvent = reconcileCommunityEventWithArpLog(next.communityEvent, next.arpLog);
+	}
+	function reconcileCachedSiteState(existing) {
+		const next = {
+			...existing,
+			caps: { ...existing.caps }
+		};
+		applyArpLogReconciliation(next);
+		return next;
+	}
+	async function refreshStaleLiveEvent(next) {
+		const event = next.communityEvent;
+		if (!event?.isLive) return;
+		const eventDocument = await loadRemoteDocument(event.url);
+		if (!eventDocument) return;
+		next.communityEvent = mergeCommunityEventScrape(scrapeCommunityEventFromDocument(eventDocument, event.url), event, { source: "remote" });
+		next.caps.steamCommunityEvent = next.communityEvent.isLive ? "available" : "capped";
+	}
+	async function refreshArpLog(next, existing, options) {
+		const arpDocument = await loadRemoteDocument(resolveArpLogPath(next.communityEvent ?? existing.communityEvent));
+		if (arpDocument) next.arpLog = mergeArpLogScrape(scrapeArpLogFromDocument(arpDocument), next.arpLog ?? existing.arpLog);
+		if (options.refreshLiveEventAfter && next.communityEvent?.isLive) {
+			const eventDocument = await loadRemoteDocument(next.communityEvent.url);
+			if (eventDocument) next.communityEvent = mergeCommunityEventScrape(scrapeCommunityEventFromDocument(eventDocument, next.communityEvent.url), next.communityEvent, { source: "remote" });
+		}
+	}
+	function requiresRemoteSnapshotHydrate(snapshot) {
+		return !isSnapshotFresh(snapshot) || !areSlotLocksFresh(snapshot);
+	}
+	function requiresRemoteSiteHydrate(state, options = {}) {
+		if (!state || options.force) return true;
+		return !isCapsFresh(state) || shouldRescrapeBattlePass(state) || !isArpLogFresh(state) || shouldRefreshCommunityEventArpLog(state) || !isCommunityEventFresh(state) || requiresSteamQuestEligibilityFetch(state);
+	}
+	function shouldRefreshCommunityEventArpLog(state) {
+		const event = state.communityEvent;
+		if (!event?.isLive || event.pendingArp <= 0) return false;
+		const received = sumCommunityEventRewardsFromArpLog(state.arpLog);
+		if (received <= 0) return true;
+		return event.awardedArp > 0 && received < event.awardedArp;
+	}
+	async function ensureSiteState(options = {}) {
+		const existing = await loadSiteState() ?? emptySiteState();
+		const isForce = options.force === true;
+		const isForceCaps = isForce && !isScrapedWithin(existing.updatedAt, FORCE_REFRESH_COOLDOWN_MS);
+		const isForceArpLog = isForce;
+		const isForceEvent = isForce && !isScrapedWithin(existing.communityEvent?.scrapedAt, FORCE_REFRESH_COOLDOWN_MS);
+		const requiresCapsRefresh = isForceCaps || !isCapsFresh(existing);
+		const requiresBattlePassRefresh = isForce || requiresCapsRefresh || shouldRescrapeBattlePass(existing);
+		const requiresArpLogRefresh = isForceArpLog || !isArpLogFresh(existing) || shouldRefreshCommunityEventArpLog(existing);
+		const requiresEventRefresh = isForceEvent || !isCommunityEventFresh(existing);
+		const requiresSteamEligibility = isForceCaps || requiresSteamQuestEligibilityFetch(existing);
+		if (!requiresCapsRefresh && !requiresBattlePassRefresh && !requiresArpLogRefresh && !requiresEventRefresh && !requiresSteamEligibility) {
+			const next = reconcileCachedSiteState(existing);
+			await applyAsceCommunityHours(next);
+			await applySteamFreeToPlayResolution(next);
+			await saveSiteState(next);
+			return next;
+		}
+		const next = {
+			...existing,
+			updatedAt: new Date().toISOString(),
+			caps: { ...existing.caps }
+		};
+		if (requiresCapsRefresh) await refreshActivityPages(next);
+		else {
+			if (requiresBattlePassRefresh) await refreshBattlePassOnly(next);
+			if (requiresEventRefresh) await refreshStaleLiveEvent(next);
+			if (requiresSteamEligibility) await enrichSteamQuestEligibility(next);
+		}
+		if (requiresArpLogRefresh) await refreshArpLog(next, existing, { refreshLiveEventAfter: !requiresCapsRefresh && !requiresEventRefresh });
+		applyArpLogReconciliation(next);
+		await applySteamFreeToPlayResolution(next);
+		await applyAsceCommunityHours(next);
+		await saveSiteState(next);
+		return next;
 	}
 	var MODAL_ID = "alienware-artifact-optimizer";
 	var INLINE_ID = "alienware-artifact-optimizer-inline";
 	var CC_PANEL_ID = "alienware-artifact-optimizer-cc";
+	var BP_CLAIM_BAR_ID = "alienware-artifact-optimizer-bp-claim";
 	var STYLE_ID$1 = "alienware-artifact-optimizer-styles";
 	var BACKDROP_ID = "alienware-artifact-optimizer-backdrop";
 	var DIALOG_ID = "alienware-artifact-optimizer-dialog";
@@ -5428,6 +6422,13 @@
       margin-top: 12px;
       width: 100%;
     }
+    .ao-actions-sep {
+      width: 1px;
+      align-self: stretch;
+      min-height: 28px;
+      background: #555;
+      margin: 0 4px;
+    }
     .ao-todo-list {
       display: block;
       margin: 0 0 4px;
@@ -5456,7 +6457,8 @@
       flex: 0 0 auto;
       padding-top: 1px;
     }
-    .ao-todo-item > .ao-upgrade-btn {
+    .ao-todo-item > .ao-upgrade-btn,
+    .ao-todo-item > .ao-claim-btn {
       flex: 0 0 auto;
       padding: 4px 10px;
       font-size: 13px !important;
@@ -5750,423 +6752,74 @@
 			toast.remove();
 		}, TOAST_MS);
 	}
-	var STALE_MS = 216e5;
-	var SLOT_LOCK_STALE_MS = 3e5;
-	var ARP_LOG_STALE_MS = 216e5;
-	var FORCE_REFRESH_COOLDOWN_MS = 5e3;
-	var BATTLE_PASS_STALE_MS = 36e5;
-	var COMMUNITY_EVENT_PENDING_STALE_MS = STALE_MS;
-	var CONTROL_CENTER_PATH = "/control-center";
-	var BATTLE_PASS_PATH = "/control-center/battle-pass/1";
-	var GAME_VAULT_PATH = "/marketplace/game-vault";
-	var ARP_LOG_PATH = "/account/arp-log";
-	var QUEST_SETUP_PATH = "/steam/questsetup";
-	var ARP_LOG_MAX_ROWS = 300;
-	var ARP_LOG_DEFAULT_DAYS = 7;
-	var ARP_LOG_LIVE_EVENT_DAYS = 14;
-	function resolveArpLogPath(event) {
-		const days = event?.isLive ? ARP_LOG_LIVE_EVENT_DAYS : ARP_LOG_DEFAULT_DAYS;
-		const now = new Date();
-		const from = new Date(now.getTime() - days * 24 * 60 * 60 * 1e3);
-		const toExclusive = new Date(now.getTime() + 864e5);
-		return `${ARP_LOG_PATH}?from=${utcDateString(from)}&to=${utcDateString(toExclusive)}&max=${ARP_LOG_MAX_ROWS}`;
-	}
-	function pathnameFromUrl(url, fallback) {
-		try {
-			return new URL(url, location.origin).pathname;
-		} catch {
-			return fallback;
+	var BP_CLAIM_ALL_PENDING_KEY = "ao-bp-claim-all";
+	var BP_CLAIM_SKIP_ARP_VALUE = "skip-arp";
+	async function runBattlePassClaims(options) {
+		const shouldSkipArpBoosts = options.shouldSkipArpBoosts;
+		showAoToast(shouldSkipArpBoosts ? "Claiming Battle Pass rewards (leaving ARP Boosts)…" : "Claiming Battle Pass rewards…");
+		const { claimed, remaining, needsBattlePassPage } = await claimAllBattlePassRewards({ shouldSkipArpBoosts });
+		if (needsBattlePassPage === true) {
+			sessionStorage.setItem(BP_CLAIM_ALL_PENDING_KEY, shouldSkipArpBoosts ? BP_CLAIM_SKIP_ARP_VALUE : "1");
+			const state = await loadSiteState();
+			location.assign(state?.battlePass?.url ?? "/control-center/battle-pass/1");
+			return;
 		}
-	}
-	async function fetchDocument(path) {
 		try {
-			const response = await fetch(path, { headers: { Accept: "text/html" } });
-			if (!response.ok) {
-				console.warn("[Artifact Optimizer] Failed to fetch", path, response.status);
-				return;
-			}
-			const html = await response.text();
-			return {
-				document: new DOMParser().parseFromString(html, "text/html"),
-				url: response.url || path
-			};
+			await saveSiteState(await refreshSiteStateFromPage());
 		} catch (error) {
-			console.warn("[Artifact Optimizer] Fetch error for", path, error);
+			console.error("[AWA Toolkit] Failed to refresh Battle Pass after claim", error);
+		}
+		if (claimed === 0) {
+			await showAoAlert("Could not claim any Battle Pass rewards.");
 			return;
 		}
+		if (remaining > 0) {
+			await showAoAlert(`Claimed ${claimed}. ${remaining} still showing CLAIM — try Claim all again.`);
+			return;
+		}
+		if (shouldSkipArpBoosts) {
+			showAoToast(`Claimed ${claimed} Battle Pass reward(s). ARP Boosts were left for All-ARP%.`);
+			return;
+		}
+		showAoToast(`Claimed ${claimed} Battle Pass reward(s).`);
 	}
-	function delay(ms) {
-		return new Promise((resolve) => {
-			setTimeout(resolve, ms);
+	async function handleClaimAllBattlePass(options = {}) {
+		const isOnBattlePassPage = location.pathname.includes("/battle-pass");
+		const liveAll = isOnBattlePassPage ? listBattlePassClaimButtons().length : 0;
+		const liveNonArp = isOnBattlePassPage ? listBattlePassClaimButtons(document, { shouldSkipArpBoosts: true }).length : 0;
+		const battlePass = (await loadSiteState())?.battlePass;
+		const ready = liveAll > 0 ? liveAll : battlePass?.readyToClaim ?? 0;
+		const arp = battlePassClaimableArp(battlePass);
+		const nonArp = liveNonArp > 0 ? liveNonArp : battlePassReadyNonArp(battlePass);
+		const shouldSkipArpBoosts = options.shouldSkipArpBoosts === true && arp > 0;
+		if ((shouldSkipArpBoosts ? nonArp : ready) <= 0) {
+			await showAoAlert("No Battle Pass rewards are ready to claim.");
+			return;
+		}
+		const arpBoostLabel = arp === 1 ? "ARP Boost" : "ARP Boosts";
+		const arpBoostPart = arp > 0 ? ` (${arp} ${arpBoostLabel})` : "";
+		if (!await didConfirmAoDialog(shouldSkipArpBoosts ? `Claim ${nonArp} Battle Pass reward(s) now, and leave ${arp} ${arpBoostLabel} until All-ARP% is equipped?` : `Claim all ${ready} ready Battle Pass reward(s)${arpBoostPart}?`, {
+			title: "Claim Battle Pass",
+			confirmLabel: shouldSkipArpBoosts ? "Claim (skip ARP)" : "Claim all"
+		})) return;
+		await runBattlePassClaims({ shouldSkipArpBoosts });
+	}
+	async function consumePendingBattlePassClaimAll() {
+		const pending = sessionStorage.getItem(BP_CLAIM_ALL_PENDING_KEY);
+		if (pending !== "1" && pending !== BP_CLAIM_SKIP_ARP_VALUE) return;
+		sessionStorage.removeItem(BP_CLAIM_ALL_PENDING_KEY);
+		await waitForBattlePassDocument();
+		const shouldSkipArpBoosts = pending === BP_CLAIM_SKIP_ARP_VALUE;
+		if (listBattlePassClaimButtons(document, { shouldSkipArpBoosts }).length === 0) {
+			await showAoAlert("No Battle Pass CLAIM buttons were found on the page.");
+			return;
+		}
+		await runBattlePassClaims({ shouldSkipArpBoosts });
+	}
+	function bindClaimAllButtons(root) {
+		for (const button of root.querySelectorAll(".ao-claim-btn")) button.addEventListener("click", () => {
+			handleClaimAllBattlePass({ shouldSkipArpBoosts: button.dataset.skipArp === "1" });
 		});
-	}
-	async function waitForCommunityEventHours(document_) {
-		const started = Date.now();
-		while (Date.now() - started < 4e3) {
-			if (document_.querySelector("#personal-hours")?.textContent?.trim()) break;
-			await delay(250);
-		}
-	}
-	async function settleIframePage(iframe, path) {
-		const document_ = iframe.contentDocument ?? void 0;
-		if (!document_) return;
-		if (path.includes("/steam/community-event")) await waitForCommunityEventHours(document_);
-		else if (path.includes("/battle-pass")) await waitForBattlePassUi(document_);
-		else await delay(400);
-		return {
-			document: document_,
-			url: iframe.contentWindow?.location.href ?? path
-		};
-	}
-	async function openPageDocument(path) {
-		return new Promise((resolve) => {
-			const iframe = document.createElement("iframe");
-			iframe.setAttribute("aria-hidden", "true");
-			iframe.style.cssText = "position:fixed;width:1px;height:1px;left:-9999px;top:0;opacity:0;pointer-events:none;border:0";
-			const cleanup = () => {
-				iframe.remove();
-			};
-			const timer = setTimeout(() => {
-				cleanup();
-				resolve(void 0);
-			}, 15e3);
-			iframe.addEventListener("load", () => {
-				clearTimeout(timer);
-				settleIframePage(iframe, path).then((page) => {
-					cleanup();
-					resolve(page);
-				});
-			});
-			iframe.addEventListener("error", () => {
-				clearTimeout(timer);
-				cleanup();
-				resolve(void 0);
-			});
-			document.body.append(iframe);
-			iframe.src = path;
-		});
-	}
-	async function waitForBattlePassUi(document_) {
-		const started = Date.now();
-		while (Date.now() - started < 5e3) {
-			if (isBattlePassDocumentReady(document_)) return;
-			await delay(250);
-		}
-	}
-	function hasPersonalHours(document_) {
-		const domHours = document_.querySelector("#personal-hours")?.textContent?.trim();
-		if (domHours && /\d/.test(domHours)) return true;
-		if (/Your Total Hours:\s*[\d.]+/i.test(document_.body?.textContent ?? "")) return true;
-		const scripts = [...document_.querySelectorAll("script:not([src])")].map((script) => script.textContent ?? "").join("\n");
-		return /personalPlaytime\s*=\s*\d+/i.test(scripts);
-	}
-	function requiresIframeFallback(path, fetched) {
-		if (path.includes("/artifacts") || path.includes("/user-artifacts-room")) return !fetched.body?.querySelector(":scope a.artifact-list-item.change-artifact-modal, :scope .slot img");
-		if (path.includes("/arp-log")) return !isArpLogDocumentReady(fetched);
-		if (path.includes("/battle-pass")) return !isBattlePassDocumentReady(fetched);
-		if (path.includes("/steam/community-event")) return !fetched.querySelector(".carousel-cell") || !hasPersonalHours(fetched);
-		if (/\/steam\/quests\/.+/.test(path)) return !hasSteamPlayEligibilitySignal(fetched);
-		return false;
-	}
-	function hasSteamPlayEligibilitySignal(document_) {
-		if (document_.querySelector(".btn-check-owned-games, .btn-start-quest, .alert-steam, a[href^='steam://']")) return true;
-		if ([...document_.querySelectorAll("a, button")].map((element) => (element.textContent ?? "").replaceAll(/\s+/g, " ").trim()).some((label) => /^(Check Game|Visit Steam|Sync Games|Launch Game)$/i.test(label))) return true;
-		return /completed this quest/i.test(document_.body?.textContent ?? "");
-	}
-	async function loadRemotePage(path) {
-		const fetched = await fetchDocument(path);
-		if (fetched?.document.querySelector("a.artifact-list-item, body")) {
-			if (requiresIframeFallback(path, fetched.document)) return openPageDocument(path);
-			return fetched;
-		}
-		return openPageDocument(path);
-	}
-	async function loadRemoteDocument(path) {
-		return (await loadRemotePage(path))?.document;
-	}
-	function isSnapshotFresh(snapshot) {
-		if (!snapshot || snapshot.artifacts.length === 0) return false;
-		if (!snapshot.slotLocks) return false;
-		const scrapedAt = Date.parse(snapshot.scrapedAt);
-		if (Number.isNaN(scrapedAt)) return false;
-		return Date.now() - scrapedAt < STALE_MS;
-	}
-	function areSlotLocksFresh(snapshot) {
-		if (!snapshot?.slotLocks) return false;
-		return isScrapedWithin(snapshot.scrapedAt, SLOT_LOCK_STALE_MS);
-	}
-	function isCapsFresh(state) {
-		if (!state) return false;
-		const updatedAt = Date.parse(state.updatedAt);
-		if (Number.isNaN(updatedAt) || Date.now() - updatedAt > STALE_MS) return false;
-		if (Object.values(state.caps).every((status) => status === "unknown")) return false;
-		if (state.caps.steamQuests === "available" && (state.steamQuests?.quests.length ?? 0) === 0) return false;
-		return true;
-	}
-	function shouldRescrapeBattlePass(state) {
-		const bp = state?.battlePass;
-		if (!bp || typeof bp.readyToClaimArp !== "number") return true;
-		const scrapedAt = Date.parse(bp.scrapedAt ?? "");
-		if (Number.isNaN(scrapedAt)) return true;
-		return Date.now() - scrapedAt > BATTLE_PASS_STALE_MS;
-	}
-	async function refreshBattlePassOnly(next) {
-		const battleDocument = await loadRemoteDocument(BATTLE_PASS_PATH);
-		if (!battleDocument) return;
-		const battlePass = scrapeBattlePassFromDocument(battleDocument);
-		if (battlePass) next.battlePass = mergeBattlePassScrape(battlePass, next.battlePass);
-	}
-	function isScrapedWithin(scrapedAt, maxAgeMs) {
-		if (!scrapedAt) return false;
-		const at = Date.parse(scrapedAt);
-		if (Number.isNaN(at)) return false;
-		return Date.now() - at < maxAgeMs;
-	}
-	function isArpLogFresh(state) {
-		return isScrapedWithin(state?.arpLog?.scrapedAt, ARP_LOG_STALE_MS);
-	}
-	function isCommunityEventFresh(state) {
-		const event = state?.communityEvent;
-		if (!event?.isLive) return isCapsFresh(state);
-		const at = Date.parse(event.scrapedAt);
-		if (Number.isNaN(at)) return false;
-		const ttl = event.pendingArp > 0 ? COMMUNITY_EVENT_PENDING_STALE_MS : STALE_MS;
-		return Date.now() - at < ttl;
-	}
-	async function persistShowroomSnapshot(loaded, showroomPath, existing) {
-		const snapshot = scrapeShowroomFromDocument(loaded.document, pathnameFromUrl(loaded.url, showroomPath));
-		if (snapshot.artifacts.length > 0) {
-			await saveSnapshot(snapshot);
-			await syncSlotLocksFromScrape(snapshot.slotLocks ?? {});
-			console.info("[Artifact Optimizer] Showroom locks", snapshot.slotLocks, "equipped", snapshot.artifacts.filter((artifact) => artifact.equippedPosition !== void 0).map((artifact) => ({
-				slot: artifact.equippedPosition,
-				name: artifact.displayName,
-				locked: artifact.slotLocked === true
-			})));
-			return snapshot;
-		}
-		if (existing?.slotLocks) await syncSlotLocksFromScrape(existing.slotLocks);
-		return existing;
-	}
-	async function scrapeShowroomAfterLockNudge(showroomPath, existing) {
-		let inventory = existing;
-		if (!inventory?.artifacts.length) {
-			const prelim = await loadRemotePage(showroomPath);
-			if (prelim) inventory = scrapeShowroomFromDocument(prelim.document, pathnameFromUrl(prelim.url, showroomPath));
-		}
-		if (inventory?.artifacts.length) await nudgeStuckSlotLocks(inventory.artifacts);
-		const loaded = await loadRemotePage(showroomPath);
-		if (!loaded) {
-			if (existing?.slotLocks) await syncSlotLocksFromScrape(existing.slotLocks);
-			return existing;
-		}
-		return persistShowroomSnapshot(loaded, showroomPath, existing);
-	}
-	async function ensureArtifactSnapshot(options = {}) {
-		const existing = await loadSnapshot();
-		const isWantsForce = options.force === true;
-		if (!isWantsForce && isSnapshotFresh(existing) && areSlotLocksFresh(existing)) return existing;
-		const showroomPath = resolveShowroomUrl(existing?.username);
-		if (isWantsForce) return scrapeShowroomAfterLockNudge(showroomPath, existing);
-		const loaded = await loadRemotePage(showroomPath);
-		if (!loaded) {
-			if (existing?.slotLocks) await syncSlotLocksFromScrape(existing.slotLocks);
-			return existing;
-		}
-		const snapshot = await persistShowroomSnapshot(loaded, showroomPath, existing);
-		if (snapshot) return snapshot;
-		if (existing?.slotLocks) await syncSlotLocksFromScrape(existing.slotLocks);
-		return existing;
-	}
-	function markCommunityEventUnavailable(next) {
-		next.caps.steamCommunityEvent = "capped";
-		if (next.communityEvent) next.communityEvent = markCommunityEventEnded(next.communityEvent);
-	}
-	function cachedLiveCommunityEvent(next, banner) {
-		const previous = next.communityEvent;
-		return {
-			scrapedAt: new Date().toISOString(),
-			url: banner.url,
-			isLive: true,
-			personalHours: previous?.personalHours ?? 0,
-			milestones: previous?.milestones ?? [],
-			pendingArp: previous?.pendingArp ?? 0,
-			awardedArp: previous?.awardedArp ?? 0,
-			...previous?.communityHours !== void 0 && { communityHours: previous.communityHours },
-			...previous?.communityHoursCap !== void 0 && { communityHoursCap: previous.communityHoursCap },
-			...previous?.communityHoursSamples && { communityHoursSamples: previous.communityHoursSamples },
-			...previous?.communityHoursSource && { communityHoursSource: previous.communityHoursSource },
-			...banner.title && { title: banner.title },
-			...previous?.playEligibility && { playEligibility: previous.playEligibility }
-		};
-	}
-	async function refreshLiveCommunityEvent(next, controlDocument) {
-		const banner = controlDocument ? scrapeLiveCommunityEventBanner(controlDocument) : void 0;
-		if (!banner) {
-			if (controlDocument === document && !isControlCenterDocumentReady(document)) return;
-			markCommunityEventUnavailable(next);
-			return;
-		}
-		const eventDocument = await loadRemoteDocument(banner.url);
-		if (!eventDocument) {
-			next.caps.steamCommunityEvent = "available";
-			next.communityEvent = cachedLiveCommunityEvent(next, banner);
-			return;
-		}
-		const scraped = scrapeCommunityEventFromDocument(eventDocument, banner.url);
-		if (banner.title && !scraped.title) {
-			const cleaned = banner.title.replaceAll(/\bLIVE\b/gi, "").replace(/Event:\s*[\d./\s-]+/i, "").replaceAll(/\s+/g, " ").trim();
-			if (cleaned) scraped.title = cleaned;
-		}
-		next.communityEvent = mergeCommunityEventScrape(scraped, next.communityEvent, { source: "remote" });
-		next.caps.steamCommunityEvent = next.communityEvent.isLive ? "available" : "capped";
-	}
-	function applyWatchTwitchProgress(next, document_) {
-		const twitch = scrapeWatchTwitchProgressFromDocument(document_, next.watchTwitch);
-		if (twitch) next.watchTwitch = twitch;
-	}
-	function shouldFetchSteamQuestEligibility(quest) {
-		return quest.status !== "complete" && Boolean(quest.href) && !isChooseYourOwnGameQuest(quest) && quest.eligibility !== "eligible" && quest.isFree !== false;
-	}
-	async function enrichSteamQuestRow(quest) {
-		if (!shouldFetchSteamQuestEligibility(quest) || !quest.href) return quest;
-		const questDocument = await loadRemoteDocument(quest.href);
-		if (!questDocument) return quest;
-		const eligibility = scrapeSteamPlayEligibilityFromDocument(questDocument, { href: quest.href });
-		const steamAppId = scrapeSteamAppIdFromDocument(questDocument) ?? quest.steamAppId;
-		const nextQuest = {
-			...quest,
-			eligibility
-		};
-		if (steamAppId !== void 0) nextQuest.steamAppId = steamAppId;
-		return nextQuest;
-	}
-	async function enrichSteamQuestEligibility(next) {
-		const quests = next.steamQuests?.quests;
-		if (!quests || quests.length === 0) return;
-		const updated = await Promise.all(quests.map((quest) => enrichSteamQuestRow(quest)));
-		next.steamQuests = {
-			scrapedAt: new Date().toISOString(),
-			quests: updated
-		};
-		const cap = steamQuestsCapFromRows(updated);
-		if (cap) next.caps.steamQuests = cap;
-	}
-	function isLiveControlCenterPage() {
-		let path = location.pathname;
-		while (path.endsWith("/") && path.length > 1) path = path.slice(0, -1);
-		return path.endsWith("/control-center");
-	}
-	async function loadControlCenterDocument() {
-		if (!isLiveControlCenterPage()) return loadRemoteDocument(CONTROL_CENTER_PATH);
-		if (isControlCenterActivityReady(document)) return document;
-		await waitForControlCenterDocument();
-		if (isControlCenterDocumentReady(document)) return document;
-		return loadRemoteDocument(CONTROL_CENTER_PATH);
-	}
-	function applyControlCenterDocument(next, controlDocument) {
-		const userArpTier = scrapeUserArpTierFromDocument(controlDocument);
-		if (userArpTier !== void 0) next.userArpTier = userArpTier;
-		applyRedeemableArpFromDocument(next, controlDocument);
-		Object.assign(next.caps, scrapeControlCenterCapsFromDocument(controlDocument));
-		applySteamQuestsFromDocument(next, controlDocument);
-		applyWatchTwitchProgress(next, controlDocument);
-		applyBattlePassEndFromDocument(next, controlDocument);
-	}
-	async function refreshActivityPages(next) {
-		const [controlDocument, questDocument, battleDocument, vaultDocument] = await Promise.all([
-			loadControlCenterDocument(),
-			loadRemoteDocument(QUEST_SETUP_PATH),
-			loadRemoteDocument(BATTLE_PASS_PATH),
-			loadRemoteDocument(GAME_VAULT_PATH)
-		]);
-		if (controlDocument) applyControlCenterDocument(next, controlDocument);
-		if (questDocument) applyWatchTwitchProgress(next, questDocument);
-		if (battleDocument) {
-			const battlePass = scrapeBattlePassFromDocument(battleDocument);
-			if (battlePass) next.battlePass = mergeBattlePassScrape(battlePass, next.battlePass);
-		}
-		if (vaultDocument) applyGameVaultDocument(next, vaultDocument);
-		await Promise.all([controlDocument ? refreshLiveCommunityEvent(next, controlDocument) : Promise.resolve(), enrichSteamQuestEligibility(next)]);
-	}
-	function applyArpLogReconciliation(next) {
-		next.caps = applyArpLogActivityCaps(next.caps, next.arpLog);
-		if (!next.communityEvent) return;
-		next.communityEvent = reconcileCommunityEventWithArpLog(next.communityEvent, next.arpLog);
-	}
-	function reconcileCachedSiteState(existing) {
-		const next = {
-			...existing,
-			caps: { ...existing.caps }
-		};
-		applyArpLogReconciliation(next);
-		return next;
-	}
-	async function refreshStaleLiveEvent(next) {
-		const event = next.communityEvent;
-		if (!event?.isLive) return;
-		const eventDocument = await loadRemoteDocument(event.url);
-		if (!eventDocument) return;
-		next.communityEvent = mergeCommunityEventScrape(scrapeCommunityEventFromDocument(eventDocument, event.url), event, { source: "remote" });
-		next.caps.steamCommunityEvent = next.communityEvent.isLive ? "available" : "capped";
-	}
-	async function refreshArpLog(next, existing, options) {
-		const arpDocument = await loadRemoteDocument(resolveArpLogPath(next.communityEvent ?? existing.communityEvent));
-		if (arpDocument) next.arpLog = mergeArpLogScrape(scrapeArpLogFromDocument(arpDocument), next.arpLog ?? existing.arpLog);
-		if (options.refreshLiveEventAfter && next.communityEvent?.isLive) {
-			const eventDocument = await loadRemoteDocument(next.communityEvent.url);
-			if (eventDocument) next.communityEvent = mergeCommunityEventScrape(scrapeCommunityEventFromDocument(eventDocument, next.communityEvent.url), next.communityEvent, { source: "remote" });
-		}
-	}
-	function requiresRemoteSnapshotHydrate(snapshot) {
-		return !isSnapshotFresh(snapshot) || !areSlotLocksFresh(snapshot);
-	}
-	function requiresRemoteSiteHydrate(state, options = {}) {
-		if (!state || options.force) return true;
-		return !isCapsFresh(state) || shouldRescrapeBattlePass(state) || !isArpLogFresh(state) || shouldRefreshCommunityEventArpLog(state) || !isCommunityEventFresh(state) || requiresSteamQuestEligibilityFetch(state);
-	}
-	function shouldRefreshCommunityEventArpLog(state) {
-		const event = state.communityEvent;
-		if (!event?.isLive || event.pendingArp <= 0) return false;
-		const received = sumCommunityEventRewardsFromArpLog(state.arpLog);
-		if (received <= 0) return true;
-		return event.awardedArp > 0 && received < event.awardedArp;
-	}
-	async function ensureSiteState(options = {}) {
-		const existing = await loadSiteState() ?? emptySiteState();
-		const isForce = options.force === true;
-		const isForceCaps = isForce && !isScrapedWithin(existing.updatedAt, FORCE_REFRESH_COOLDOWN_MS);
-		const isForceArpLog = isForce;
-		const isForceEvent = isForce && !isScrapedWithin(existing.communityEvent?.scrapedAt, FORCE_REFRESH_COOLDOWN_MS);
-		const requiresCapsRefresh = isForceCaps || !isCapsFresh(existing);
-		const requiresBattlePassRefresh = isForce || requiresCapsRefresh || shouldRescrapeBattlePass(existing);
-		const requiresArpLogRefresh = isForceArpLog || !isArpLogFresh(existing) || shouldRefreshCommunityEventArpLog(existing);
-		const requiresEventRefresh = isForceEvent || !isCommunityEventFresh(existing);
-		const requiresSteamEligibility = isForceCaps || requiresSteamQuestEligibilityFetch(existing);
-		if (!requiresCapsRefresh && !requiresBattlePassRefresh && !requiresArpLogRefresh && !requiresEventRefresh && !requiresSteamEligibility) {
-			const next = reconcileCachedSiteState(existing);
-			await applyAsceCommunityHours(next);
-			await applySteamFreeToPlayResolution(next);
-			await saveSiteState(next);
-			return next;
-		}
-		const next = {
-			...existing,
-			updatedAt: new Date().toISOString(),
-			caps: { ...existing.caps }
-		};
-		if (requiresCapsRefresh) await refreshActivityPages(next);
-		else {
-			if (requiresBattlePassRefresh) await refreshBattlePassOnly(next);
-			if (requiresEventRefresh) await refreshStaleLiveEvent(next);
-			if (requiresSteamEligibility) await enrichSteamQuestEligibility(next);
-		}
-		if (requiresArpLogRefresh) await refreshArpLog(next, existing, { refreshLiveEventAfter: !requiresCapsRefresh && !requiresEventRefresh });
-		applyArpLogReconciliation(next);
-		await applySteamFreeToPlayResolution(next);
-		await applyAsceCommunityHours(next);
-		await saveSiteState(next);
-		return next;
 	}
 	function isControlCenterPage() {
 		let path = location.pathname;
@@ -6181,7 +6834,11 @@
 		if (isRemote) return ensureArtifactSnapshot({ force: options.force === true });
 		return loadSnapshot();
 	}
+	function assertGmStorage() {
+		if (typeof _GM?.getValue !== "function") throw new TypeError("GM storage is unavailable. For pnpm run dev, install the userscript served at http://localhost:3000 (named server:AWA Toolkit). A custom stub that only @requires that file does not get @grant, so recommendations never load.");
+	}
 	async function gatherData(options) {
+		assertGmStorage();
 		const isRemote = options?.remote ?? true;
 		const shouldForceSite = options?.forceSite === true;
 		const snapshotPromise = !shouldForceSite && isArtifactsShowroomPage() ? scrapeAndPersist() : loadCachedOrRemoteSnapshot(isRemote || isArtifactsShowroomPage(), { force: shouldForceSite });
@@ -6267,6 +6924,12 @@
 	function renderSkeletonBars() {
 		return SKELETON_BAR_WIDTHS.map((width) => `<div class="ao-skel" style="width:${width}"></div>`).join("");
 	}
+	function renderPanelError(message) {
+		return `
+    <div class="ao-heading">Artifact Optimizer</div>
+    <div class="ao-note">${escapeHtml(message)}</div>
+  `;
+	}
 	function renderPanelSkeleton(message = "Loading recommendations…") {
 		return `
     <div class="ao-heading">Artifact Optimizer</div>
@@ -6331,10 +6994,10 @@
 		if (!result) return "";
 		const rows = Object.entries(result.breakdown).filter(([, entry]) => entry.total !== 0).map(([k, entry]) => `<div class="ao-row ao-muted">${escapeHtml(breakdownLabel(k))}: ${formatBreakdownLine(entry)}</div>`).join("");
 		return `
+    ${result.activeSetNames.length > 0 ? `<div class="ao-row"><strong>Set:</strong> ${escapeHtml(result.activeSetNames.join(", "))}</div>` : ""}
     <div class="ao-row">Estimated lock-window ARP: <strong>${result.weeklyArp}</strong></div>
     ${result.marketplaceSavingsArp > 0 ? `<div class="ao-row">Market savings: <strong>${result.marketplaceSavingsArp}</strong></div>` : ""}
     <div class="ao-row">All ARP multiplier: <strong>${(result.allArpPct * 100).toFixed(0)}%</strong></div>
-    ${result.activeSetNames.length > 0 ? `<div class="ao-row">Sets: ${escapeHtml(result.activeSetNames.join(", "))}</div>` : ""}
     <details>
       <summary class="ao-muted">Breakdown</summary>
       ${rows}
@@ -6411,7 +7074,7 @@
 		lines.push(`<div>${renderTextLink("Open event", event.url)}</div>`);
 		return `<div class="ao-note">${lines.join("")}</div>`;
 	}
-	function renderBattlePassBlock(siteState) {
+	function renderBattlePassBlock(siteState, options = {}) {
 		const bp = siteState?.battlePass;
 		if (!bp) return "";
 		const remaining = battlePassRemainingMs(bp);
@@ -6422,6 +7085,10 @@
 		if (bp.readyToClaim > 0) {
 			const arpBoostPart = bp.readyToClaimArp > 0 ? ` (${bp.readyToClaimArp} ARP Boost)` : "";
 			lines.push(`<div><strong>${bp.readyToClaim} ready to claim</strong>${arpBoostPart}</div>`);
+		}
+		if (options.showClaimAll === true) {
+			const skipArp = options.shouldSkipArpBoosts === true ? " data-skip-arp=\"1\"" : "";
+			lines.push(`<div class="ao-note-actions"><button type="button" class="ao-claim-btn"${skipArp}>Claim all</button></div>`);
 		}
 		lines.push(`<div>${renderTextLink("Open Battle Pass", bp.url)}</div>`);
 		return `<div class="ao-note">${lines.join("")}</div>`;
@@ -6466,9 +7133,12 @@
       ${rows.join("")}
     </div>`;
 	}
-	function renderStatusSection(settings, siteState, slotLocks) {
+	function renderStatusSection(settings, siteState, slotLocks, options = {}) {
 		const cards = [
-			renderBattlePassBlock(siteState),
+			renderBattlePassBlock(siteState, {
+				showClaimAll: options.showBattlePassClaimAll === true,
+				shouldSkipArpBoosts: options.shouldSkipArpBoosts === true
+			}),
 			renderCommunityEventBlock(siteState, { detailed: true }),
 			renderCooldownBlock(settings, slotLocks),
 			renderActivityCapsCard(siteState),
@@ -6534,7 +7204,10 @@
 		const vaultDiscount = renderVaultDiscountBlock(result);
 		const upgrades = renderUpgradePath(result.upgrades, fragments);
 		const swap = formatSwapMessage(result);
-		const status = renderStatusSection(settings, siteState, snapshot?.slotLocks);
+		const status = renderStatusSection(settings, siteState, snapshot?.slotLocks, {
+			showBattlePassClaimAll: shouldShowBattlePassClaimAll(siteState?.battlePass, result.deferBattlePassClaims === true),
+			shouldSkipArpBoosts: shouldSkipArpInBattlePassClaimAll(siteState?.battlePass, result.deferBattlePassClaims === true)
+		});
 		const equippedLabel = formatEquippedLabel(result);
 		const activityToggles = Object.keys(settings.activities).map((key) => {
 			const a = settings.activities[key];
@@ -6632,16 +7305,41 @@
 			artifactId: a.instanceId,
 			position: a.equippedPosition
 		}));
-		const { allOk, results } = await applyLoadout(resolved.now, currentlyEquipped);
-		notifyLoadoutResult(allOk, results, label);
+		const { allOk, results, applied } = await applyLoadout(resolved.now, currentlyEquipped);
+		if (allOk) {
+			if (applied.length > 0) await confirmShowroomLoadout(applied);
+			notifyLoadoutResult(true, results, label);
+			return;
+		}
+		if (applied.length > 0) {
+			await confirmShowroomLoadout(applied);
+			notifyLoadoutResult(false, results, label);
+			return;
+		}
+		const { snapshot, didChange } = await resyncShowroomSnapshot();
+		await reloadOptimizerFromCache();
+		if (snapshot !== void 0 && resolved.now.every((target) => snapshot.artifacts.some((artifact) => artifact.instanceId === target.artifactId && artifact.equippedPosition === target.position))) {
+			showAoToast("Those artifacts were already equipped. Recommendations updated.");
+			return;
+		}
+		if (didChange) {
+			showAoToast("Showroom was out of date. Recommendations updated.");
+			return;
+		}
+		notifyLoadoutResult(false, results, label);
+	}
+	function namedLoadout(label, activeSetNames) {
+		if (!activeSetNames || activeSetNames.length === 0) return label;
+		return `${label} (${activeSetNames.join(", ")})`;
 	}
 	async function explainNothingToEquip(label, plan, settings, options) {
+		const named = namedLoadout(label, options?.activeSetNames);
 		const lines = [];
 		if (plan.later.length > 0) {
-			lines.push(`No unlocked slots for ${label} yet.`);
+			lines.push(`No unlocked slots for ${named} yet.`);
 			if (plan.laterNames.length > 0) lines.push(`Still needed: ${plan.laterNames.join(", ")}.`);
-		} else if (options?.allArpLabel) lines.push(`The ${label} loadout is already equipped.`, `All-ARP% still needed:\n${options.allArpLabel}`);
-		else lines.push(`The ${label} loadout is already equipped.`);
+		} else if (options?.allArpLabel) lines.push(`The ${named} loadout is already equipped.`, `All-ARP% still needed:\n${options.allArpLabel}`);
+		else lines.push(`The ${named} loadout is already equipped.`);
 		if (plan.lockedSlots.length > 0) {
 			const parts = formatLockedSlotParts(settings, plan.lockedSlots, options?.slotLocks);
 			lines.push(`Slots on cooldown: ${parts.join(", ")}.`);
@@ -6658,29 +7356,50 @@
 	async function resolveAllArpWhenRecommendedEquipped(current, settings, result, recommendedPlan) {
 		const allArp = allArpTargetArtifacts(result);
 		if (!allArp || isSameLoadout(current?.artifacts, allArp)) {
-			await explainNothingToEquip("recommended", recommendedPlan, settings, { ...result?.slotLocks && { slotLocks: result.slotLocks } });
+			await explainNothingToEquip("recommended", recommendedPlan, settings, {
+				activeSetNames: loadoutSetNames(current?.artifacts),
+				...result?.slotLocks && { slotLocks: result.slotLocks }
+			});
 			return;
 		}
 		const allArpLabel = loadoutLabel(allArp);
+		const allArpSetNames = loadoutSetNames(allArp);
 		const unlockedPlan = planLoadoutChanges(allArp, current, settings, result?.slotLocks);
-		if (unlockedPlan.now.length > 0) return await didConfirmNormalEquip(unlockedPlan, "All-ARP%", settings, result?.slotLocks) ? unlockedPlan : void 0;
+		if (unlockedPlan.now.length > 0) return await didConfirmNormalEquip(unlockedPlan, "All-ARP%", settings, {
+			activeSetNames: allArpSetNames,
+			...result?.slotLocks && { slotLocks: result.slotLocks }
+		}) ? unlockedPlan : void 0;
 		await explainNothingToEquip("recommended", unlockedPlan, settings, {
-			allArpLabel,
+			allArpLabel: namedLoadout(allArpLabel, allArpSetNames),
+			activeSetNames: loadoutSetNames(current?.artifacts),
 			...result?.slotLocks && { slotLocks: result.slotLocks }
 		});
 	}
 	async function resolveLoadoutPlan(combo, current, settings, label, result) {
 		const plan = planLoadoutChanges(combo.artifacts, current, settings, result?.slotLocks);
-		if (plan.now.length > 0) return await didConfirmNormalEquip(plan, label, settings, result?.slotLocks) ? plan : void 0;
+		const activeSetNames = loadoutSetNames(combo.artifacts);
+		if (plan.now.length > 0) return await didConfirmNormalEquip(plan, label, settings, {
+			activeSetNames,
+			...result?.slotLocks && { slotLocks: result.slotLocks }
+		}) ? plan : void 0;
 		if (plan.later.length > 0) {
-			await explainNothingToEquip(label, plan, settings, { ...result?.slotLocks && { slotLocks: result.slotLocks } });
+			await explainNothingToEquip(label, plan, settings, {
+				activeSetNames,
+				...result?.slotLocks && { slotLocks: result.slotLocks }
+			});
 			return;
 		}
 		if (label === "recommended") return resolveAllArpWhenRecommendedEquipped(current, settings, result, plan);
-		await explainNothingToEquip(label, plan, settings, { ...result?.slotLocks && { slotLocks: result.slotLocks } });
+		await explainNothingToEquip(label, plan, settings, {
+			activeSetNames,
+			...result?.slotLocks && { slotLocks: result.slotLocks }
+		});
 	}
-	async function didConfirmNormalEquip(plan, label, settings, slotLocks) {
-		return didConfirmAoDialog(`Equip ${label} into unlocked slot(s) now?\n\n${plan.now.map((change) => `${change.displayName} → slot ${change.position}`).join("\n")}${plan.lockedSlots.length > 0 ? `\n\nLeaving locked as-is: ${formatLockedSlotParts(settings, plan.lockedSlots, slotLocks).join(", ")}.` : ""}${plan.laterNames.length > 0 ? `\nStill needed later: ${plan.laterNames.join(", ")}.` : ""}\n\nThis uses the live AWA API and starts a 24h cooldown per changed slot.`, {
+	async function didConfirmNormalEquip(plan, label, settings, options) {
+		const nowLines = plan.now.map((change) => `${change.displayName} → slot ${change.position}`).join("\n");
+		const lockedNote = plan.lockedSlots.length > 0 ? `\n\nLeaving locked as-is: ${formatLockedSlotParts(settings, plan.lockedSlots, options?.slotLocks).join(", ")}.` : "";
+		const laterNote = plan.laterNames.length > 0 ? `\nStill needed later: ${plan.laterNames.join(", ")}.` : "";
+		return didConfirmAoDialog(`Equip ${namedLoadout(label, options?.activeSetNames)} into unlocked slot(s) now?\n\n${nowLines}${lockedNote}${laterNote}\n\nThis uses the live AWA API and starts a 24h cooldown per changed slot.`, {
 			title: "Equip loadout",
 			confirmLabel: "Equip"
 		});
@@ -6744,6 +7463,7 @@
 			handleRemoveManual(Number(button.dataset.index)).then(onChanged);
 		});
 		bindUpgradeButtons(root, onChanged);
+		bindClaimAllButtons(root);
 		bindVaultDiscountActions(root, onChanged);
 	}
 	function bindUpgradeButtons(root, onChanged) {
@@ -7003,33 +7723,55 @@
 	function isPanelGenerationCurrent(panel, generation) {
 		return panel.isConnected && panel.dataset.aoGen === String(generation);
 	}
+	function compactLoadoutSummary(data) {
+		const todos = buildActionPlan(data.result, data.settings, data.siteState);
+		const isHideRecommendedEquip = isKeepingCurrentLoadout(todos) && Boolean(data.result.current);
+		return {
+			todos,
+			combo: isHideRecommendedEquip ? data.result.current : data.result.best,
+			label: isHideRecommendedEquip ? "Currently equipped" : "Recommended",
+			hideRecommendedEquip: isHideRecommendedEquip
+		};
+	}
 	function renderShowroomPanelBody(data, options = {}) {
 		const hydrateBanner = options.isHydrating ? renderHydrateBanner("Updating in the background…") : "";
+		const summary = compactLoadoutSummary(data);
 		return `
     <div class="ao-heading">Artifact Optimizer</div>
     ${renderCredits({ compact: true })}
     ${hydrateBanner}
-    <div class="ao-row"><strong>Recommended:</strong> ${comboLabel(data.result.best)}</div>
-    ${renderBreakdown(data.result.best)}
+    <div class="ao-row"><strong>${summary.label}:</strong> ${comboLabel(summary.combo)}</div>
+    ${renderBreakdown(summary.combo)}
     ${renderVaultDiscountBlock(data.result)}
-    ${renderShowroomEquipActions(data.result)}
+    ${renderShowroomEquipActions(data.result, { hideRecommendedEquip: summary.hideRecommendedEquip })}
   `;
+	}
+	function compactClaimAllBpButton(data) {
+		const shouldWait = data.result.deferBattlePassClaims === true;
+		if (!shouldShowBattlePassClaimAll(data.siteState.battlePass, shouldWait)) return "";
+		const shouldSkipArpBoosts = shouldSkipArpInBattlePassClaimAll(data.siteState.battlePass, shouldWait);
+		return `<button type="button" class="ao-claim-btn ao-secondary"${shouldSkipArpBoosts ? " data-skip-arp=\"1\"" : ""}${shouldSkipArpBoosts ? " title=\"Claims cosmetics and fragments; leaves ARP Boosts until All-ARP% is equipped\"" : ""}>Claim all BP</button>`;
 	}
 	function renderControlCenterPanelBody(data, options = {}) {
 		const hydrateBanner = options.isHydrating ? renderHydrateBanner("Updating in the background…") : "";
+		const summary = compactLoadoutSummary(data);
+		const equipButton = summary.hideRecommendedEquip ? "" : "<button type=\"button\" id=\"ao-cc-equip\">Equip Recommended</button>";
+		const claimBpButton = compactClaimAllBpButton(data);
 		return `
     <div class="ao-heading">Artifact Optimizer</div>
     ${renderCredits({ compact: true })}
     ${hydrateBanner}
-    ${renderActionPlan(buildActionPlan(data.result, data.settings, data.siteState))}
+    ${renderActionPlan(summary.todos)}
     ${renderSectionDivider()}
-    <div class="ao-row"><strong>Recommended:</strong> ${comboLabel(data.result.best)}</div>
-    ${renderBreakdown(data.result.best)}
+    <div class="ao-row"><strong>${summary.label}:</strong> ${comboLabel(summary.combo)}</div>
+    ${renderBreakdown(summary.combo)}
     ${renderCooldownBlock(data.settings, data.snapshot?.slotLocks)}
     ${renderVaultDiscountBlock(data.result)}
     ${supplementalNotes(data.result.notes).map((note) => `<div class="ao-note">${escapeHtml(note)}</div>`).join("")}
     <div class="ao-actions">
-      <button type="button" id="ao-cc-equip">Equip Recommended</button>
+      ${equipButton}
+      ${equipButton ? "<span class=\"ao-actions-sep\" aria-hidden=\"true\"></span>" : ""}
+      ${claimBpButton}
       <button type="button" id="ao-cc-open" class="ao-secondary">Open Full Panel</button>
       <button type="button" id="ao-cc-artifacts" class="ao-secondary">Go to Artifacts</button>
       <button type="button" id="ao-cc-refresh" class="ao-secondary">Refresh</button>
@@ -7074,37 +7816,56 @@
 		if (!isPanelGenerationCurrent(panel, generation)) return;
 		paint(live, false);
 	}
+	function formatPanelLoadError(error) {
+		return error instanceof Error ? error.message : String(error);
+	}
 	async function fillPanelFromCacheThenHydrate(panel, generation, paint, options = {}) {
-		if (options.force === true) {
-			const cached = gatheredCache.current ?? await gatherData({ remote: false });
+		try {
+			if (options.force === true) {
+				const cached = gatheredCache.current ?? await gatherData({ remote: false });
+				if (!isPanelGenerationCurrent(panel, generation)) return;
+				paint(cached, true);
+				const hydrated = await hydrateGatheredData({ force: true });
+				if (!isPanelGenerationCurrent(panel, generation)) return;
+				paint(hydrated, false);
+				return;
+			}
+			const cached = await gatherData({ remote: false });
 			if (!isPanelGenerationCurrent(panel, generation)) return;
-			paint(cached, true);
-			const hydrated = await hydrateGatheredData({ force: true });
+			const shouldHydrate = requiresBackgroundHydrate(cached, options);
+			paint(cached, shouldHydrate);
+			if (!shouldHydrate) {
+				await refreshPanelFromLivePage(panel, generation, (data, isHydrating) => {
+					paint(data, isHydrating);
+				});
+				return;
+			}
+			const hydrated = await hydrateGatheredData(options);
 			if (!isPanelGenerationCurrent(panel, generation)) return;
 			paint(hydrated, false);
-			return;
+		} catch (error) {
+			console.error("[AWA Toolkit] Failed to load recommendations", error);
+			if (!isPanelGenerationCurrent(panel, generation)) return;
+			replaceInlinePanelBody(panel, renderPanelError(formatPanelLoadError(error)));
 		}
-		const cached = await gatherData({ remote: false });
-		if (!isPanelGenerationCurrent(panel, generation)) return;
-		const shouldHydrate = requiresBackgroundHydrate(cached, options);
-		paint(cached, shouldHydrate);
-		if (!shouldHydrate) {
-			await refreshPanelFromLivePage(panel, generation, (data, isHydrating) => {
-				paint(data, isHydrating);
-			});
-			return;
-		}
-		const hydrated = await hydrateGatheredData(options);
-		if (!isPanelGenerationCurrent(panel, generation)) return;
-		paint(hydrated, false);
 	}
-	function renderShowroomEquipActions(result) {
+	function renderShowroomEquipActions(result, options = {}) {
+		const recommended = options.hideRecommendedEquip ? "" : "<button type=\"button\" id=\"ao-inline-equip\">Equip Recommended</button>";
+		const allArp = result.allArpLoadout ? `<button type="button" id="ao-inline-equip-allarp" class="ao-secondary" title="${escapeHtml(comboLabel(result.allArpLoadout))}">Equip All-ARP%</button>` : "";
+		const monthlyMeta = result.monthlyMetaLoadout ? `<button type="button" id="ao-inline-equip-monthly" class="ao-secondary" title="${escapeHtml(comboLabel(result.monthlyMetaLoadout))}">Equip Monthly META</button>` : "";
+		const market = result.marketDiscountLoadout ? `<button type="button" id="ao-inline-equip-market" class="ao-secondary" title="${escapeHtml(comboLabel(result.marketDiscountLoadout))}">Equip Market Discount</button>` : "";
 		return `
     <div class="ao-actions">
-      <button type="button" id="ao-inline-equip">Equip Recommended</button>
-      ${result.allArpLoadout ? `<button type="button" id="ao-inline-equip-allarp" title="${escapeHtml(comboLabel(result.allArpLoadout))}">Equip All-ARP%</button>` : ""}
-      ${result.monthlyMetaLoadout ? `<button type="button" id="ao-inline-equip-monthly" class="ao-secondary" title="${escapeHtml(comboLabel(result.monthlyMetaLoadout))}">Equip Monthly META</button>` : ""}
-      ${result.marketDiscountLoadout ? `<button type="button" id="ao-inline-equip-market" class="ao-secondary" title="${escapeHtml(comboLabel(result.marketDiscountLoadout))}">Equip Market Discount</button>` : ""}
+      ${recommended}
+      ${allArp}
+      ${monthlyMeta}
+      ${market}
+      ${[
+			recommended,
+			allArp,
+			monthlyMeta,
+			market
+		].some((html) => html.length > 0) ? "<span class=\"ao-actions-sep\" aria-hidden=\"true\"></span>" : ""}
       <button type="button" id="ao-inline-open" class="ao-secondary">Open Full Panel</button>
     </div>
   `;
@@ -7132,6 +7893,7 @@
 			openId: "ao-cc-open"
 		});
 		bindUpgradeButtons(panelTree(panel), async () => {});
+		bindClaimAllButtons(panelTree(panel));
 		bindVaultDiscountActions(panelTree(panel), () => {
 			injectControlCenterPanel({ force: true });
 		});
@@ -7159,6 +7921,15 @@
 		};
 		await fillPanelFromCacheThenHydrate(panel, generation, paint, options);
 		if (isPanelGenerationCurrent(panel, generation)) panel.dataset.aoReady = "1";
+	}
+	async function reloadOptimizerFromCache() {
+		const ccPanel = document.querySelector(`#${CC_PANEL_ID}`);
+		if (ccPanel) delete ccPanel.dataset.aoReady;
+		const showroomPanel = document.querySelector(`#${INLINE_ID}`);
+		if (showroomPanel) delete showroomPanel.dataset.aoReady;
+		await injectControlCenterPanel();
+		await injectShowroomPanel();
+		await document.querySelector(`#${MODAL_ID}`)?.__aoRefresh?.({ remote: false });
 	}
 	var DEFAULT_INLINE_PANEL_IDS = {
 		equipId: "ao-inline-equip",
@@ -7191,6 +7962,42 @@
 			openOptimizerModal();
 		});
 	}
+	function renderBattlePassClaimBarBody() {
+		const live = scrapeBattlePassFromDocument(document);
+		const cached = gatheredCache.current;
+		const battlePass = live ?? cached?.siteState.battlePass;
+		const count = live?.readyToClaim ?? (listBattlePassClaimButtons().length || battlePass?.readyToClaim || 0);
+		if (count <= 0) return `
+      <div class="ao-heading">Battle Pass</div>
+      <div class="ao-muted">No rewards waiting to claim</div>
+    `;
+		const shouldWait = cached === void 0 ? (battlePass?.readyToClaimArp ?? 0) > 0 : cached.result.deferBattlePassClaims === true;
+		const shouldShowClaimAll = shouldShowBattlePassClaimAll(battlePass, shouldWait);
+		const skipArp = shouldSkipArpInBattlePassClaimAll(battlePass, shouldWait) ? " data-skip-arp=\"1\"" : "";
+		return `
+    <div class="ao-heading">Battle Pass</div>
+    <div class="ao-row"><strong>${count} ready to claim</strong></div>
+    ${shouldShowClaimAll ? `<div class="ao-actions"><button type="button" class="ao-claim-btn"${skipArp}>Claim all</button></div>` : "<div class=\"ao-muted\">Wait to claim ARP Boosts until All-ARP% is equipped</div>"}
+  `;
+	}
+	async function paintBattlePassClaimBar() {
+		if (!gatheredCache.current) await gatherData({ remote: false });
+		const panel = document.querySelector(`#${BP_CLAIM_BAR_ID}`);
+		if (!panel?.shadowRoot) return;
+		replaceInlinePanelBody(panel, renderBattlePassClaimBarBody());
+		bindClaimAllButtons(panelTree(panel));
+	}
+	function injectBattlePassClaimBar() {
+		ensureOptimizerStyles();
+		let panel = document.querySelector(`#${BP_CLAIM_BAR_ID}`);
+		if (!panel) {
+			panel = document.createElement("div");
+			panel.id = BP_CLAIM_BAR_ID;
+			mountInlinePanelShadow(panel, renderBattlePassClaimBarBody());
+		}
+		insertControlCenterHost(panel);
+		bindClaimAllButtons(panelTree(panel));
+	}
 	async function initArtifactOptimizer() {
 		ensureOptimizerStyles();
 		watchOptimizerMenuButton();
@@ -7208,11 +8015,20 @@
 			ensureShowroomHost();
 			injectShowroomPanel();
 		} else if (isSiteStatePage()) {
-			if (location.pathname.includes("/battle-pass")) watchBattlePassPage(async (state) => {
-				await applyAsceCommunityHours(state);
-				await saveSiteState(state);
-			});
-			else if (location.pathname.includes("/arp-log")) watchArpLogPage(async (state) => {
+			if (location.pathname.includes("/battle-pass")) {
+				injectBattlePassClaimBar();
+				watchBattlePassPage(async (state) => {
+					await applyAsceCommunityHours(state);
+					await saveSiteState(state);
+					await paintBattlePassClaimBar();
+				});
+				(async () => {
+					await waitForBattlePassDocument();
+					await paintBattlePassClaimBar();
+					await consumePendingBattlePassClaimAll();
+					await paintBattlePassClaimBar();
+				})();
+			} else if (location.pathname.includes("/arp-log")) watchArpLogPage(async (state) => {
 				await applyAsceCommunityHours(state);
 				await saveSiteState(state);
 			});

@@ -1,6 +1,7 @@
 export const MODAL_ID = 'alienware-artifact-optimizer';
 export const INLINE_ID = 'alienware-artifact-optimizer-inline';
 export const CC_PANEL_ID = 'alienware-artifact-optimizer-cc';
+export const BP_CLAIM_BAR_ID = 'alienware-artifact-optimizer-bp-claim';
 export const STYLE_ID = 'alienware-artifact-optimizer-styles';
 export const BACKDROP_ID = 'alienware-artifact-optimizer-backdrop';
 export const DIALOG_ID = 'alienware-artifact-optimizer-dialog';
@@ -337,7 +338,8 @@ function buildPanelShadowCss(variant: PanelShadowVariant): string {
       flex: 0 0 auto;
       padding-top: 1px;
     }
-    .ao-todo-item > .ao-upgrade-btn {
+    .ao-todo-item > .ao-upgrade-btn,
+    .ao-todo-item > .ao-claim-btn {
       flex: 0 0 auto;
       padding: 4px 10px;
       font-size: 13px !important;

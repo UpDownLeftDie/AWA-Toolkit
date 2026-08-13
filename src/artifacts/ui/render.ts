@@ -14,6 +14,7 @@ import {
   emptySiteState,
   type SiteState,
 } from '../siteState';
+import { shouldShowBattlePassClaimAll, shouldSkipArpInBattlePassClaimAll } from '../siteState/battlePass';
 import { buildActionPlan, renderActionPlan } from './actionPlan';
 import {
   comboLabel,
@@ -304,7 +305,10 @@ function renderCommunityEventBlock(
   return `<div class="ao-note">${lines.join('')}</div>`;
 }
 
-function renderBattlePassBlock(siteState: SiteState | undefined): string {
+function renderBattlePassBlock(
+  siteState: SiteState | undefined,
+  options: { showClaimAll?: boolean; shouldSkipArpBoosts?: boolean } = {},
+): string {
   const bp = siteState?.battlePass;
   if (!bp) {
     return '';
@@ -324,6 +328,13 @@ function renderBattlePassBlock(siteState: SiteState | undefined): string {
       bp.readyToClaimArp > 0 ? ` (${bp.readyToClaimArp} ARP Boost)` : '';
     lines.push(
       `<div><strong>${bp.readyToClaim} ready to claim</strong>${arpBoostPart}</div>`,
+    );
+  }
+  if (options.showClaimAll === true) {
+    const skipArp =
+      options.shouldSkipArpBoosts === true ? ' data-skip-arp="1"' : '';
+    lines.push(
+      `<div class="ao-note-actions"><button type="button" class="ao-claim-btn"${skipArp}>Claim all</button></div>`,
     );
   }
   lines.push(`<div>${renderTextLink('Open Battle Pass', bp.url)}</div>`);
@@ -408,9 +419,16 @@ export function renderStatusSection(
   settings: ArtifactOptimizerSettings,
   siteState: SiteState | undefined,
   slotLocks?: Partial<Record<1 | 2 | 3, boolean>>,
+  options: {
+    showBattlePassClaimAll?: boolean;
+    shouldSkipArpBoosts?: boolean;
+  } = {},
 ): string {
   const cards = [
-    renderBattlePassBlock(siteState),
+    renderBattlePassBlock(siteState, {
+      showClaimAll: options.showBattlePassClaimAll === true,
+      shouldSkipArpBoosts: options.shouldSkipArpBoosts === true,
+    }),
     renderCommunityEventBlock(siteState, { detailed: true }),
     renderCooldownBlock(settings, slotLocks),
     renderActivityCapsCard(siteState),
@@ -523,7 +541,21 @@ export function renderResultBody(
   const upgrades = renderUpgradePath(result.upgrades, fragments);
 
   const swap = formatSwapMessage(result);
-  const status = renderStatusSection(settings, siteState, snapshot?.slotLocks);
+  const status = renderStatusSection(
+    settings,
+    siteState,
+    snapshot?.slotLocks,
+    {
+      showBattlePassClaimAll: shouldShowBattlePassClaimAll(
+        siteState?.battlePass,
+        result.deferBattlePassClaims === true,
+      ),
+      shouldSkipArpBoosts: shouldSkipArpInBattlePassClaimAll(
+        siteState?.battlePass,
+        result.deferBattlePassClaims === true,
+      ),
+    },
+  );
   const equippedLabel = formatEquippedLabel(result);
 
   const activityToggles = (

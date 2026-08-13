@@ -126,6 +126,17 @@ export async function upgradeArtifact(artifactId: number): Promise<ApiResult> {
 }
 
 /**
+ * POST the site's Battle Pass claim route (same encoding as artifact equip).
+ * Path comes from the live page's markup/JS — not a guessed URL.
+ */
+export async function claimBattlePassReward(
+  path: string,
+  body: Record<string, unknown> = {},
+): Promise<ApiResult> {
+  return postJson(path, body);
+}
+
+/**
  * Pick a free "upgrade" target for AWA's stuck 24h lock bug (Megumin FAQ):
  * posting Upgrade on a maxed card spends 0 fragments and refreshes slot locks.
  * Prefer H`erkow Warrior Script when owned.
@@ -194,8 +205,13 @@ export async function nudgeStuckSlotLocks(
 export async function applyLoadout(
   targets: { artifactId: number; position: ArtifactSlot }[],
   currentlyEquipped: { artifactId: number; position: ArtifactSlot }[],
-): Promise<{ results: ApiResult[]; allOk: boolean }> {
+): Promise<{
+  results: ApiResult[];
+  allOk: boolean;
+  applied: { artifactId: number; position: ArtifactSlot }[];
+}> {
   const results: ApiResult[] = [];
+  const applied: { artifactId: number; position: ArtifactSlot }[] = [];
   for (const target of targets) {
     const isAlready = currentlyEquipped.some(
       (c) =>
@@ -207,12 +223,14 @@ export async function applyLoadout(
     const equipResult = await equipArtifact(target.artifactId, target.position);
     results.push(equipResult);
     if (!equipResult.ok) {
-      return { results, allOk: false };
+      return { results, allOk: false, applied };
     }
+    applied.push(target);
   }
 
   return {
     results,
-    allOk: results.every((r) => r.ok),
+    allOk: results.every((result) => result.ok),
+    applied,
   };
 }

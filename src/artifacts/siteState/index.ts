@@ -536,9 +536,14 @@ export {
   mergeBattlePassScrape,
   applyBattlePassEndFromDocument,
   battlePassClaimableArp,
+  battlePassReadyNonArp,
+  shouldShowBattlePassClaimAll,
+  shouldSkipArpInBattlePassClaimAll,
   scrapeBattlePass,
   isBattlePassDocumentReady,
   waitForBattlePassDocument,
+  listBattlePassClaimButtons,
+  claimAllBattlePassRewards,
 } from './battlePass';
 export type { ArpLogEntry, ArpLogState } from './arpLog';
 export {

@@ -2,13 +2,17 @@ import { applyAsceCommunityHours } from '../asce';
 import type { OptimizerResult } from '../optimizer';
 import { isArtifactsShowroomPage, waitForShowroomDocument } from '../scraper';
 import {
+  listBattlePassClaimButtons,
   refreshSiteStateFromPage,
   saveSiteState,
+  scrapeBattlePassFromDocument,
+  waitForBattlePassDocument,
   waitForControlCenterDocument,
   watchArpLogPage,
   watchBattlePassPage,
   watchControlCenterPage,
 } from '../siteState';
+import { shouldShowBattlePassClaimAll, shouldSkipArpInBattlePassClaimAll } from '../siteState/battlePass';
 import {
   buildActionPlan,
   isKeepingCurrentLoadout,
@@ -21,6 +25,10 @@ import {
   confirmAndApplyLoadout,
   persistFormSettings,
 } from './actions';
+import {
+  bindClaimAllButtons,
+  consumePendingBattlePassClaimAll,
+} from './battlePassClaim';
 import { showAoToast } from './dialog';
 import {
   gatheredCache,
@@ -48,6 +56,7 @@ import {
 } from './render';
 import {
   BACKDROP_ID,
+  BP_CLAIM_BAR_ID,
   CC_PANEL_ID,
   INLINE_ID,
   MODAL_ID,
@@ -468,13 +477,13 @@ function compactLoadoutSummary(data: GatheredData): {
   hideRecommendedEquip: boolean;
 } {
   const todos = buildActionPlan(data.result, data.settings, data.siteState);
-  const hideRecommendedEquip =
+  const isHideRecommendedEquip =
     isKeepingCurrentLoadout(todos) && Boolean(data.result.current);
   return {
     todos,
-    combo: hideRecommendedEquip ? data.result.current : data.result.best,
-    label: hideRecommendedEquip ? 'Currently equipped' : 'Recommended',
-    hideRecommendedEquip,
+    combo: isHideRecommendedEquip ? data.result.current : data.result.best,
+    label: isHideRecommendedEquip ? 'Currently equipped' : 'Recommended',
+    hideRecommendedEquip: isHideRecommendedEquip,
   };
 }
 
@@ -499,6 +508,22 @@ function renderShowroomPanelBody(
   `;
 }
 
+function compactClaimAllBpButton(data: GatheredData): string {
+  const shouldWait = data.result.deferBattlePassClaims === true;
+  if (!shouldShowBattlePassClaimAll(data.siteState.battlePass, shouldWait)) {
+    return '';
+  }
+  const shouldSkipArpBoosts = shouldSkipArpInBattlePassClaimAll(
+    data.siteState.battlePass,
+    shouldWait,
+  );
+  const skipArp = shouldSkipArpBoosts ? ' data-skip-arp="1"' : '';
+  const title = shouldSkipArpBoosts
+    ? ' title="Claims cosmetics and fragments; leaves ARP Boosts until All-ARP% is equipped"'
+    : '';
+  return `<button type="button" class="ao-claim-btn ao-secondary"${skipArp}${title}>Claim all BP</button>`;
+}
+
 function renderControlCenterPanelBody(
   data: GatheredData,
   options: { isHydrating?: boolean } = {},
@@ -510,6 +535,7 @@ function renderControlCenterPanelBody(
   const equipButton = summary.hideRecommendedEquip
     ? ''
     : '<button type="button" id="ao-cc-equip">Equip Recommended</button>';
+  const claimBpButton = compactClaimAllBpButton(data);
   return `
     <div class="ao-heading">Artifact Optimizer</div>
     ${renderCredits({ compact: true })}
@@ -530,6 +556,7 @@ function renderControlCenterPanelBody(
           ? '<span class="ao-actions-sep" aria-hidden="true"></span>'
           : ''
       }
+      ${claimBpButton}
       <button type="button" id="ao-cc-open" class="ao-secondary">Open Full Panel</button>
       <button type="button" id="ao-cc-artifacts" class="ao-secondary">Go to Artifacts</button>
       <button type="button" id="ao-cc-refresh" class="ao-secondary">Refresh</button>
@@ -663,10 +690,10 @@ function renderShowroomEquipActions(
   const market = result.marketDiscountLoadout
     ? `<button type="button" id="ao-inline-equip-market" class="ao-secondary" title="${escapeHtml(comboLabel(result.marketDiscountLoadout))}">Equip Market Discount</button>`
     : '';
-  const loadoutButtons = [recommended, allArp, monthlyMeta, market].some(
+  const isLoadoutButtons = [recommended, allArp, monthlyMeta, market].some(
     (html) => html.length > 0,
   );
-  const sep = loadoutButtons
+  const separator = isLoadoutButtons
     ? '<span class="ao-actions-sep" aria-hidden="true"></span>'
     : '';
   return `
@@ -675,7 +702,7 @@ function renderShowroomEquipActions(
       ${allArp}
       ${monthlyMeta}
       ${market}
-      ${sep}
+      ${separator}
       <button type="button" id="ao-inline-open" class="ao-secondary">Open Full Panel</button>
     </div>
   `;
@@ -727,6 +754,7 @@ function paintControlCenterPanel(
   // No-op: handleUpgradeClick already force-reinjects this same panel after
   // onChanged resolves, so refreshing it here too would just double-fetch.
   bindUpgradeButtons(panelTree(panel), async () => {});
+  bindClaimAllButtons(panelTree(panel));
   bindVaultDiscountActions(panelTree(panel), () => {
     void injectControlCenterPanel({ force: true });
   });
@@ -774,6 +802,25 @@ export async function injectControlCenterPanel(
   if (isPanelGenerationCurrent(panel, generation)) {
     panel.dataset.aoReady = '1';
   }
+}
+
+/**
+ * Re-paint from GM after a Showroom resync. Does not Force-Refresh (no
+ * stuck-lock nudge). If the snapshot was marked stale, hydrate will scrape.
+ */
+export async function reloadOptimizerFromCache(): Promise<void> {
+  const ccPanel = document.querySelector<HTMLElement>(`#${CC_PANEL_ID}`);
+  if (ccPanel) {
+    delete ccPanel.dataset.aoReady;
+  }
+  const showroomPanel = document.querySelector<HTMLElement>(`#${INLINE_ID}`);
+  if (showroomPanel) {
+    delete showroomPanel.dataset.aoReady;
+  }
+  await injectControlCenterPanel();
+  await injectShowroomPanel();
+  const modal = document.querySelector<OptimizerModal>(`#${MODAL_ID}`);
+  await modal?.__aoRefresh?.({ remote: false });
 }
 
 const DEFAULT_INLINE_PANEL_IDS = {
@@ -846,6 +893,66 @@ function bindInlinePanelActions(
   });
 }
 
+function renderBattlePassClaimBarBody(): string {
+  const live = scrapeBattlePassFromDocument(document);
+  const cached = gatheredCache.current;
+  const battlePass = live ?? cached?.siteState.battlePass;
+  const count =
+    live?.readyToClaim ??
+    (listBattlePassClaimButtons().length || battlePass?.readyToClaim || 0);
+  if (count <= 0) {
+    return `
+      <div class="ao-heading">Battle Pass</div>
+      <div class="ao-muted">No rewards waiting to claim</div>
+    `;
+  }
+  const shouldWait =
+    cached === undefined
+      ? (battlePass?.readyToClaimArp ?? 0) > 0
+      : cached.result.deferBattlePassClaims === true;
+  const shouldShowClaimAll = shouldShowBattlePassClaimAll(
+    battlePass,
+    shouldWait,
+  );
+  const shouldSkipArpBoosts = shouldSkipArpInBattlePassClaimAll(
+    battlePass,
+    shouldWait,
+  );
+  const skipArp = shouldSkipArpBoosts ? ' data-skip-arp="1"' : '';
+  const claimButton = shouldShowClaimAll
+    ? `<div class="ao-actions"><button type="button" class="ao-claim-btn"${skipArp}>Claim all</button></div>`
+    : '<div class="ao-muted">Wait to claim ARP Boosts until All-ARP% is equipped</div>';
+  return `
+    <div class="ao-heading">Battle Pass</div>
+    <div class="ao-row"><strong>${count} ready to claim</strong></div>
+    ${claimButton}
+  `;
+}
+
+async function paintBattlePassClaimBar(): Promise<void> {
+  if (!gatheredCache.current) {
+    await gatherData({ remote: false });
+  }
+  const panel = document.querySelector<HTMLElement>(`#${BP_CLAIM_BAR_ID}`);
+  if (!panel?.shadowRoot) {
+    return;
+  }
+  replaceInlinePanelBody(panel, renderBattlePassClaimBarBody());
+  bindClaimAllButtons(panelTree(panel));
+}
+
+function injectBattlePassClaimBar(): void {
+  ensureOptimizerStyles();
+  let panel = document.querySelector<HTMLElement>(`#${BP_CLAIM_BAR_ID}`);
+  if (!panel) {
+    panel = document.createElement('div');
+    panel.id = BP_CLAIM_BAR_ID;
+    mountInlinePanelShadow(panel, renderBattlePassClaimBarBody());
+  }
+  insertControlCenterHost(panel);
+  bindClaimAllButtons(panelTree(panel));
+}
+
 export async function initArtifactOptimizer(): Promise<void> {
   ensureOptimizerStyles();
   watchOptimizerMenuButton();
@@ -871,10 +978,18 @@ export async function initArtifactOptimizer(): Promise<void> {
     void injectShowroomPanel();
   } else if (isSiteStatePage()) {
     if (location.pathname.includes('/battle-pass')) {
+      injectBattlePassClaimBar();
       watchBattlePassPage(async (state) => {
         await applyAsceCommunityHours(state);
         await saveSiteState(state);
+        await paintBattlePassClaimBar();
       });
+      void (async () => {
+        await waitForBattlePassDocument();
+        await paintBattlePassClaimBar();
+        await consumePendingBattlePassClaimAll();
+        await paintBattlePassClaimBar();
+      })();
     } else if (location.pathname.includes('/arp-log')) {
       watchArpLogPage(async (state) => {
         await applyAsceCommunityHours(state);
