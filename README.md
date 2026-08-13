@@ -10,7 +10,7 @@
 
 ## Install
 
-[Install](https://github.com/UpDownLeftDie/AWA-Toolkit/raw/refs/heads/main/dist/awa-toolkit.user.js)
+[Install](https://raw.githubusercontent.com/UpDownLeftDie/AWA-Toolkit/main/dist/awa-toolkit.user.js)
 
 _No userscript manager yet? Install [Violentmonkey](https://violentmonkey.github.io/get-it/) first, then use the link above._
 

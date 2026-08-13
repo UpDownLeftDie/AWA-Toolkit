@@ -1,5 +1,5 @@
-import { GM } from '$';
-import { resolveSiteStateSteamFreeToPlay } from '../steamApp';
+import { GM } from "$";
+import { resolveSiteStateSteamFreeToPlay } from "../steamApp";
 import {
   applyRedeemableArpFromDocument,
   arpLogSignature,
@@ -7,7 +7,7 @@ import {
   mergeArpLogScrape,
   scrapeArpLogFromDocument,
   waitForArpLogDocument,
-} from './arpLog';
+} from "./arpLog";
 import {
   applyBattlePassEndFromDocument,
   battlePassClaimSignature,
@@ -15,7 +15,7 @@ import {
   mergeBattlePassScrape,
   scrapeBattlePass,
   waitForBattlePassDocument,
-} from './battlePass';
+} from "./battlePass";
 import {
   applyArpLogActivityCaps,
   controlCenterActivitySignature,
@@ -24,40 +24,40 @@ import {
   scrapeControlCenterCaps,
   scrapeWatchTwitchProgressFromDocument,
   waitForControlCenterDocument,
-} from './caps';
+} from "./caps";
 import {
   mergeCommunityEventScrape,
   reconcileCommunityEventWithArpLog,
   scrapeCommunityEventFromDocument,
   scrapeLiveCommunityEventBanner,
-} from './communityEvent';
-import { applyDailyQuestsFromDocument } from './dailyQuests';
+} from "./communityEvent";
+import { applyDailyQuestsFromDocument } from "./dailyQuests";
 import {
   applyGameVaultDocument,
   scrapeUserArpTierFromDocument,
-} from './gameVault';
+} from "./gameVault";
 import {
   applySteamQuestDetailFromDocument,
   applySteamQuestsFromDocument,
   steamQuestsCapFromRows,
-} from './steamQuests';
+} from "./steamQuests";
 import type {
   ActivityCapState,
   ActivityKey,
   CapStatus,
   SiteState,
-} from './types';
+} from "./types";
 
-const SITE_STATE_KEY = 'artifactSiteState';
+const SITE_STATE_KEY = "artifactSiteState";
 
 const DEFAULT_CAPS: ActivityCapState = {
-  timeOnSite: 'unknown',
-  steamQuests: 'unknown',
-  watchTwitch: 'unknown',
-  dailyCalendar: 'unknown',
-  discordPoll: 'unknown',
-  dailyQuests: 'unknown',
-  steamCommunityEvent: 'unknown',
+  timeOnSite: "unknown",
+  steamQuests: "unknown",
+  watchTwitch: "unknown",
+  dailyCalendar: "unknown",
+  discordPoll: "unknown",
+  dailyQuests: "unknown",
+  steamCommunityEvent: "unknown",
 };
 
 function normalizeCaps(raw: unknown): ActivityCapState {
@@ -67,13 +67,13 @@ function normalizeCaps(raw: unknown): ActivityCapState {
   return {
     ...DEFAULT_CAPS,
     ...caps,
-    dailyQuests: caps.dailyQuests ?? caps.communityEvent ?? 'unknown',
-    steamCommunityEvent: caps.steamCommunityEvent ?? 'unknown',
+    dailyQuests: caps.dailyQuests ?? caps.communityEvent ?? "unknown",
+    steamCommunityEvent: caps.steamCommunityEvent ?? "unknown",
   };
 }
 
 function isSiteState(value: unknown): value is SiteState {
-  return typeof value === 'object' && !!value && 'caps' in value;
+  return typeof value === "object" && !!value && "caps" in value;
 }
 
 export async function loadSiteState(): Promise<SiteState | undefined> {
@@ -82,7 +82,7 @@ export async function loadSiteState(): Promise<SiteState | undefined> {
     return undefined;
   }
   try {
-    const parsed: unknown = typeof raw === 'string' ? JSON.parse(raw) : raw;
+    const parsed: unknown = typeof raw === "string" ? JSON.parse(raw) : raw;
     if (!isSiteState(parsed)) {
       return undefined;
     }
@@ -123,23 +123,23 @@ function applyControlCenterPage(next: SiteState): void {
   applyBattlePassEndFromDocument(next, document);
   const banner = scrapeLiveCommunityEventBanner(document);
   if (banner) {
-    next.caps.steamCommunityEvent = 'available';
+    next.caps.steamCommunityEvent = "available";
     return;
   }
   // Banner miss is not proof the event ended — widgets can paint first.
   // Keep a live cached event; the event-page scrape is what ends it.
   if (!next.communityEvent?.isLive) {
-    next.caps.steamCommunityEvent = 'capped';
+    next.caps.steamCommunityEvent = "capped";
   }
 }
 
 function applyCommunityEventPage(next: SiteState): void {
   const scraped = scrapeCommunityEventFromDocument(document, location.pathname);
   const event = mergeCommunityEventScrape(scraped, next.communityEvent, {
-    source: 'visit',
+    source: "visit",
   });
   next.communityEvent = event;
-  next.caps.steamCommunityEvent = event.isLive ? 'available' : 'capped';
+  next.caps.steamCommunityEvent = event.isLive ? "available" : "capped";
 }
 
 export function applyLiveDocumentToSiteState(next: SiteState): void {
@@ -151,30 +151,30 @@ export function applyLiveDocumentToSiteState(next: SiteState): void {
   }
   applyRedeemableArpFromDocument(next, document);
 
-  if (path.includes('/control-center') && !path.includes('/battle-pass')) {
+  if (path.includes("/control-center") && !path.includes("/battle-pass")) {
     applyControlCenterPage(next);
   }
 
   if (
-    path.includes('/steam/questsetup') ||
-    path.includes('/rewards/terms') ||
-    path.includes('/faq-contact')
+    path.includes("/steam/questsetup") ||
+    path.includes("/rewards/terms") ||
+    path.includes("/faq-contact")
   ) {
     applyWatchTwitchFromDocument(next, document);
   }
 
-  if (path.includes('/marketplace') || path.includes('/game-vault')) {
+  if (path.includes("/marketplace") || path.includes("/game-vault")) {
     applyGameVaultDocument(next, document);
   }
 
-  if (path.includes('/battle-pass')) {
+  if (path.includes("/battle-pass")) {
     const battlePass = scrapeBattlePass();
     if (battlePass) {
       next.battlePass = mergeBattlePassScrape(battlePass, next.battlePass);
     }
   }
 
-  if (path.includes('/arp-log') && isArpLogDocumentReady(document)) {
+  if (path.includes("/arp-log") && isArpLogDocumentReady(document)) {
     // The page defaults to its 10 most recent rows unless the user added
     // from/to params — merge so a plain visit doesn't clobber a wider
     // background-fetched window. Skip before the table exists: an empty
@@ -185,7 +185,7 @@ export function applyLiveDocumentToSiteState(next: SiteState): void {
     );
   }
 
-  if (path.includes('/steam/community-event')) {
+  if (path.includes("/steam/community-event")) {
     applyCommunityEventPage(next);
   }
 
@@ -210,8 +210,14 @@ export async function refreshSiteStateFromPage(): Promise<SiteState> {
     gameVault: [],
   };
 
-  if (location.pathname.includes('/arp-log')) {
+  if (location.pathname.includes("/arp-log")) {
     await waitForArpLogDocument();
+  }
+  if (
+    location.pathname.includes("/control-center") &&
+    !location.pathname.includes("/battle-pass")
+  ) {
+    await waitForControlCenterDocument();
   }
 
   const next: SiteState = {
@@ -230,7 +236,7 @@ export async function refreshSiteStateFromPage(): Promise<SiteState> {
  */
 function watchLiveSiteStatePage(options: {
   isPage: boolean;
-  datasetFlag: 'aoBpWatch' | 'aoCcWatch' | 'aoArpWatch';
+  datasetFlag: "aoBpWatch" | "aoCcWatch" | "aoArpWatch";
   isReady: (document_: Document) => boolean;
   signature: (document_: Document) => string;
   waitForReady: () => Promise<void>;
@@ -240,13 +246,13 @@ function watchLiveSiteStatePage(options: {
   if (!options.isPage) {
     return;
   }
-  if (document.documentElement.dataset[options.datasetFlag] === '1') {
+  if (document.documentElement.dataset[options.datasetFlag] === "1") {
     return;
   }
-  document.documentElement.dataset[options.datasetFlag] = '1';
+  document.documentElement.dataset[options.datasetFlag] = "1";
 
   let debounceTimer: ReturnType<typeof setTimeout> | undefined;
-  let lastSignature = '';
+  let lastSignature = "";
   let isPersisting = false;
   let isPendingAfterPersist = false;
 
@@ -300,7 +306,7 @@ function watchLiveSiteStatePage(options: {
     }
     const clickSelector = options.clickSelector;
     document.addEventListener(
-      'click',
+      "click",
       (event) => {
         const target = event.target;
         if (!(target instanceof Element)) {
@@ -323,13 +329,13 @@ export function watchBattlePassPage(
   onPersist?: (state: SiteState) => void | Promise<void>,
 ): void {
   watchLiveSiteStatePage({
-    isPage: location.pathname.includes('/battle-pass'),
-    datasetFlag: 'aoBpWatch',
+    isPage: location.pathname.includes("/battle-pass"),
+    datasetFlag: "aoBpWatch",
     isReady: isBattlePassDocumentReady,
     signature: battlePassClaimSignature,
     waitForReady: waitForBattlePassDocument,
     ...(onPersist && { onPersist }),
-    clickSelector: '.bp-popup__claim-btn',
+    clickSelector: ".bp-popup__claim-btn",
   });
 }
 
@@ -342,9 +348,9 @@ export function watchControlCenterPage(
 ): void {
   watchLiveSiteStatePage({
     isPage:
-      location.pathname.includes('/control-center') &&
-      !location.pathname.includes('/battle-pass'),
-    datasetFlag: 'aoCcWatch',
+      location.pathname.includes("/control-center") &&
+      !location.pathname.includes("/battle-pass"),
+    datasetFlag: "aoCcWatch",
     isReady: isControlCenterActivityReady,
     signature: controlCenterActivitySignature,
     waitForReady: waitForControlCenterDocument,
@@ -360,8 +366,8 @@ export function watchArpLogPage(
   onPersist?: (state: SiteState) => void | Promise<void>,
 ): void {
   watchLiveSiteStatePage({
-    isPage: location.pathname.includes('/arp-log'),
-    datasetFlag: 'aoArpWatch',
+    isPage: location.pathname.includes("/arp-log"),
+    datasetFlag: "aoArpWatch",
     isReady: isArpLogDocumentReady,
     signature: arpLogSignature,
     waitForReady: waitForArpLogDocument,
@@ -394,7 +400,7 @@ export function isActivityAvailable(
   caps: ActivityCapState,
   key: ActivityKey,
 ): boolean {
-  return caps[key] !== 'capped';
+  return caps[key] !== "capped";
 }
 
 /**
@@ -407,14 +413,14 @@ export function isActivityPending(
   key: ActivityKey,
 ): boolean {
   const status = caps[key];
-  if (status === 'available') {
+  if (status === "available") {
     return true;
   }
-  if (status === 'capped') {
+  if (status === "capped") {
     return false;
   }
   return (
-    ['steamQuests', 'dailyQuests', 'steamCommunityEvent'] as ActivityKey[]
+    ["steamQuests", "dailyQuests", "steamCommunityEvent"] as ActivityKey[]
   ).includes(key);
 }
 
@@ -423,8 +429,8 @@ export type {
   ActivityCapState,
   CapStatus,
   SiteState,
-} from './types';
-export type { WatchTwitchProgress } from './caps';
+} from "./types";
+export type { WatchTwitchProgress } from "./caps";
 export {
   scrapeWatchTwitchProgressFromDocument,
   twitchWatchRemainingMs,
@@ -435,24 +441,24 @@ export {
   isControlCenterActivityReady,
   isControlCenterDocumentReady,
   waitForControlCenterDocument,
-} from './caps';
-export { utcDateString } from './shared';
+} from "./caps";
+export { utcDateString } from "./shared";
 export type {
   DailyQuestKind,
   DailyQuestRow,
   DailyQuestsState,
-} from './dailyQuests';
+} from "./dailyQuests";
 export {
   applyDailyQuestsFromDocument,
   dailyQuestsCapFromRows,
   remainingDailyQuestRows,
   scrapeDailyQuestRowsFromDocument,
-} from './dailyQuests';
+} from "./dailyQuests";
 export type {
   SteamPlayEligibility,
   SteamQuestRow,
   SteamQuestsState,
-} from './steamQuests';
+} from "./steamQuests";
 export {
   isChooseYourOwnGameQuest,
   scrapeSteamQuestRowsFromDocument,
@@ -463,7 +469,7 @@ export {
   scrapeSteamPlayEligibilityFromDocument,
   applySteamQuestsFromDocument,
   applySteamQuestDetailFromDocument,
-} from './steamQuests';
+} from "./steamQuests";
 export type {
   CommunityEventMilestone,
   CommunityEventState,
@@ -473,7 +479,7 @@ export type {
   CommunityUnlockEstimate,
   ReachableCommunityUnlock,
   WaitingCommunityArpDescription,
-} from './communityEvent';
+} from "./communityEvent";
 export {
   canEarnCommunityEventArp,
   scrapeLiveCommunityEventBanner,
@@ -505,8 +511,8 @@ export {
   parseCommunityEventProgress,
   scrapeCommunityEventFromDocument,
   scrapeCommunityEvent,
-} from './communityEvent';
-export type { GameVaultItem } from './gameVault';
+} from "./communityEvent";
+export type { GameVaultItem } from "./gameVault";
 export {
   vaultPayArp,
   vaultGamePayArp,
@@ -527,8 +533,8 @@ export {
   scrapeGameVault,
   scrapeUserArpTierFromDocument,
   applyGameVaultDocument,
-} from './gameVault';
-export type { BattlePassState } from './battlePass';
+} from "./gameVault";
+export type { BattlePassState } from "./battlePass";
 export {
   scrapeBattlePassFromDocument,
   parseBattlePassCountdownMs,
@@ -544,8 +550,8 @@ export {
   waitForBattlePassDocument,
   listBattlePassClaimButtons,
   claimAllBattlePassRewards,
-} from './battlePass';
-export type { ArpLogEntry, ArpLogState } from './arpLog';
+} from "./battlePass";
+export type { ArpLogEntry, ArpLogState } from "./arpLog";
 export {
   scrapeRedeemableArpFromDocument,
   applyRedeemableArpFromDocument,
@@ -554,4 +560,4 @@ export {
   isArpLogDocumentReady,
   arpLogSignature,
   waitForArpLogDocument,
-} from './arpLog';
+} from "./arpLog";

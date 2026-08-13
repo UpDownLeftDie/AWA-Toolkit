@@ -1,14 +1,16 @@
 // ==UserScript==
 // @name         AWA Toolkit
 // @namespace    https://github.com/UpDownLeftDie/AWA-Toolkit
-// @version      2.0.8
+// @version      2.0.9
 // @author       jaredcat
 // @description  Artifact Optimizer, Control Center tasks, giveaway/vault filters, and UCF reading mode
 // @license      AGPL-3.0-or-later
 // @icon         https://raw.githubusercontent.com/UpDownLeftDie/AWA-Toolkit/main/icon.png
 // @icon64       https://raw.githubusercontent.com/UpDownLeftDie/AWA-Toolkit/main/icon64.png
-// @downloadURL  https://github.com/UpDownLeftDie/AWA-Toolkit/raw/refs/heads/main/dist/awa-toolkit.user.js
-// @updateURL    https://github.com/UpDownLeftDie/AWA-Toolkit/raw/refs/heads/main/dist/awa-toolkit.user.js
+// @homepageURL  https://github.com/UpDownLeftDie/AWA-Toolkit
+// @supportURL   https://github.com/UpDownLeftDie/AWA-Toolkit/issues
+// @downloadURL  https://raw.githubusercontent.com/UpDownLeftDie/AWA-Toolkit/main/dist/awa-toolkit.user.js
+// @updateURL    https://raw.githubusercontent.com/UpDownLeftDie/AWA-Toolkit/main/dist/awa-toolkit.user.js
 // @match        *://*.alienwarearena.com/*
 // @connect      store.steampowered.com
 // @connect      raw.githubusercontent.com
@@ -2816,6 +2818,11 @@
 			earnedArp: Number(incompleteArp[1])
 		};
 		if (/^Incomplete\b/i.test(status)) return { cap: "available" };
+		const completeArp = /^Complete:\s*(\d+)\s*ARP/i.exec(status);
+		if (completeArp?.[1] !== void 0) return {
+			cap: "capped",
+			earnedArp: Number(completeArp[1])
+		};
 		if (/^Complete\b/i.test(status)) return { cap: "capped" };
 		return {};
 	}
@@ -2857,8 +2864,13 @@
 			totalPoints,
 			timeWatched: Number.isFinite(timeWatched) ? timeWatched : 0,
 			bonusPoints: Number.isFinite(bonusPoints) ? bonusPoints : 0,
-			isUnderCap: data.underCap !== false
+			isUnderCap: isTwitchUnderCapFromData(data)
 		};
+	}
+	function isTwitchUnderCapFromData(data) {
+		if (typeof data.underCap === "boolean") return data.underCap;
+		if (typeof data.isUnderCap === "boolean") return data.isUnderCap;
+		return true;
 	}
 	function parseTwitchDailyCapArp(document_) {
 		const body = pageText(document_);
@@ -2881,11 +2893,11 @@
 		if (!twitchData && capFromPage === void 0 && status.earnedArp === void 0 && status.cap === void 0) return previous;
 		const capArp = capFromPage ?? previous?.capArp ?? BASE_ACTIVITY.watchTwitchBasePerDay;
 		let isUnderCap;
-		if (twitchData) isUnderCap = twitchData.isUnderCap;
-		else if (status.cap === "capped") isUnderCap = false;
+		if (status.cap === "capped") isUnderCap = false;
 		else if (status.cap === "available") isUnderCap = true;
+		else if (twitchData) isUnderCap = twitchData.isUnderCap;
 		else isUnderCap = previous?.isUnderCap ?? true;
-		const parsedArp = twitchData?.totalPoints ?? status.earnedArp ?? previous?.baseArp ?? 0;
+		const parsedArp = status.earnedArp ?? twitchData?.totalPoints ?? previous?.baseArp ?? 0;
 		const baseArp = isUnderCap ? parsedArp : Math.max(parsedArp, capArp);
 		const remainingArp = isUnderCap ? Math.max(0, capArp - baseArp) : 0;
 		return {
@@ -2902,9 +2914,8 @@
 		const progress = state?.watchTwitch;
 		const baseCap = progress?.capArp ?? BASE_ACTIVITY.watchTwitchBasePerDay;
 		const isFreshProgress = progress !== void 0 && utcDateString(new Date(progress.scrapedAt)) === utcDateString(now);
-		let earned = 0;
-		if (isFreshProgress && progress) earned = progress.isUnderCap ? progress.baseArp : Math.max(progress.baseArp, baseCap);
-		else if (state?.caps.watchTwitch === "capped") earned = baseCap;
+		if (state?.caps.watchTwitch === "capped" || isFreshProgress && progress && !progress.isUnderCap) return 0;
+		const earned = isFreshProgress && progress ? progress.baseArp : 0;
 		return Math.max(0, baseCap + twitchFlat - earned) * TWITCH_MS_PER_ARP;
 	}
 	function readQuestStatusesFromCard(card) {
@@ -3000,7 +3011,8 @@
 	}
 	function isControlCenterTwitchDataReady(document_) {
 		if (document_.querySelector("#control-center__twitch-arp-status")?.textContent?.trim()) return true;
-		return parseDailyArpTwitchData(document_) !== void 0;
+		if (document_ !== document) return parseDailyArpTwitchData(document_) !== void 0;
+		return false;
 	}
 	function isControlCenterActivityReady(document_) {
 		return isControlCenterDocumentReady(document_) && isControlCenterTwitchDataReady(document_);
@@ -3246,6 +3258,7 @@
 			gameVault: []
 		};
 		if (location.pathname.includes("/arp-log")) await waitForArpLogDocument();
+		if (location.pathname.includes("/control-center") && !location.pathname.includes("/battle-pass")) await waitForControlCenterDocument();
 		const next = {
 			...previous,
 			updatedAt: new Date().toISOString(),
@@ -5243,7 +5256,7 @@
 	}
 	function isSequencedActivityDue(rule, settings, siteState, watchRemainingMs) {
 		if (!isActivityEnabled(settings, rule.key)) return false;
-		if (rule.key === "watchTwitch") return watchRemainingMs > 0;
+		if (rule.key === "watchTwitch") return watchRemainingMs > 0 && isActivityAvailable(siteState.caps, "watchTwitch");
 		return rule.isDue(siteState.caps);
 	}
 	function buildSequencedActivityTodos(result, settings, siteState, options) {
@@ -9060,12 +9073,10 @@
 			if (!isPanelGenerationCurrent(panel, generation)) return;
 			const shouldHydrate = requiresBackgroundHydrate(cached, options);
 			paint(cached, shouldHydrate);
-			if (!shouldHydrate) {
-				await refreshPanelFromLivePage(panel, generation, (data, isHydrating) => {
-					paint(data, isHydrating);
-				});
-				return;
-			}
+			await refreshPanelFromLivePage(panel, generation, (data, isHydrating) => {
+				paint(data, shouldHydrate || isHydrating);
+			});
+			if (!shouldHydrate) return;
 			const hydrated = await hydrateGatheredData(options);
 			if (!isPanelGenerationCurrent(panel, generation)) return;
 			paint(hydrated, false);

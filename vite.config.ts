@@ -5,7 +5,7 @@ import monkey from 'vite-plugin-monkey';
 
 const require = createRequire(import.meta.url);
 const installUrl =
-  'https://github.com/UpDownLeftDie/AWA-Toolkit/raw/refs/heads/main/dist/awa-toolkit.user.js';
+  'https://raw.githubusercontent.com/UpDownLeftDie/AWA-Toolkit/main/dist/awa-toolkit.user.js';
 
 export default defineConfig(({ command }) => {
   const isDev = command === 'serve' || process.env.WATCH === 'true';

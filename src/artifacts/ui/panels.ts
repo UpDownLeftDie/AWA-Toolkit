@@ -1,6 +1,6 @@
-import { applyAsceCommunityHours } from '../asce';
-import type { OptimizerResult } from '../optimizer';
-import { isArtifactsShowroomPage, waitForShowroomDocument } from '../scraper';
+import { applyAsceCommunityHours } from "../asce";
+import type { OptimizerResult } from "../optimizer";
+import { isArtifactsShowroomPage, waitForShowroomDocument } from "../scraper";
 import {
   listBattlePassClaimButtons,
   refreshSiteStateFromPage,
@@ -11,28 +11,28 @@ import {
   watchArpLogPage,
   watchBattlePassPage,
   watchControlCenterPage,
-} from '../siteState';
+} from "../siteState";
 import {
   shouldShowBattlePassClaimAll,
   shouldSkipArpInBattlePassClaimAll,
-} from '../siteState/battlePass';
+} from "../siteState/battlePass";
 import {
   buildActionPlan,
   isKeepingCurrentLoadout,
   renderActionPlan,
-} from './actionPlan';
+} from "./actionPlan";
 import {
   bindDynamicBody,
   bindUpgradeButtons,
   confirmAndApplyCombo,
   confirmAndApplyLoadout,
   persistFormSettings,
-} from './actions';
+} from "./actions";
 import {
   bindClaimAllButtons,
   consumePendingBattlePassClaimAll,
-} from './battlePassClaim';
-import { showAoToast } from './dialog';
+} from "./battlePassClaim";
+import { showAoToast } from "./dialog";
 import {
   gatherData,
   gatheredCache,
@@ -42,8 +42,8 @@ import {
   requiresBackgroundHydrate,
   warmNotificationSchedule,
   type GatheredData,
-} from './gather';
-import { comboLabel, escapeHtml } from './loadoutPlan';
+} from "./gather";
+import { comboLabel, escapeHtml } from "./loadoutPlan";
 import {
   bindVaultDiscountActions,
   renderBreakdown,
@@ -57,7 +57,7 @@ import {
   renderSectionDivider,
   renderVaultDiscountBlock,
   supplementalNotes,
-} from './render';
+} from "./render";
 import {
   BACKDROP_ID,
   BP_CLAIM_BAR_ID,
@@ -69,17 +69,17 @@ import {
   buildInlineShadowCss,
   buildModalShadowCss,
   ensureOptimizerStyles,
-} from './styles';
-import { bindOpenTwitchButtons } from './twitchPick';
+} from "./styles";
+import { bindOpenTwitchButtons } from "./twitchPick";
 
 function ensureOptimizerBackdrop(): HTMLElement {
   let backdrop = document.querySelector<HTMLElement>(`#${BACKDROP_ID}`);
   if (!backdrop) {
-    backdrop = document.createElement('div');
+    backdrop = document.createElement("div");
     backdrop.id = BACKDROP_ID;
-    backdrop.style.setProperty('display', 'none', 'important');
+    backdrop.style.setProperty("display", "none", "important");
     applyOpaqueBackdropChrome(backdrop);
-    backdrop.addEventListener('click', () => {
+    backdrop.addEventListener("click", () => {
       setOptimizerModalOpen(false);
     });
     document.body.append(backdrop);
@@ -91,18 +91,18 @@ function setOptimizerModalOpen(isOpen: boolean): void {
   const modal = document.querySelector<HTMLElement>(`#${MODAL_ID}`);
   const backdrop = ensureOptimizerBackdrop();
   if (!modal) {
-    backdrop.style.setProperty('display', 'none', 'important');
+    backdrop.style.setProperty("display", "none", "important");
     return;
   }
   modal.hidden = !isOpen;
   if (isOpen) {
     applyOpaqueModalChrome(modal);
     applyOpaqueBackdropChrome(backdrop);
-    modal.style.setProperty('display', 'block', 'important');
-    backdrop.style.setProperty('display', 'block', 'important');
+    modal.style.setProperty("display", "block", "important");
+    backdrop.style.setProperty("display", "block", "important");
   } else {
-    modal.style.setProperty('display', 'none', 'important');
-    backdrop.style.setProperty('display', 'none', 'important');
+    modal.style.setProperty("display", "none", "important");
+    backdrop.style.setProperty("display", "none", "important");
   }
 }
 
@@ -140,15 +140,15 @@ function resolveShowroomInsertTarget():
       before: ChildNode | null;
     }
   | undefined {
-  const fragments = [...document.querySelectorAll('div, p, span')].find(
-    (element) => /^Fragments:\s*\d+/i.test(element.textContent?.trim() ?? ''),
+  const fragments = [...document.querySelectorAll("div, p, span")].find(
+    (element) => /^Fragments:\s*\d+/i.test(element.textContent?.trim() ?? ""),
   );
   let target: Element | undefined =
-    fragments ?? document.querySelector('#weapon-section') ?? undefined;
+    fragments ?? document.querySelector("#weapon-section") ?? undefined;
   if (!target) {
     return undefined;
   }
-  const link = target.closest('a');
+  const link = target.closest("a");
   if (link) {
     target = link;
   }
@@ -171,7 +171,7 @@ function bindModalEvents(
     options: { isHydrating?: boolean } = {},
   ): void => {
     cache = data;
-    const body = tree().querySelector('#ao-body');
+    const body = tree().querySelector("#ao-body");
     if (!body) {
       return;
     }
@@ -206,35 +206,35 @@ function bindModalEvents(
   };
 
   tree()
-    .querySelector('#ao-close')
-    ?.addEventListener('click', () => {
+    .querySelector("#ao-close")
+    ?.addEventListener("click", () => {
       setOptimizerModalOpen(false);
     });
 
   tree()
-    .querySelector('#ao-save')
-    ?.addEventListener('click', () => {
+    .querySelector("#ao-save")
+    ?.addEventListener("click", () => {
       void (async () => {
         await persistFormSettings(tree());
         await refreshView({ persist: false });
-        showAoToast('Settings saved.');
+        showAoToast("Settings saved.");
       })();
     });
 
   tree()
-    .querySelector('#ao-equip')
-    ?.addEventListener('click', () => {
+    .querySelector("#ao-equip")
+    ?.addEventListener("click", () => {
       void confirmAndApplyLoadout(cache.result, cache.settings);
     });
 
   tree()
-    .querySelector('#ao-refresh')
-    ?.addEventListener('click', () => {
+    .querySelector("#ao-refresh")
+    ?.addEventListener("click", () => {
       void refreshView({ force: true });
     });
 
-  document.addEventListener('keydown', (event) => {
-    if (event.key === 'Escape' && !modal.hidden) {
+  document.addEventListener("keydown", (event) => {
+    if (event.key === "Escape" && !modal.hidden) {
       setOptimizerModalOpen(false);
     }
   });
@@ -273,13 +273,13 @@ async function openOptimizerModal(): Promise<void> {
   }
   const isNew = !modal;
   if (!modal) {
-    const shell = document.createElement('div') as OptimizerModal;
+    const shell = document.createElement("div") as OptimizerModal;
     shell.id = MODAL_ID;
-    shell.setAttribute('role', 'dialog');
-    shell.setAttribute('aria-modal', 'true');
-    shell.setAttribute('aria-labelledby', 'ao-title');
+    shell.setAttribute("role", "dialog");
+    shell.setAttribute("aria-modal", "true");
+    shell.setAttribute("aria-labelledby", "ao-title");
     shell.hidden = true;
-    const shadow = shell.attachShadow({ mode: 'open' });
+    const shadow = shell.attachShadow({ mode: "open" });
     shadow.innerHTML = `
       <style>${buildModalShadowCss()}</style>
       <div class="ao-panel">
@@ -316,17 +316,17 @@ async function openOptimizerModal(): Promise<void> {
 
 export function addOptimizerMenuButton(): void {
   const menuList = document.querySelector<HTMLElement>(
-    '.nav-item-mus .dropdown-menu.dropdown-menu-end',
+    ".nav-item-mus .dropdown-menu.dropdown-menu-end",
   );
-  if (!menuList || menuList.querySelector('[data-ao-menu]')) {
+  if (!menuList || menuList.querySelector("[data-ao-menu]")) {
     return;
   }
-  const item = document.createElement('a');
-  item.className = 'dropdown-item';
-  item.href = '#';
-  item.dataset.aoMenu = '1';
-  item.textContent = 'Artifact Optimizer';
-  item.addEventListener('click', (event) => {
+  const item = document.createElement("a");
+  item.className = "dropdown-item";
+  item.href = "#";
+  item.dataset.aoMenu = "1";
+  item.textContent = "Artifact Optimizer";
+  item.addEventListener("click", (event) => {
     event.preventDefault();
     event.stopPropagation();
     void openOptimizerModal();
@@ -336,12 +336,12 @@ export function addOptimizerMenuButton(): void {
 
 function watchOptimizerMenuButton(): void {
   addOptimizerMenuButton();
-  if (document.documentElement.dataset.aoMenuWatch === '1') {
+  if (document.documentElement.dataset.aoMenuWatch === "1") {
     return;
   }
-  document.documentElement.dataset.aoMenuWatch = '1';
+  document.documentElement.dataset.aoMenuWatch = "1";
   const observer = new MutationObserver(() => {
-    if (!document.querySelector('[data-ao-menu]')) {
+    if (!document.querySelector("[data-ao-menu]")) {
       addOptimizerMenuButton();
     }
   });
@@ -360,9 +360,9 @@ function parkElement(element: HTMLElement): void {
 
 function findControlCenterMount(): HTMLElement | undefined {
   return (
-    document.querySelector<HTMLElement>('.container.account.has-fixed-menu') ??
-    document.querySelector<HTMLElement>('main .container.account') ??
-    document.querySelector<HTMLElement>('main') ??
+    document.querySelector<HTMLElement>(".container.account.has-fixed-menu") ??
+    document.querySelector<HTMLElement>("main .container.account") ??
+    document.querySelector<HTMLElement>("main") ??
     undefined
   );
 }
@@ -380,10 +380,10 @@ function insertControlCenterHost(panel: HTMLElement): void {
 
 function watchControlCenterHost(panel: HTMLElement): void {
   insertControlCenterHost(panel);
-  if (panel.dataset.aoHostWatch === '1') {
+  if (panel.dataset.aoHostWatch === "1") {
     return;
   }
-  panel.dataset.aoHostWatch = '1';
+  panel.dataset.aoHostWatch = "1";
   const observer = new MutationObserver(() => {
     if (!panel.isConnected) {
       insertControlCenterHost(panel);
@@ -413,10 +413,10 @@ function insertShowroomHost(panel: HTMLElement): void {
 
 function watchShowroomHost(panel: HTMLElement): void {
   insertShowroomHost(panel);
-  if (panel.dataset.aoHostWatch === '1') {
+  if (panel.dataset.aoHostWatch === "1") {
     return;
   }
-  panel.dataset.aoHostWatch = '1';
+  panel.dataset.aoHostWatch = "1";
   const observer = new MutationObserver(() => {
     if (!panel.isConnected) {
       insertShowroomHost(panel);
@@ -443,7 +443,7 @@ function mountInlinePanelShadow(
   if (host.shadowRoot) {
     host.shadowRoot.replaceChildren();
   }
-  const shadow = host.shadowRoot ?? host.attachShadow({ mode: 'open' });
+  const shadow = host.shadowRoot ?? host.attachShadow({ mode: "open" });
   shadow.innerHTML = `
     <style>${buildInlineShadowCss()}</style>
     <div class="ao-panel">
@@ -454,7 +454,7 @@ function mountInlinePanelShadow(
 }
 
 function replaceInlinePanelBody(panel: HTMLElement, bodyHtml: string): void {
-  const box = panelTree(panel).querySelector('.ao-panel');
+  const box = panelTree(panel).querySelector(".ao-panel");
   if (box) {
     box.innerHTML = bodyHtml;
     return;
@@ -463,7 +463,7 @@ function replaceInlinePanelBody(panel: HTMLElement, bodyHtml: string): void {
 }
 
 function bumpPanelGeneration(panel: HTMLElement): number {
-  const generation = Number(panel.dataset.aoGen ?? '0') + 1;
+  const generation = Number(panel.dataset.aoGen ?? "0") + 1;
   panel.dataset.aoGen = String(generation);
   return generation;
 }
@@ -477,8 +477,8 @@ function isPanelGenerationCurrent(
 
 function compactLoadoutSummary(data: GatheredData): {
   todos: ReturnType<typeof buildActionPlan>;
-  combo: OptimizerResult['best'];
-  label: 'Currently equipped' | 'Recommended';
+  combo: OptimizerResult["best"];
+  label: "Currently equipped" | "Recommended";
   hideRecommendedEquip: boolean;
 } {
   const todos = buildActionPlan(data.result, data.settings, data.siteState);
@@ -487,7 +487,7 @@ function compactLoadoutSummary(data: GatheredData): {
   return {
     todos,
     combo: isHideRecommendedEquip ? data.result.current : data.result.best,
-    label: isHideRecommendedEquip ? 'Currently equipped' : 'Recommended',
+    label: isHideRecommendedEquip ? "Currently equipped" : "Recommended",
     hideRecommendedEquip: isHideRecommendedEquip,
   };
 }
@@ -497,8 +497,8 @@ function renderShowroomPanelBody(
   options: { isHydrating?: boolean } = {},
 ): string {
   const hydrateBanner = options.isHydrating
-    ? renderHydrateBanner('Updating in the background…')
-    : '';
+    ? renderHydrateBanner("Updating in the background…")
+    : "";
   const summary = compactLoadoutSummary(data);
   return `
     <div class="ao-heading">Artifact Optimizer</div>
@@ -516,16 +516,16 @@ function renderShowroomPanelBody(
 function compactClaimAllBpButton(data: GatheredData): string {
   const shouldWait = data.result.deferBattlePassClaims === true;
   if (!shouldShowBattlePassClaimAll(data.siteState.battlePass, shouldWait)) {
-    return '';
+    return "";
   }
   const shouldSkipArpBoosts = shouldSkipArpInBattlePassClaimAll(
     data.siteState.battlePass,
     shouldWait,
   );
-  const skipArp = shouldSkipArpBoosts ? ' data-skip-arp="1"' : '';
+  const skipArp = shouldSkipArpBoosts ? ' data-skip-arp="1"' : "";
   const title = shouldSkipArpBoosts
     ? ' title="Claims cosmetics and fragments; leaves ARP Boosts until All-ARP% is equipped"'
-    : '';
+    : "";
   return `<button type="button" class="ao-claim-btn ao-secondary"${skipArp}${title}>Claim all BP</button>`;
 }
 
@@ -534,11 +534,11 @@ function renderControlCenterPanelBody(
   options: { isHydrating?: boolean } = {},
 ): string {
   const hydrateBanner = options.isHydrating
-    ? renderHydrateBanner('Updating in the background…')
-    : '';
+    ? renderHydrateBanner("Updating in the background…")
+    : "";
   const summary = compactLoadoutSummary(data);
   const equipButton = summary.hideRecommendedEquip
-    ? ''
+    ? ""
     : '<button type="button" id="ao-cc-equip">Equip Recommended</button>';
   const claimBpButton = compactClaimAllBpButton(data);
   return `
@@ -553,13 +553,13 @@ function renderControlCenterPanelBody(
     ${renderVaultDiscountBlock(data.result)}
     ${supplementalNotes(data.result.notes)
       .map((note) => `<div class="ao-note">${escapeHtml(note)}</div>`)
-      .join('')}
+      .join("")}
     <div class="ao-actions">
       ${equipButton}
       ${
         equipButton
           ? '<span class="ao-actions-sep" aria-hidden="true"></span>'
-          : ''
+          : ""
       }
       ${claimBpButton}
       <button type="button" id="ao-cc-open" class="ao-secondary">Open Full Panel</button>
@@ -575,7 +575,7 @@ function ensureControlCenterHost(): HTMLElement {
     watchControlCenterHost(existing);
     return existing;
   }
-  const panel = document.createElement('div');
+  const panel = document.createElement("div");
   panel.id = CC_PANEL_ID;
   mountInlinePanelShadow(panel, renderPanelSkeleton());
   watchControlCenterHost(panel);
@@ -588,7 +588,7 @@ function ensureShowroomHost(): HTMLElement {
     watchShowroomHost(existing);
     return existing;
   }
-  const panel = document.createElement('div');
+  const panel = document.createElement("div");
   panel.id = INLINE_ID;
   mountInlinePanelShadow(panel, renderPanelSkeleton());
   watchShowroomHost(panel);
@@ -659,10 +659,14 @@ async function fillPanelFromCacheThenHydrate(
     const shouldHydrate = requiresBackgroundHydrate(cached, options);
     paint(cached, shouldHydrate);
 
+    // Control Center / Showroom are already open — scrape them on every load
+    // even when other resources are still within TTL. Waiting for a 6h
+    // Showroom/ARP-log hydrate left Watch Twitch up while this page already
+    // said Complete / Max Cap Reached.
+    await refreshPanelFromLivePage(panel, generation, (data, isHydrating) => {
+      paint(data, shouldHydrate || isHydrating);
+    });
     if (!shouldHydrate) {
-      await refreshPanelFromLivePage(panel, generation, (data, isHydrating) => {
-        paint(data, isHydrating);
-      });
       return;
     }
     const hydrated = await hydrateGatheredData(options);
@@ -671,7 +675,7 @@ async function fillPanelFromCacheThenHydrate(
     }
     paint(hydrated, false);
   } catch (error) {
-    console.error('[AWA Toolkit] Failed to load recommendations', error);
+    console.error("[AWA Toolkit] Failed to load recommendations", error);
     if (!isPanelGenerationCurrent(panel, generation)) {
       return;
     }
@@ -687,23 +691,23 @@ function renderShowroomEquipActions(
   options: { hideRecommendedEquip?: boolean } = {},
 ): string {
   const recommended = options.hideRecommendedEquip
-    ? ''
+    ? ""
     : '<button type="button" id="ao-inline-equip">Equip Recommended</button>';
   const allArp = result.allArpLoadout
     ? `<button type="button" id="ao-inline-equip-allarp" class="ao-secondary" title="${escapeHtml(comboLabel(result.allArpLoadout))}">Equip All-ARP%</button>`
-    : '';
+    : "";
   const monthlyMeta = result.monthlyMetaLoadout
     ? `<button type="button" id="ao-inline-equip-monthly" class="ao-secondary" title="${escapeHtml(comboLabel(result.monthlyMetaLoadout))}">Equip Monthly META</button>`
-    : '';
+    : "";
   const market = result.marketDiscountLoadout
     ? `<button type="button" id="ao-inline-equip-market" class="ao-secondary" title="${escapeHtml(comboLabel(result.marketDiscountLoadout))}">Equip Market Discount</button>`
-    : '';
+    : "";
   const isLoadoutButtons = [recommended, allArp, monthlyMeta, market].some(
     (html) => html.length > 0,
   );
   const separator = isLoadoutButtons
     ? '<span class="ao-actions-sep" aria-hidden="true"></span>'
-    : '';
+    : "";
   return `
     <div class="ao-actions">
       ${recommended}
@@ -724,7 +728,7 @@ export async function injectShowroomPanel(
   }
   ensureOptimizerStyles();
   const panel = ensureShowroomHost();
-  if (panel.dataset.aoReady === '1' && options.force !== true) {
+  if (panel.dataset.aoReady === "1" && options.force !== true) {
     return;
   }
   const generation = bumpPanelGeneration(panel);
@@ -742,7 +746,7 @@ export async function injectShowroomPanel(
 
   await fillPanelFromCacheThenHydrate(panel, generation, paint, options);
   if (isPanelGenerationCurrent(panel, generation)) {
-    panel.dataset.aoReady = '1';
+    panel.dataset.aoReady = "1";
   }
 }
 
@@ -756,8 +760,8 @@ function paintControlCenterPanel(
     renderControlCenterPanelBody(data, { isHydrating }),
   );
   bindInlinePanelActions(panel, data, {
-    equipId: 'ao-cc-equip',
-    openId: 'ao-cc-open',
+    equipId: "ao-cc-equip",
+    openId: "ao-cc-open",
   });
   // No-op: handleUpgradeClick already force-reinjects this same panel after
   // onChanged resolves, so refreshing it here too would just double-fetch.
@@ -768,13 +772,13 @@ function paintControlCenterPanel(
     void injectControlCenterPanel({ force: true });
   });
   panelTree(panel)
-    .querySelector('#ao-cc-artifacts')
-    ?.addEventListener('click', () => {
-      location.assign('/user-artifacts-room');
+    .querySelector("#ao-cc-artifacts")
+    ?.addEventListener("click", () => {
+      location.assign("/user-artifacts-room");
     });
   panelTree(panel)
-    .querySelector('#ao-cc-refresh')
-    ?.addEventListener('click', () => {
+    .querySelector("#ao-cc-refresh")
+    ?.addEventListener("click", () => {
       void injectControlCenterPanel({ force: true });
     });
 }
@@ -798,7 +802,7 @@ export async function injectControlCenterPanel(
   }
   ensureOptimizerStyles();
   const panel = ensureControlCenterHost();
-  if (panel.dataset.aoReady === '1' && options.force !== true) {
+  if (panel.dataset.aoReady === "1" && options.force !== true) {
     return;
   }
   const generation = bumpPanelGeneration(panel);
@@ -809,7 +813,7 @@ export async function injectControlCenterPanel(
 
   await fillPanelFromCacheThenHydrate(panel, generation, paint, options);
   if (isPanelGenerationCurrent(panel, generation)) {
-    panel.dataset.aoReady = '1';
+    panel.dataset.aoReady = "1";
   }
 }
 
@@ -833,8 +837,8 @@ export async function reloadOptimizerFromCache(): Promise<void> {
 }
 
 const DEFAULT_INLINE_PANEL_IDS = {
-  equipId: 'ao-inline-equip',
-  openId: 'ao-inline-open',
+  equipId: "ao-inline-equip",
+  openId: "ao-inline-open",
 } as const;
 
 function bindShowroomPanelActions(
@@ -842,45 +846,45 @@ function bindShowroomPanelActions(
   data: Awaited<ReturnType<typeof gatherData>>,
 ): void {
   const tree = panelTree(panel);
-  tree.querySelector('#ao-inline-equip')?.addEventListener('click', () => {
+  tree.querySelector("#ao-inline-equip")?.addEventListener("click", () => {
     void confirmAndApplyCombo(
       data.result.best,
       data.result.current,
       data.settings,
-      'recommended',
+      "recommended",
     );
   });
   tree
-    .querySelector('#ao-inline-equip-allarp')
-    ?.addEventListener('click', () => {
+    .querySelector("#ao-inline-equip-allarp")
+    ?.addEventListener("click", () => {
       void confirmAndApplyCombo(
         data.result.allArpLoadout,
         data.result.current,
         data.settings,
-        'All-ARP%',
+        "All-ARP%",
       );
     });
   tree
-    .querySelector('#ao-inline-equip-monthly')
-    ?.addEventListener('click', () => {
+    .querySelector("#ao-inline-equip-monthly")
+    ?.addEventListener("click", () => {
       void confirmAndApplyCombo(
         data.result.monthlyMetaLoadout,
         data.result.current,
         data.settings,
-        'monthly META',
+        "monthly META",
       );
     });
   tree
-    .querySelector('#ao-inline-equip-market')
-    ?.addEventListener('click', () => {
+    .querySelector("#ao-inline-equip-market")
+    ?.addEventListener("click", () => {
       void confirmAndApplyCombo(
         data.result.marketDiscountLoadout,
         data.result.current,
         data.settings,
-        'market discount',
+        "market discount",
       );
     });
-  tree.querySelector('#ao-inline-open')?.addEventListener('click', () => {
+  tree.querySelector("#ao-inline-open")?.addEventListener("click", () => {
     void openOptimizerModal();
   });
 }
@@ -894,10 +898,10 @@ function bindInlinePanelActions(
   } = DEFAULT_INLINE_PANEL_IDS,
 ): void {
   const tree = panelTree(panel);
-  tree.querySelector(`#${ids.equipId}`)?.addEventListener('click', () => {
+  tree.querySelector(`#${ids.equipId}`)?.addEventListener("click", () => {
     void confirmAndApplyLoadout(data.result, data.settings);
   });
-  tree.querySelector(`#${ids.openId}`)?.addEventListener('click', () => {
+  tree.querySelector(`#${ids.openId}`)?.addEventListener("click", () => {
     void openOptimizerModal();
   });
 }
@@ -927,7 +931,7 @@ function renderBattlePassClaimBarBody(): string {
     battlePass,
     shouldWait,
   );
-  const skipArp = shouldSkipArpBoosts ? ' data-skip-arp="1"' : '';
+  const skipArp = shouldSkipArpBoosts ? ' data-skip-arp="1"' : "";
   const claimButton = shouldShowClaimAll
     ? `<div class="ao-actions"><button type="button" class="ao-claim-btn"${skipArp}>Claim all</button></div>`
     : '<div class="ao-muted">Wait to claim ARP Boosts until All-ARP% is equipped</div>';
@@ -954,7 +958,7 @@ function injectBattlePassClaimBar(): void {
   ensureOptimizerStyles();
   let panel = document.querySelector<HTMLElement>(`#${BP_CLAIM_BAR_ID}`);
   if (!panel) {
-    panel = document.createElement('div');
+    panel = document.createElement("div");
     panel.id = BP_CLAIM_BAR_ID;
     mountInlinePanelShadow(panel, renderBattlePassClaimBarBody());
   }
@@ -986,7 +990,7 @@ export async function initArtifactOptimizer(): Promise<void> {
     ensureShowroomHost();
     void injectShowroomPanel();
   } else if (isSiteStatePage()) {
-    if (location.pathname.includes('/battle-pass')) {
+    if (location.pathname.includes("/battle-pass")) {
       injectBattlePassClaimBar();
       watchBattlePassPage(async (state) => {
         await applyAsceCommunityHours(state);
@@ -999,7 +1003,7 @@ export async function initArtifactOptimizer(): Promise<void> {
         await consumePendingBattlePassClaimAll();
         await paintBattlePassClaimBar();
       })();
-    } else if (location.pathname.includes('/arp-log')) {
+    } else if (location.pathname.includes("/arp-log")) {
       watchArpLogPage(async (state) => {
         await applyAsceCommunityHours(state);
         await saveSiteState(state);
