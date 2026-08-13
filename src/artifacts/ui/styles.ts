@@ -302,6 +302,13 @@ function buildPanelShadowCss(variant: PanelShadowVariant): string {
       margin-top: 12px;
       width: 100%;
     }
+    .ao-actions-sep {
+      width: 1px;
+      align-self: stretch;
+      min-height: 28px;
+      background: #555;
+      margin: 0 4px;
+    }
     .ao-todo-list {
       display: block;
       margin: 0 0 4px;

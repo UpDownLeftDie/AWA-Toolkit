@@ -5,7 +5,7 @@ import {
 } from '../data';
 import type { OptimizerResult, ScoredCombo } from '../optimizer';
 import { collectBonuses } from '../optimizer/bonuses';
-import { combinations } from '../optimizer/context';
+import { activeSets, combinations } from '../optimizer/context';
 import {
   isShowroomSlotLocked,
   showroomCooldownRemainingMs,
@@ -66,6 +66,17 @@ export function loadoutLabel(
   return sortArtifactsForDisplay(artifacts)
     .map((artifact) => artifact.displayName)
     .join(' + ');
+}
+
+export function loadoutSetNames(
+  artifacts: { familyId: string }[] | undefined,
+): string[] {
+  if (!artifacts || artifacts.length === 0) {
+    return [];
+  }
+  return activeSets(artifacts.map((artifact) => artifact.familyId)).map(
+    (set) => set.name,
+  );
 }
 
 export function comboLabel(result: OptimizerResult['best']): string {

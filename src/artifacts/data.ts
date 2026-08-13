@@ -134,9 +134,6 @@ export interface ArtifactSetDefinition {
     value: number;
     unit: 'flat' | 'pct' | 'cosmetic';
   }[];
-  /**
-  Unconfirmed / likely unobtainable sets.
-  */
   unconfirmed?: boolean;
 }
 
@@ -406,6 +403,36 @@ export const ARTIFACTS: ArtifactDefinition[] = [
     effectUnit: 'cosmetic',
   },
   {
+    id: 'the-fractured-lilly',
+    category: 'Precious Gems',
+    tierNames: [
+      'The Fractured Lilly',
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+    ],
+    effects: [0, undefined, undefined, undefined, undefined, undefined],
+    effectType: ArtifactEffectType.None,
+    effectUnit: 'flat',
+  },
+  {
+    id: 'the-veiled-thorn',
+    category: 'Weapon',
+    tierNames: [
+      'The Veiled Thorn',
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+    ],
+    effects: [0, undefined, undefined, undefined, undefined, undefined],
+    effectType: ArtifactEffectType.None,
+    effectUnit: 'flat',
+  },
+  {
     id: 'audio-archive-stone',
     category: 'Clothing',
     tierNames: [
@@ -473,12 +500,12 @@ export const ARTIFACT_SETS: ArtifactSetDefinition[] = [
   {
     id: 'braxtine-garden',
     name: 'Braxtine Garden',
-    memberIds: ['the-black-rose'],
+    // This set is an April Fools joke, and likely unobtainable.
+    memberIds: ['the-black-rose', 'the-crimsom-t', 'the-nebula-c'],
     effects: [
       { type: ArtifactEffectType.AllArpPct, value: 5, unit: 'pct' },
       { type: ArtifactEffectType.TimeOnSite, value: 100, unit: 'flat' },
     ],
-    unconfirmed: true,
   },
 ];
 

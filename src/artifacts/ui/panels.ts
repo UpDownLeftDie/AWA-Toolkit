@@ -9,7 +9,11 @@ import {
   watchBattlePassPage,
   watchControlCenterPage,
 } from '../siteState';
-import { buildActionPlan, renderActionPlan } from './actionPlan';
+import {
+  buildActionPlan,
+  isKeepingCurrentLoadout,
+  renderActionPlan,
+} from './actionPlan';
 import {
   bindDynamicBody,
   bindUpgradeButtons,
@@ -457,6 +461,23 @@ function isPanelGenerationCurrent(
   return panel.isConnected && panel.dataset.aoGen === String(generation);
 }
 
+function compactLoadoutSummary(data: GatheredData): {
+  todos: ReturnType<typeof buildActionPlan>;
+  combo: OptimizerResult['best'];
+  label: 'Currently equipped' | 'Recommended';
+  hideRecommendedEquip: boolean;
+} {
+  const todos = buildActionPlan(data.result, data.settings, data.siteState);
+  const hideRecommendedEquip =
+    isKeepingCurrentLoadout(todos) && Boolean(data.result.current);
+  return {
+    todos,
+    combo: hideRecommendedEquip ? data.result.current : data.result.best,
+    label: hideRecommendedEquip ? 'Currently equipped' : 'Recommended',
+    hideRecommendedEquip,
+  };
+}
+
 function renderShowroomPanelBody(
   data: GatheredData,
   options: { isHydrating?: boolean } = {},
@@ -464,14 +485,17 @@ function renderShowroomPanelBody(
   const hydrateBanner = options.isHydrating
     ? renderHydrateBanner('Updating in the background…')
     : '';
+  const summary = compactLoadoutSummary(data);
   return `
     <div class="ao-heading">Artifact Optimizer</div>
     ${renderCredits({ compact: true })}
     ${hydrateBanner}
-    <div class="ao-row"><strong>Recommended:</strong> ${comboLabel(data.result.best)}</div>
-    ${renderBreakdown(data.result.best)}
+    <div class="ao-row"><strong>${summary.label}:</strong> ${comboLabel(summary.combo)}</div>
+    ${renderBreakdown(summary.combo)}
     ${renderVaultDiscountBlock(data.result)}
-    ${renderShowroomEquipActions(data.result)}
+    ${renderShowroomEquipActions(data.result, {
+      hideRecommendedEquip: summary.hideRecommendedEquip,
+    })}
   `;
 }
 
@@ -482,23 +506,30 @@ function renderControlCenterPanelBody(
   const hydrateBanner = options.isHydrating
     ? renderHydrateBanner('Updating in the background…')
     : '';
+  const summary = compactLoadoutSummary(data);
+  const equipButton = summary.hideRecommendedEquip
+    ? ''
+    : '<button type="button" id="ao-cc-equip">Equip Recommended</button>';
   return `
     <div class="ao-heading">Artifact Optimizer</div>
     ${renderCredits({ compact: true })}
     ${hydrateBanner}
-    ${renderActionPlan(
-      buildActionPlan(data.result, data.settings, data.siteState),
-    )}
+    ${renderActionPlan(summary.todos)}
     ${renderSectionDivider()}
-    <div class="ao-row"><strong>Recommended:</strong> ${comboLabel(data.result.best)}</div>
-    ${renderBreakdown(data.result.best)}
+    <div class="ao-row"><strong>${summary.label}:</strong> ${comboLabel(summary.combo)}</div>
+    ${renderBreakdown(summary.combo)}
     ${renderCooldownBlock(data.settings, data.snapshot?.slotLocks)}
     ${renderVaultDiscountBlock(data.result)}
     ${supplementalNotes(data.result.notes)
       .map((note) => `<div class="ao-note">${escapeHtml(note)}</div>`)
       .join('')}
     <div class="ao-actions">
-      <button type="button" id="ao-cc-equip">Equip Recommended</button>
+      ${equipButton}
+      ${
+        equipButton
+          ? '<span class="ao-actions-sep" aria-hidden="true"></span>'
+          : ''
+      }
       <button type="button" id="ao-cc-open" class="ao-secondary">Open Full Panel</button>
       <button type="button" id="ao-cc-artifacts" class="ao-secondary">Go to Artifacts</button>
       <button type="button" id="ao-cc-refresh" class="ao-secondary">Refresh</button>
@@ -616,9 +647,15 @@ async function fillPanelFromCacheThenHydrate(
   }
 }
 
-function renderShowroomEquipActions(result: OptimizerResult): string {
+function renderShowroomEquipActions(
+  result: OptimizerResult,
+  options: { hideRecommendedEquip?: boolean } = {},
+): string {
+  const recommended = options.hideRecommendedEquip
+    ? ''
+    : '<button type="button" id="ao-inline-equip">Equip Recommended</button>';
   const allArp = result.allArpLoadout
-    ? `<button type="button" id="ao-inline-equip-allarp" title="${escapeHtml(comboLabel(result.allArpLoadout))}">Equip All-ARP%</button>`
+    ? `<button type="button" id="ao-inline-equip-allarp" class="ao-secondary" title="${escapeHtml(comboLabel(result.allArpLoadout))}">Equip All-ARP%</button>`
     : '';
   const monthlyMeta = result.monthlyMetaLoadout
     ? `<button type="button" id="ao-inline-equip-monthly" class="ao-secondary" title="${escapeHtml(comboLabel(result.monthlyMetaLoadout))}">Equip Monthly META</button>`
@@ -626,12 +663,19 @@ function renderShowroomEquipActions(result: OptimizerResult): string {
   const market = result.marketDiscountLoadout
     ? `<button type="button" id="ao-inline-equip-market" class="ao-secondary" title="${escapeHtml(comboLabel(result.marketDiscountLoadout))}">Equip Market Discount</button>`
     : '';
+  const loadoutButtons = [recommended, allArp, monthlyMeta, market].some(
+    (html) => html.length > 0,
+  );
+  const sep = loadoutButtons
+    ? '<span class="ao-actions-sep" aria-hidden="true"></span>'
+    : '';
   return `
     <div class="ao-actions">
-      <button type="button" id="ao-inline-equip">Equip Recommended</button>
+      ${recommended}
       ${allArp}
       ${monthlyMeta}
       ${market}
+      ${sep}
       <button type="button" id="ao-inline-open" class="ao-secondary">Open Full Panel</button>
     </div>
   `;

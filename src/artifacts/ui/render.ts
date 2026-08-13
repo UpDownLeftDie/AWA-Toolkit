@@ -140,6 +140,11 @@ export function renderBreakdown(result: OptimizerResult['best']): string {
     )
     .join('');
   return `
+    ${
+      result.activeSetNames.length > 0
+        ? `<div class="ao-row"><strong>Set:</strong> ${escapeHtml(result.activeSetNames.join(', '))}</div>`
+        : ''
+    }
     <div class="ao-row">Estimated lock-window ARP: <strong>${result.weeklyArp}</strong></div>
     ${
       result.marketplaceSavingsArp > 0
@@ -149,11 +154,6 @@ export function renderBreakdown(result: OptimizerResult['best']): string {
     <div class="ao-row">All ARP multiplier: <strong>${(
       result.allArpPct * 100
     ).toFixed(0)}%</strong></div>
-    ${
-      result.activeSetNames.length > 0
-        ? `<div class="ao-row">Sets: ${escapeHtml(result.activeSetNames.join(', '))}</div>`
-        : ''
-    }
     <details>
       <summary class="ao-muted">Breakdown</summary>
       ${rows}

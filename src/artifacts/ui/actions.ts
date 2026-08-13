@@ -13,6 +13,7 @@ import {
   formatLockedSlotParts,
   isSameLoadout,
   loadoutLabel,
+  loadoutSetNames,
   planLoadoutChanges,
   type ArtifactSlot,
   type LoadoutChangePlan,
@@ -108,6 +109,16 @@ export async function confirmAndApplyCombo(
   notifyLoadoutResult(allOk, results, label);
 }
 
+function namedLoadout(
+  label: string,
+  activeSetNames: string[] | undefined,
+): string {
+  if (!activeSetNames || activeSetNames.length === 0) {
+    return label;
+  }
+  return `${label} (${activeSetNames.join(', ')})`;
+}
+
 async function explainNothingToEquip(
   label: string,
   plan: LoadoutChangePlan,
@@ -115,21 +126,23 @@ async function explainNothingToEquip(
   options?: {
     allArpLabel?: string;
     slotLocks?: Partial<Record<ArtifactSlot, boolean>>;
+    activeSetNames?: string[];
   },
 ): Promise<void> {
+  const named = namedLoadout(label, options?.activeSetNames);
   const lines: string[] = [];
   if (plan.later.length > 0) {
-    lines.push(`No unlocked slots for ${label} yet.`);
+    lines.push(`No unlocked slots for ${named} yet.`);
     if (plan.laterNames.length > 0) {
       lines.push(`Still needed: ${plan.laterNames.join(', ')}.`);
     }
   } else if (options?.allArpLabel) {
     lines.push(
-      `The ${label} loadout is already equipped.`,
+      `The ${named} loadout is already equipped.`,
       `All-ARP% still needed:\n${options.allArpLabel}`,
     );
   } else {
-    lines.push(`The ${label} loadout is already equipped.`);
+    lines.push(`The ${named} loadout is already equipped.`);
   }
   if (plan.lockedSlots.length > 0) {
     const parts = formatLockedSlotParts(
@@ -169,12 +182,14 @@ async function resolveAllArpWhenRecommendedEquipped(
   const allArp = allArpTargetArtifacts(result);
   if (!allArp || isSameLoadout(current?.artifacts, allArp)) {
     await explainNothingToEquip('recommended', recommendedPlan, settings, {
+      activeSetNames: loadoutSetNames(current?.artifacts),
       ...(result?.slotLocks && { slotLocks: result.slotLocks }),
     });
     return undefined;
   }
 
   const allArpLabel = loadoutLabel(allArp);
+  const allArpSetNames = loadoutSetNames(allArp);
   const unlockedPlan = planLoadoutChanges(
     allArp,
     current,
@@ -186,13 +201,17 @@ async function resolveAllArpWhenRecommendedEquipped(
       unlockedPlan,
       'All-ARP%',
       settings,
-      result?.slotLocks,
+      {
+        activeSetNames: allArpSetNames,
+        ...(result?.slotLocks && { slotLocks: result.slotLocks }),
+      },
     );
     return isOk ? unlockedPlan : undefined;
   }
 
   await explainNothingToEquip('recommended', unlockedPlan, settings, {
-    allArpLabel,
+    allArpLabel: namedLoadout(allArpLabel, allArpSetNames),
+    activeSetNames: loadoutSetNames(current?.artifacts),
     ...(result?.slotLocks && { slotLocks: result.slotLocks }),
   });
   return undefined;
@@ -211,18 +230,18 @@ async function resolveLoadoutPlan(
     settings,
     result?.slotLocks,
   );
+  const activeSetNames = loadoutSetNames(combo.artifacts);
   if (plan.now.length > 0) {
-    const isOk = await didConfirmNormalEquip(
-      plan,
-      label,
-      settings,
-      result?.slotLocks,
-    );
+    const isOk = await didConfirmNormalEquip(plan, label, settings, {
+      activeSetNames,
+      ...(result?.slotLocks && { slotLocks: result.slotLocks }),
+    });
     return isOk ? plan : undefined;
   }
 
   if (plan.later.length > 0) {
     await explainNothingToEquip(label, plan, settings, {
+      activeSetNames,
       ...(result?.slotLocks && { slotLocks: result.slotLocks }),
     });
     return undefined;
@@ -239,6 +258,7 @@ async function resolveLoadoutPlan(
   }
 
   await explainNothingToEquip(label, plan, settings, {
+    activeSetNames,
     ...(result?.slotLocks && { slotLocks: result.slotLocks }),
   });
   return undefined;
@@ -248,7 +268,10 @@ async function didConfirmNormalEquip(
   plan: LoadoutChangePlan,
   label: string,
   settings: ArtifactOptimizerSettings,
-  slotLocks?: Partial<Record<ArtifactSlot, boolean>>,
+  options?: {
+    slotLocks?: Partial<Record<ArtifactSlot, boolean>>;
+    activeSetNames?: string[];
+  },
 ): Promise<boolean> {
   const nowLines = plan.now
     .map((change) => `${change.displayName} → slot ${change.position}`)
@@ -258,7 +281,7 @@ async function didConfirmNormalEquip(
       ? `\n\nLeaving locked as-is: ${formatLockedSlotParts(
           settings,
           plan.lockedSlots,
-          slotLocks,
+          options?.slotLocks,
         ).join(', ')}.`
       : '';
   const laterNote =
@@ -266,7 +289,7 @@ async function didConfirmNormalEquip(
       ? `\nStill needed later: ${plan.laterNames.join(', ')}.`
       : '';
   return didConfirmAoDialog(
-    `Equip ${label} into unlocked slot(s) now?\n\n${nowLines}${lockedNote}${laterNote}\n\nThis uses the live AWA API and starts a 24h cooldown per changed slot.`,
+    `Equip ${namedLoadout(label, options?.activeSetNames)} into unlocked slot(s) now?\n\n${nowLines}${lockedNote}${laterNote}\n\nThis uses the live AWA API and starts a 24h cooldown per changed slot.`,
     { title: 'Equip loadout', confirmLabel: 'Equip' },
   );
 }

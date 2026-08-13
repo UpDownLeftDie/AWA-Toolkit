@@ -2066,6 +2066,16 @@ function isCautionTodo(todo: ActionTodo): boolean {
   return todo.kind === 'caution';
 }
 
+/**
+ * True when the next step still uses the equipped set (e.g. finish Daily
+ * Quests before a later swap). The compact summary should then show current
+ * stats instead of advertising the future recommended loadout.
+ */
+export function isKeepingCurrentLoadout(todos: ActionTodo[]): boolean {
+  const firstStep = todos.find((todo) => !isCautionTodo(todo));
+  return firstStep?.urgency?.chain !== 'equip';
+}
+
 export function renderActionPlanContents(todos: ActionTodo[]): string {
   const cautions = todos.filter((todo) => isCautionTodo(todo));
   const steps = todos.filter((todo) => !isCautionTodo(todo));
