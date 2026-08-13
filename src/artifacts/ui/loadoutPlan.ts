@@ -179,6 +179,7 @@ export interface LoadoutChangePlan {
     artifactId: number;
     position: ArtifactSlot;
     displayName: string;
+    replacedDisplayName?: string;
   }[];
   later: {
     artifactId: number;
@@ -377,10 +378,12 @@ export function planLoadoutChanges(
     if (position === undefined) {
       break;
     }
+    const replaced = currentBySlot.get(position);
     now.push({
       artifactId: artifact.instanceId,
       position,
       displayName: artifact.displayName,
+      ...(replaced && { replacedDisplayName: replaced.displayName }),
     });
     placedIds.add(artifact.instanceId);
   }

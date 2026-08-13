@@ -330,7 +330,12 @@ async function didConfirmNormalEquip(
   },
 ): Promise<boolean> {
   const nowLines = plan.now
-    .map((change) => `${change.displayName} → slot ${change.position}`)
+    .map((change) => {
+      const incoming = `${change.displayName} → slot ${change.position}`;
+      return change.replacedDisplayName
+        ? `${incoming} (removing ${change.replacedDisplayName})`
+        : incoming;
+    })
     .join('\n');
   const lockedNote =
     plan.lockedSlots.length > 0

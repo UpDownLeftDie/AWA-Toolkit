@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         AWA Toolkit
 // @namespace    https://github.com/UpDownLeftDie/AWA-Toolkit
-// @version      2.0.9
+// @version      2.0.10
 // @author       jaredcat
 // @description  Artifact Optimizer, Control Center tasks, giveaway/vault filters, and UCF reading mode
 // @license      AGPL-3.0-or-later
@@ -4777,10 +4777,12 @@
 		for (const artifact of nowArtifacts) {
 			const position = freeSlots.shift();
 			if (position === void 0) break;
+			const replaced = currentBySlot.get(position);
 			now.push({
 				artifactId: artifact.instanceId,
 				position,
-				displayName: artifact.displayName
+				displayName: artifact.displayName,
+				...replaced && { replacedDisplayName: replaced.displayName }
 			});
 			placedIds.add(artifact.instanceId);
 		}
@@ -8569,7 +8571,10 @@
 		});
 	}
 	async function didConfirmNormalEquip(plan, label, settings, options) {
-		const nowLines = plan.now.map((change) => `${change.displayName} → slot ${change.position}`).join("\n");
+		const nowLines = plan.now.map((change) => {
+			const incoming = `${change.displayName} → slot ${change.position}`;
+			return change.replacedDisplayName ? `${incoming} (removing ${change.replacedDisplayName})` : incoming;
+		}).join("\n");
 		const lockedNote = plan.lockedSlots.length > 0 ? `\n\nLeaving locked as-is: ${formatLockedSlotParts(settings, plan.lockedSlots, options?.slotLocks).join(", ")}.` : "";
 		const laterNote = plan.laterNames.length > 0 ? `\nStill needed later: ${plan.laterNames.join(", ")}.` : "";
 		return didConfirmAoDialog(`Equip ${namedLoadout(label, options?.activeSetNames)} into unlocked slot(s) now?\n\n${nowLines}${lockedNote}${laterNote}\n\nThis uses the live AWA API and starts a 24h cooldown per changed slot.`, {
