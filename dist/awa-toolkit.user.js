@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         AWA Toolkit
 // @namespace    https://github.com/UpDownLeftDie/AWA-Toolkit
-// @version      2.0.7
+// @version      2.0.8
 // @author       jaredcat
 // @description  Artifact Optimizer, Control Center tasks, giveaway/vault filters, and UCF reading mode
 // @license      AGPL-3.0-or-later
@@ -13,9 +13,12 @@
 // @connect      store.steampowered.com
 // @connect      raw.githubusercontent.com
 // @grant        GM.getValue
+// @grant        GM.notification
 // @grant        GM.openInTab
 // @grant        GM.setValue
 // @grant        GM_xmlhttpRequest
+// @grant        unsafeWindow
+// @grant        window.focus
 // @run-at       document-start
 // ==/UserScript==
 
@@ -23,6 +26,7 @@
 	"use strict";
 	var _GM = (() => typeof GM != "undefined" ? GM : void 0)();
 	var _GM_xmlhttpRequest = (() => typeof GM_xmlhttpRequest != "undefined" ? GM_xmlhttpRequest : void 0)();
+	var _unsafeWindow = (() => typeof unsafeWindow != "undefined" ? unsafeWindow : void 0)();
 	var STEAM_FREE_CACHE_KEY = "steamAppFreeCache";
 	var STEAM_FREE_TTL_PERMANENT_MS = 6048e5;
 	var STEAM_FREE_TTL_PRICE_MS = 864e5;
@@ -229,6 +233,100 @@
 			...upgraded.libraryPending === true && { libraryPending: true }
 		};
 	}
+	function pageWindow() {
+		try {
+			return _unsafeWindow;
+		} catch {}
+		return globalThis;
+	}
+	function asFiniteNumber(value) {
+		if (typeof value === "number" && Number.isFinite(value)) return value;
+		if (typeof value === "string" && value.trim() !== "") {
+			const parsed = Number(value.replaceAll(",", ""));
+			if (Number.isFinite(parsed)) return parsed;
+		}
+	}
+	function readPageNumber(name) {
+		try {
+			return asFiniteNumber(pageWindow()[name]);
+		} catch {
+			return;
+		}
+	}
+	function parseInlineNumber(document_, names) {
+		const pattern = new RegExp(String.raw`(?:var\s+|window\.)?(?:${names.join("|")})\s*=\s*(\d+)`);
+		for (const script of document_.querySelectorAll("script")) {
+			const match = pattern.exec(script.textContent ?? "");
+			if (match?.[1]) return Number(match[1]);
+		}
+	}
+	function readPageArpTier(document_ = document) {
+		if (document_ === document) {
+			const tier = readPageNumber("arp_tier");
+			if (tier !== void 0 && tier >= 0) return tier;
+		}
+		const fromScript = parseInlineNumber(document_, ["arp_tier"]);
+		if (fromScript !== void 0) return fromScript;
+		const tierImg = document_.querySelector("img[src*=\"/images/content/tier-tags/\"]");
+		const tierMatch = /tier-tags\/(\d+)\.png/.exec(tierImg?.src ?? "");
+		if (!tierMatch?.[1]) return;
+		const tier = Number(tierMatch[1]);
+		return Number.isFinite(tier) ? tier : void 0;
+	}
+	function readPageFragmentBalance(document_ = document) {
+		if (document_ === document) {
+			const fragments = readPageNumber("fragment_balance");
+			if (fragments !== void 0 && fragments >= 0) return fragments;
+		}
+		const fromScript = parseInlineNumber(document_, ["fragment_balance"]);
+		return fromScript !== void 0 && fromScript >= 0 ? fromScript : void 0;
+	}
+	function readPageRedeemableArp(document_ = document) {
+		const names = [
+			"arp_balance",
+			"user_arp",
+			"arp_points",
+			"redeemable_arp"
+		];
+		if (document_ === document) for (const name of names) {
+			const value = readPageNumber(name);
+			if (value !== void 0 && value >= 0) return value;
+		}
+		const fromScript = parseInlineNumber(document_, names);
+		return fromScript !== void 0 && fromScript >= 0 ? fromScript : void 0;
+	}
+	function giveawayKeyFromUnknown(value) {
+		if (typeof value !== "object" || !value) return;
+		const row = value;
+		const id = row.giveaway_id ?? row.giveawayId ?? row.id;
+		if (id === void 0 || id === null) return;
+		const status = typeof row.status === "string" ? row.status : "";
+		const entry = {
+			giveawayId: String(id),
+			status
+		};
+		const remaining = asFiniteNumber(row.remaining);
+		if (remaining !== void 0) entry.remaining = remaining;
+		return entry;
+	}
+	function readPageGiveawayKeys() {
+		let raw;
+		try {
+			raw = pageWindow().giveawayKeys;
+		} catch {
+			return [];
+		}
+		if (!Array.isArray(raw)) return [];
+		const keys = [];
+		for (const item of raw) {
+			const entry = giveawayKeyFromUnknown(item);
+			if (entry) keys.push(entry);
+		}
+		return keys;
+	}
+	function giveawayKeyStatus(giveawayId) {
+		return readPageGiveawayKeys().find((entry) => entry.giveawayId === giveawayId);
+	}
 	function pageText(document_ = document) {
 		return document_.body?.textContent ?? "";
 	}
@@ -278,18 +376,8 @@
 		return Number.isFinite(value) ? value : void 0;
 	}
 	function scrapeRedeemableArpFromDocument(document_) {
-		if (document_ === document) {
-			const win = globalThis;
-			for (const value of [
-				win.user_arp,
-				win.arp_points,
-				win.redeemable_arp
-			]) if (typeof value === "number" && Number.isFinite(value) && value >= 0) return value;
-		}
-		for (const script of document_.querySelectorAll("script")) {
-			const match = /(?:var\s+|window\.)?(?:user_arp|arp_points|redeemable_arp)\s*=\s*(\d+)/.exec(script.textContent ?? "");
-			if (match?.[1]) return Number(match[1]);
-		}
+		const fromPage = readPageRedeemableArp(document_);
+		if (fromPage !== void 0) return fromPage;
 		return parseRedeemableArpText(pageText(document_));
 	}
 	function applyRedeemableArpFromDocument(next, document_) {
@@ -441,6 +529,36 @@
 	}
 	var SETTINGS_KEY = "artifactOptimizerSettings";
 	var COOLDOWN_MS = 864e5;
+	var NOTIFICATION_TYPE_KEYS = [
+		"swap",
+		"community",
+		"vault",
+		"giveaways"
+	];
+	var NOTIFICATION_TYPE_COPY = {
+		swap: {
+			title: "Recommended swap",
+			hint: "When a better loadout is waiting on a 24h lock — not every unlock."
+		},
+		community: {
+			title: "Community Event",
+			hint: "When community hours unlock pending ARP."
+		},
+		vault: {
+			title: "Game Vault",
+			hint: "When the vault opens or new games appear."
+		},
+		giveaways: {
+			title: "New giveaways",
+			hint: "Official Alienware key giveaways — not community giveaways."
+		}
+	};
+	var DEFAULT_NOTIFICATION_TYPES = {
+		swap: true,
+		community: true,
+		vault: true,
+		giveaways: true
+	};
 	var DEFAULT_ACTIVITIES = {
 		timeOnSite: {
 			enabled: true,
@@ -477,7 +595,9 @@
 		manualArtifacts: [],
 		preferScraped: true,
 		slotCooldowns: [],
-		preferredTwitchStreamers: []
+		preferredTwitchStreamers: [],
+		browserNotifications: false,
+		notificationTypes: { ...DEFAULT_NOTIFICATION_TYPES }
 	};
 	function isPartialSettings(value) {
 		return typeof value === "object" && !!value;
@@ -512,6 +632,14 @@
 			else delete settings.vaultDiscountDismissedCycle;
 		}
 		if (Array.isArray(parsed.preferredTwitchStreamers)) settings.preferredTwitchStreamers = parsePreferredTwitchStreamers(parsed.preferredTwitchStreamers.filter((item) => typeof item === "string").join("\n"));
+		if (typeof parsed.browserNotifications === "boolean") settings.browserNotifications = parsed.browserNotifications;
+		settings.notificationTypes = mergeNotificationTypes(settings.notificationTypes, parsed.notificationTypes);
+	}
+	function mergeNotificationTypes(base, incoming) {
+		if (!incoming) return base;
+		const next = { ...base };
+		for (const key of NOTIFICATION_TYPE_KEYS) if (typeof incoming[key] === "boolean") next[key] = incoming[key];
+		return next;
 	}
 	function twitchLoginFromInput(value) {
 		let text = value.trim();
@@ -539,7 +667,8 @@
 			activities: { ...DEFAULT_ACTIVITIES },
 			manualArtifacts: [],
 			slotCooldowns: [],
-			preferredTwitchStreamers: []
+			preferredTwitchStreamers: [],
+			notificationTypes: { ...DEFAULT_NOTIFICATION_TYPES }
 		};
 		if (!raw) return settings;
 		try {
@@ -559,7 +688,11 @@
 			activities: patch.activities ? {
 				...previous.activities,
 				...patch.activities
-			} : previous.activities
+			} : previous.activities,
+			notificationTypes: patch.notificationTypes ? {
+				...previous.notificationTypes,
+				...patch.notificationTypes
+			} : previous.notificationTypes
 		};
 		await _GM.setValue(SETTINGS_KEY, JSON.stringify(next));
 		return next;
@@ -621,6 +754,9 @@
 			for (const entry of previous) if (slotLocks[entry.position] !== false && next.every((row) => row.position === entry.position)) next.push(entry);
 		}
 		if (JSON.stringify(previous) !== JSON.stringify(next)) await saveArtifactSettings({ slotCooldowns: next });
+	}
+	function isNotificationTypeEnabled(settings, key) {
+		return settings.notificationTypes[key] ?? true;
 	}
 	async function postJson(path, body) {
 		try {
@@ -841,14 +977,14 @@
 		}
 		return items;
 	}
-	function delay$1(ms) {
+	function delay$2(ms) {
 		return new Promise((resolve) => {
 			setTimeout(resolve, ms);
 		});
 	}
 	async function waitWhile(isWaiting, timeoutMs, intervalMs = 100) {
 		const startedAt = Date.now();
-		while (isWaiting() && Date.now() - startedAt < timeoutMs) await delay$1(intervalMs);
+		while (isWaiting() && Date.now() - startedAt < timeoutMs) await delay$2(intervalMs);
 	}
 	var claimEndpointCache = {};
 	function jsonishId(value) {
@@ -982,7 +1118,7 @@
 			seen.add(key);
 			if (!(await claimBattlePassReward(resolveClaimPath(endpoint, milestoneId), resolveClaimBody(endpoint, item.popup, item.button))).ok) continue;
 			claimed += 1;
-			await delay$1(200);
+			await delay$2(200);
 		}
 		return claimed;
 	}
@@ -997,7 +1133,7 @@
 			button.click();
 			claimed += 1;
 			await waitWhile(() => button.isConnected && popup.contains(button), 4e3);
-			await delay$1(200);
+			await delay$2(200);
 		}
 		return claimed;
 	}
@@ -1031,7 +1167,7 @@
 						return;
 					}
 					const started = Date.now();
-					while (Date.now() - started < 8e3 && !isBattlePassDocumentReady(document_)) await delay$1(250);
+					while (Date.now() - started < 8e3 && !isBattlePassDocumentReady(document_)) await delay$2(250);
 					finish(iframe);
 				})();
 			};
@@ -3000,19 +3136,7 @@
 		return result;
 	}
 	function scrapeUserArpTierFromDocument(document_) {
-		if (document_ === document) {
-			const arpTier = globalThis.arp_tier;
-			if (typeof arpTier === "number" && Number.isFinite(arpTier) && arpTier >= 0) return arpTier;
-		}
-		for (const script of document_.querySelectorAll("script")) {
-			const match = /(?:var\s+|window\.)?arp_tier\s*=\s*(\d+)/.exec(script.textContent ?? "");
-			if (match?.[1]) return Number(match[1]);
-		}
-		const tierImg = document_.querySelector("img[src*=\"/images/content/tier-tags/\"]");
-		const tierMatch = /tier-tags\/(\d+)\.png/.exec(tierImg?.src ?? "");
-		if (!tierMatch?.[1]) return;
-		const tier = Number(tierMatch[1]);
-		return Number.isFinite(tier) ? tier : void 0;
+		return readPageArpTier(document_);
 	}
 	function applyGameVaultSchedule(next, timerMs, isOpen, now) {
 		if (isOpen) {
@@ -3251,11 +3375,11 @@
 	function hasPendingAsceRefresh() {
 		return inflightLookup.promise !== void 0;
 	}
-	function isRecord(value) {
+	function isRecord$1(value) {
 		return typeof value === "object" && value !== null;
 	}
 	function isAsceCache(value) {
-		return isRecord(value) && typeof value.at === "string";
+		return isRecord$1(value) && typeof value.at === "string";
 	}
 	function gmGetJson(url) {
 		return new Promise((resolve) => {
@@ -3331,7 +3455,7 @@
 		return Date.UTC(year, month - 1, day, hour, 0, 0);
 	}
 	function parseAsceHourPoint(value) {
-		if (!isRecord(value)) return;
+		if (!isRecord$1(value)) return;
 		const hours = value.value;
 		const hour = value.hour;
 		const timestamp = value.timestamp;
@@ -3362,14 +3486,14 @@
 		if (!Array.isArray(milestones)) return [];
 		const unlockedHours = [];
 		for (const row of milestones) {
-			if (!isRecord(row) || row.unlocked !== true) continue;
+			if (!isRecord$1(row) || row.unlocked !== true) continue;
 			const hours = row.current_hours;
 			if (typeof hours === "number" && Number.isFinite(hours) && hours > 0) unlockedHours.push(hours);
 		}
 		return unlockedHours;
 	}
 	function parseAsceConfig(raw) {
-		if (!isRecord(raw)) return { unlockedHours: [] };
+		if (!isRecord$1(raw)) return { unlockedHours: [] };
 		const game = typeof raw.game === "string" ? raw.game : void 0;
 		const goalHours = typeof raw.goal_hours === "number" && Number.isFinite(raw.goal_hours) ? raw.goal_hours : void 0;
 		return {
@@ -3545,10 +3669,8 @@
 		return next;
 	}
 	function readFragmentBalance(document_) {
-		if (document_ === document) {
-			const win = globalThis;
-			if (typeof win.fragment_balance === "number") return win.fragment_balance;
-		}
+		const fromPage = readPageFragmentBalance(document_);
+		if (fromPage !== void 0) return fromPage;
 		const text = document_.body?.textContent ?? "";
 		const match = /Fragments:\s*([\d,]+)/i.exec(text);
 		if (match?.[1]) return Number(match[1].replaceAll(",", ""));
@@ -5680,7 +5802,7 @@
 	var EQUIP_CONFIRM_RETRY_MS = 750;
 	var BATTLE_PASS_STALE_MS = 36e5;
 	var COMMUNITY_EVENT_PENDING_STALE_MS = STALE_MS;
-	var CONTROL_CENTER_PATH = "/control-center";
+	var CONTROL_CENTER_PATH$1 = "/control-center";
 	var BATTLE_PASS_PATH = "/control-center/battle-pass/1";
 	var GAME_VAULT_PATH = "/marketplace/game-vault";
 	var ARP_LOG_PATH = "/account/arp-log";
@@ -5719,7 +5841,7 @@
 			return;
 		}
 	}
-	function delay(ms) {
+	function delay$1(ms) {
 		return new Promise((resolve) => {
 			setTimeout(resolve, ms);
 		});
@@ -5728,7 +5850,7 @@
 		const started = Date.now();
 		while (Date.now() - started < 4e3) {
 			if (document_.querySelector("#personal-hours")?.textContent?.trim()) break;
-			await delay(250);
+			await delay$1(250);
 		}
 	}
 	async function settleIframePage(iframe, path) {
@@ -5736,7 +5858,7 @@
 		if (!document_) return;
 		if (path.includes("/steam/community-event")) await waitForCommunityEventHours(document_);
 		else if (path.includes("/battle-pass")) await waitForBattlePassUi(document_);
-		else await delay(400);
+		else await delay$1(400);
 		return {
 			document: document_,
 			url: iframe.contentWindow?.location.href ?? path
@@ -5774,7 +5896,7 @@
 		const started = Date.now();
 		while (Date.now() - started < 5e3) {
 			if (isBattlePassDocumentReady(document_)) return;
-			await delay(250);
+			await delay$1(250);
 		}
 	}
 	function hasPersonalHours(document_) {
@@ -5936,7 +6058,7 @@
 		const previousSig = previous ? equippedSignature(previous) : "";
 		let snapshot = await fetchShowroomSnapshot();
 		if (snapshot && equippedSignature(snapshot) === previousSig) {
-			await delay(EQUIP_CONFIRM_RETRY_MS);
+			await delay$1(EQUIP_CONFIRM_RETRY_MS);
 			snapshot = await fetchShowroomSnapshot() ?? snapshot;
 		}
 		if (!snapshot) {
@@ -5964,7 +6086,7 @@
 			return true;
 		};
 		if (await didConfirm()) return;
-		await delay(EQUIP_CONFIRM_RETRY_MS);
+		await delay$1(EQUIP_CONFIRM_RETRY_MS);
 		if (await didConfirm()) return;
 		await invalidateSnapshotFreshness();
 	}
@@ -6064,11 +6186,11 @@
 		return path.endsWith("/control-center");
 	}
 	async function loadControlCenterDocument() {
-		if (!isLiveControlCenterPage()) return loadRemoteDocument(CONTROL_CENTER_PATH);
+		if (!isLiveControlCenterPage()) return loadRemoteDocument(CONTROL_CENTER_PATH$1);
 		if (isControlCenterActivityReady(document)) return document;
 		await waitForControlCenterDocument();
 		if (isControlCenterDocumentReady(document)) return document;
-		return loadRemoteDocument(CONTROL_CENTER_PATH);
+		return loadRemoteDocument(CONTROL_CENTER_PATH$1);
 	}
 	function applyControlCenterDocument(next, controlDocument) {
 		const userArpTier = scrapeUserArpTierFromDocument(controlDocument);
@@ -6174,6 +6296,701 @@
 		await applyAsceCommunityHours(next);
 		await saveSiteState(next);
 		return next;
+	}
+	var OFFICIAL_GIVEAWAYS_PATH = "/ucf/Giveaway";
+	var ESI_GIVEAWAY_PATH = "/esi/featured-tile-data/Giveaway";
+	var MAX_ESI_PAGES = 10;
+	var SHOW_GIVEAWAY_HREF = /\/ucf\/show\/(\d+)\/(?:[\w.-]+\/)*Giveaway\/([\w.-]+)/i;
+	var LISTING_PATH = /\/ucf\/Giveaway\/?$/i;
+	var IFRAME_WAIT_MS = 15e3;
+	var IFRAME_SETTLE_MS = 600;
+	function delay(ms) {
+		return new Promise((resolve) => {
+			setTimeout(resolve, ms);
+		});
+	}
+	function titleFromSlug(slug) {
+		const words = slug.replaceAll("-", " ").trim();
+		if (!words) return "New giveaway";
+		return words.replaceAll(/\b\w/g, (letter) => letter.toUpperCase());
+	}
+	function titleFromCard(element) {
+		const headingText = element.querySelector("h1, h2, h3, h4, .giveaways__listing-post-title, .post-title, .tile-title")?.textContent?.replaceAll(/\s+/g, " ").trim();
+		if (headingText) return headingText;
+		const titled = element.title.trim();
+		if (titled) return titled;
+		return "";
+	}
+	function giveawayFromHref(href, title) {
+		const match = SHOW_GIVEAWAY_HREF.exec(href);
+		if (!match?.[1] || !match[2]) return;
+		const id = match[1];
+		const slug = match[2];
+		return {
+			id,
+			title: title || titleFromSlug(slug),
+			url: new URL(`/ucf/show/${id}/Giveaway/${slug}`, location.origin).href
+		};
+	}
+	function addGiveaway(found, href, title) {
+		const giveaway = giveawayFromHref(href, title);
+		if (!giveaway) return;
+		const existing = found.get(giveaway.id);
+		if (!existing || giveaway.title.length > existing.title.length) found.set(giveaway.id, giveaway);
+	}
+	function withClaimed(giveaway, isClaimed) {
+		if (isClaimed !== true) return giveaway;
+		return {
+			...giveaway,
+			isClaimed: true
+		};
+	}
+	function mergeGiveaways(groups) {
+		const found = new Map();
+		for (const group of groups) for (const giveaway of group) {
+			const existing = found.get(giveaway.id);
+			const isClaimed = existing?.isClaimed === true || giveaway.isClaimed === true;
+			if (!existing || giveaway.title.length > existing.title.length) found.set(giveaway.id, withClaimed(giveaway, isClaimed));
+			else if (isClaimed) found.set(giveaway.id, withClaimed(existing, true));
+		}
+		return found.values().toArray();
+	}
+	function isOfficialGiveawayListingPath(path) {
+		return LISTING_PATH.test(path);
+	}
+	function scrapeGiveawayFromPath(pathOrUrl, title = "") {
+		return giveawayFromHref(pathOrUrl, title);
+	}
+	function scrapeOfficialGiveawaysFromDocument(document_) {
+		const found = new Map();
+		for (const post of document_.querySelectorAll(".giveaways__listing-post, [data-url-link*=\"/ucf/show/\"]")) addGiveaway(found, post.dataset.urlLink ?? "", titleFromCard(post));
+		for (const link of document_.querySelectorAll("a[href*=\"/ucf/show/\"][href*=\"/Giveaway/\"]")) addGiveaway(found, link.href, link.textContent?.replaceAll(/\s+/g, " ").trim() ?? "");
+		const hrefMatches = (document_.documentElement?.getHTML() ?? "").matchAll(new RegExp(SHOW_GIVEAWAY_HREF.source, "gi"));
+		for (const match of hrefMatches) if (match[0]) addGiveaway(found, match[0], "");
+		return found.values().toArray();
+	}
+	function scrapeLiveGiveaways() {
+		const listing = isOfficialGiveawayListingPath(location.pathname) ? scrapeOfficialGiveawaysFromDocument(document) : [];
+		const pageTitle = document.querySelector("h1, .ucf-title, .content-title")?.textContent?.replaceAll(/\s+/g, " ").trim() ?? document.title.split("|", 1)[0]?.trim() ?? "";
+		const current = scrapeGiveawayFromPath(location.pathname, pageTitle);
+		return mergeGiveaways([listing, current ? [current] : []]);
+	}
+	function esiItemsFromPayload(data) {
+		if (Array.isArray(data)) return data;
+		if (typeof data === "object" && data && "data" in data) {
+			const nested = data.data;
+			if (Array.isArray(nested)) return nested;
+		}
+		return [];
+	}
+	function officialGiveawayFromEsi(item) {
+		if (item.id === void 0) return;
+		const id = String(item.id);
+		const title = (item.title ?? item.name ?? "").trim() || titleFromSlug(item.slug ?? "");
+		let url;
+		if (item.url) url = new URL(item.url, location.origin).href;
+		else if (item.slug) url = new URL(`/ucf/show/${id}/Giveaway/${item.slug}`, location.origin).href;
+		else url = new URL(`/ucf/show/${id}/`, location.origin).href;
+		const giveaway = {
+			id,
+			title,
+			url
+		};
+		if (giveawayKeyStatus(id)?.status === "assigned") giveaway.isClaimed = true;
+		return giveaway;
+	}
+	async function fetchEsiGiveawayPage(page) {
+		const response = await fetch(`${ESI_GIVEAWAY_PATH}/${page}`, { headers: {
+			Accept: "*/*",
+			"X-Requested-With": "XMLHttpRequest"
+		} });
+		if (!response.ok) throw new Error(`ESI Giveaway page ${page} failed (${response.status})`);
+		return esiItemsFromPayload(await response.json());
+	}
+	async function loadGiveawaysFromEsi() {
+		const found = [];
+		for (let page = 1; page <= MAX_ESI_PAGES; page += 1) {
+			let items;
+			try {
+				items = await fetchEsiGiveawayPage(page);
+			} catch (error) {
+				if (page === 1) throw error;
+				break;
+			}
+			if (items.length === 0) break;
+			for (const item of items) {
+				const giveaway = officialGiveawayFromEsi(item);
+				if (giveaway) found.push(giveaway);
+			}
+		}
+		return mergeGiveaways([found]);
+	}
+	async function fetchGiveawayDocument(path) {
+		try {
+			const response = await fetch(path, { headers: { Accept: "text/html" } });
+			if (!response.ok) return;
+			const html = await response.text();
+			return new DOMParser().parseFromString(html, "text/html");
+		} catch (error) {
+			console.warn("[AWA Toolkit] Giveaway listing fetch failed:", error);
+			return;
+		}
+	}
+	async function openGiveawayListingFrame() {
+		return new Promise((resolve) => {
+			const iframe = document.createElement("iframe");
+			iframe.setAttribute("aria-hidden", "true");
+			iframe.style.cssText = "position:fixed;width:1px;height:1px;left:-9999px;top:0;opacity:0;pointer-events:none;border:0";
+			const cleanup = () => {
+				iframe.remove();
+			};
+			const timer = setTimeout(() => {
+				cleanup();
+				resolve(void 0);
+			}, IFRAME_WAIT_MS);
+			iframe.addEventListener("load", () => {
+				clearTimeout(timer);
+				delay(IFRAME_SETTLE_MS).then(() => {
+					const document_ = iframe.contentDocument ?? void 0;
+					cleanup();
+					resolve(document_);
+				});
+			});
+			iframe.addEventListener("error", () => {
+				clearTimeout(timer);
+				cleanup();
+				resolve(void 0);
+			});
+			document.body.append(iframe);
+			iframe.src = OFFICIAL_GIVEAWAYS_PATH;
+		});
+	}
+	async function loadOfficialGiveaways() {
+		const live = scrapeLiveGiveaways();
+		try {
+			const fromEsi = await loadGiveawaysFromEsi();
+			if (fromEsi.length > 0) return mergeGiveaways([fromEsi, live]);
+		} catch (error) {
+			console.warn("[AWA Toolkit] ESI giveaway list failed:", error);
+		}
+		if (isOfficialGiveawayListingPath(location.pathname) && live.length > 0) return live;
+		const fetched = await fetchGiveawayDocument(OFFICIAL_GIVEAWAYS_PATH);
+		const fromFetch = fetched ? scrapeOfficialGiveawaysFromDocument(fetched) : [];
+		if (fromFetch.length > 0) return mergeGiveaways([fromFetch, live]);
+		const framed = await openGiveawayListingFrame();
+		return mergeGiveaways([framed ? scrapeOfficialGiveawaysFromDocument(framed) : [], live]);
+	}
+	var NOTIFY_LOG_KEY = "artifactOptimizerNotifyLog";
+	var NOTIFY_ICON = "https://raw.githubusercontent.com/UpDownLeftDie/AWA-Toolkit/main/icon.png";
+	var NOTIFY_TITLE = "AWA Toolkit";
+	var FIRED_KEEP_MS = 1728e5;
+	var ZOMBIE_MS = 864e5;
+	var SHOWROOM_PATH = "/user-artifacts-room";
+	var VAULT_PATH = "/game-vault";
+	var CONTROL_CENTER_PATH = "/control-center";
+	function absoluteAwaUrl(pathOrUrl) {
+		return new URL(pathOrUrl, location.origin).href;
+	}
+	function notifyUrlForKind(kind) {
+		if (kind === "swap") return absoluteAwaUrl(SHOWROOM_PATH);
+		if (kind === "vault") return absoluteAwaUrl(VAULT_PATH);
+		if (kind === "giveaway") return absoluteAwaUrl(OFFICIAL_GIVEAWAYS_PATH);
+		return absoluteAwaUrl(CONTROL_CENTER_PATH);
+	}
+	var pendingTimers = new Map();
+	var notifyRuntime = {
+		syncGeneration: 0,
+		didBindWake: false,
+		shouldForceGiveawayCheck: false
+	};
+	function emptyLog() {
+		return {
+			scheduled: {},
+			fired: {},
+			seenGiveawayIds: [],
+			seenVaultKeys: [],
+			hasSeededGiveaways: false,
+			hasSeededVaultItems: false
+		};
+	}
+	function isRecord(value) {
+		return typeof value === "object" && value !== null;
+	}
+	var NOTIFY_KINDS = [
+		"swap",
+		"vault",
+		"community",
+		"giveaway"
+	];
+	var GIVEAWAY_CHECK_MS = 9e5;
+	var SEEN_GIVEAWAY_KEEP = 300;
+	function isNotifyKind(value) {
+		return typeof value === "string" && NOTIFY_KINDS.includes(value);
+	}
+	function optionalNumberIds(value) {
+		if (!Array.isArray(value)) return;
+		const ids = value.filter((id) => typeof id === "number");
+		return ids.length > 0 ? ids : void 0;
+	}
+	function parseScheduledNotify(value) {
+		if (!isRecord(value) || !isNotifyKind(value.kind)) return;
+		if (typeof value.id !== "string" || typeof value.fireAt !== "number" || typeof value.title !== "string" || typeof value.body !== "string") return;
+		const event = {
+			id: value.id,
+			kind: value.kind,
+			fireAt: value.fireAt,
+			title: value.title,
+			body: value.body,
+			url: typeof value.url === "string" && value.url ? value.url : notifyUrlForKind(value.kind)
+		};
+		const artifactIds = optionalNumberIds(value.artifactIds);
+		if (artifactIds) event.artifactIds = artifactIds;
+		if (typeof value.cycleId === "string" && value.cycleId) event.cycleId = value.cycleId;
+		if (typeof value.targetHours === "number") event.targetHours = value.targetHours;
+		return event;
+	}
+	function scheduledFromUnknown(value) {
+		if (!isRecord(value)) return {};
+		const scheduled = {};
+		for (const [id, item] of Object.entries(value)) {
+			const event = parseScheduledNotify(item);
+			if (event) scheduled[id] = event;
+		}
+		return scheduled;
+	}
+	function stringListFromUnknown(value) {
+		if (!Array.isArray(value)) return [];
+		return value.filter((item) => typeof item === "string" && item.length > 0);
+	}
+	function notifyLogFromUnknown(value) {
+		const log = {
+			scheduled: scheduledFromUnknown(value.scheduled),
+			fired: firedFromUnknown(value.fired),
+			seenGiveawayIds: stringListFromUnknown(value.seenGiveawayIds),
+			seenVaultKeys: stringListFromUnknown(value.seenVaultKeys),
+			hasSeededGiveaways: value.hasSeededGiveaways === true,
+			hasSeededVaultItems: value.hasSeededVaultItems === true
+		};
+		if (typeof value.lastGiveawayCheckAt === "number") log.lastGiveawayCheckAt = value.lastGiveawayCheckAt;
+		return log;
+	}
+	function firedFromUnknown(value) {
+		if (!isRecord(value)) return {};
+		const fired = {};
+		for (const [id, at] of Object.entries(value)) if (typeof at === "number") fired[id] = at;
+		return fired;
+	}
+	async function loadNotifyLog() {
+		const raw = await _GM.getValue(NOTIFY_LOG_KEY);
+		if (!raw) return emptyLog();
+		try {
+			const parsedUnknown = typeof raw === "string" ? JSON.parse(raw) : raw;
+			if (!isRecord(parsedUnknown)) return emptyLog();
+			return notifyLogFromUnknown(parsedUnknown);
+		} catch (error) {
+			console.error("[AWA Toolkit] Error parsing notification log:", error);
+			return emptyLog();
+		}
+	}
+	async function saveNotifyLog(log) {
+		await _GM.setValue(NOTIFY_LOG_KEY, JSON.stringify(log));
+	}
+	function pruneFired(log, now) {
+		for (const [id, at] of Object.entries(log.fired)) if (now - at > FIRED_KEEP_MS) delete log.fired[id];
+	}
+	function clearPendingTimers() {
+		for (const timer of pendingTimers.values()) clearTimeout(timer);
+		pendingTimers.clear();
+	}
+	function onNotifyClick(event, url) {
+		event?.preventDefault();
+		window.focus();
+		const path = new URL(url, location.origin).pathname;
+		if (location.pathname !== path) location.assign(path);
+	}
+	function isNotificationPermissionGranted() {
+		return typeof Notification !== "undefined" && Notification.permission === "granted";
+	}
+	function didShowWebNotification(options) {
+		if (!isNotificationPermissionGranted()) return false;
+		const notification = new Notification(options.title, {
+			body: options.text,
+			icon: NOTIFY_ICON,
+			tag: options.tag,
+			requireInteraction: true
+		});
+		notification.addEventListener("click", () => {
+			onNotifyClick(void 0, options.url);
+			notification.close();
+		});
+		return true;
+	}
+	function didShowGmNotification(options) {
+		if (typeof _GM.notification !== "function") return false;
+		try {
+			_GM.notification({
+				title: options.title,
+				text: options.text,
+				image: NOTIFY_ICON,
+				tag: options.tag,
+				url: options.url,
+				highlight: true,
+				zombieTimeout: ZOMBIE_MS,
+				zombieUrl: options.url,
+				onclick: (event) => {
+					onNotifyClick(event, options.url);
+				}
+			});
+			return true;
+		} catch (error) {
+			console.error("[AWA Toolkit] GM.notification failed:", error);
+			return false;
+		}
+	}
+	function didShowBrowserNotification(options) {
+		if (didShowWebNotification(options)) return true;
+		return didShowGmNotification(options);
+	}
+	function sortedIds(ids) {
+		return [...ids].toSorted((left, right) => left - right);
+	}
+	function pendingSwapTarget(source) {
+		const { result, settings } = source;
+		const best = result.best;
+		const current = result.current;
+		if (best && !isSameLoadout(best.artifacts, current?.artifacts)) {
+			const plan = planLoadoutChanges(best.artifacts, current, settings, result.slotLocks);
+			if (plan.waitMs <= 0) return;
+			const later = best.artifacts.filter((artifact) => plan.later.some((item) => item.artifactId === artifact.instanceId));
+			return {
+				artifacts: later.length > 0 ? later : best.artifacts,
+				waitMs: plan.waitMs
+			};
+		}
+		const deferred = result.deferredAllArp;
+		if (!deferred || deferred.waitMs <= 0) return;
+		return {
+			artifacts: deferred.artifacts,
+			waitMs: deferred.waitMs
+		};
+	}
+	function swapNotifyEvent(source, now) {
+		const pending = pendingSwapTarget(source);
+		if (!pending) return;
+		const ids = sortedIds(pending.artifacts.map((artifact) => artifact.instanceId));
+		const event = {
+			id: `swap:${ids.join(",")}`,
+			kind: "swap",
+			fireAt: now + pending.waitMs,
+			title: "Recommended swap ready",
+			body: `You can equip ${loadoutLabel(pending.artifacts)} now.`,
+			url: notifyUrlForKind("swap")
+		};
+		if (ids.length > 0) event.artifactIds = ids;
+		return event;
+	}
+	function notifyTypeKeyForKind(kind) {
+		return kind === "giveaway" ? "giveaways" : kind;
+	}
+	function isKindEnabled(source, kind) {
+		return isNotificationTypeEnabled(source.settings, notifyTypeKeyForKind(kind));
+	}
+	function vaultNotifyEvent(source, now) {
+		const cycleId = gameVaultCycleId(source.siteState);
+		const opensAt = gameVaultOpensAtMs(source.siteState);
+		if (!cycleId || opensAt === void 0 || opensAt <= now) return;
+		return {
+			id: `vault:${cycleId}`,
+			kind: "vault",
+			fireAt: opensAt,
+			title: "Game Vault is open",
+			body: "The monthly Game Vault window is live.",
+			url: notifyUrlForKind("vault"),
+			cycleId
+		};
+	}
+	function communityNotifyEvent(source, now) {
+		const community = source.siteState.communityEvent;
+		if (!community || !canEarnCommunityEventArp(community)) return;
+		const pending = breakDownCommunityEventPending(community);
+		const eta = estimateNextCommunityUnlock(community, now);
+		if (!eta || eta.etaMs <= 0 || pending.waitingCommunityArp <= 0) return;
+		return {
+			id: `community:${eta.targetHours}`,
+			kind: "community",
+			fireAt: now + eta.etaMs,
+			title: "Community Event unlock",
+			body: `${formatCommunityEventArp(pending.waitingCommunityArp)} should unlock around now.`,
+			url: community.url ? absoluteAwaUrl(community.url) : notifyUrlForKind("community"),
+			targetHours: eta.targetHours
+		};
+	}
+	function collectUpcomingEvents(source, now) {
+		const events = [];
+		if (isKindEnabled(source, "swap")) events.push(swapNotifyEvent(source, now));
+		if (isKindEnabled(source, "vault")) events.push(vaultNotifyEvent(source, now));
+		if (isKindEnabled(source, "community")) events.push(communityNotifyEvent(source, now));
+		return events.filter((event) => event !== void 0);
+	}
+	function vaultItemKey(game) {
+		return `${game.name}:${game.price}`;
+	}
+	function collectNewVaultItems(source, log, now) {
+		const games = source.siteState.gameVault.filter((game) => game.inStock && game.isAuction !== true);
+		if (games.length === 0) return [];
+		const keys = games.map((game) => vaultItemKey(game));
+		if (!log.hasSeededVaultItems) {
+			log.seenVaultKeys = [...new Set([...log.seenVaultKeys, ...keys])];
+			log.hasSeededVaultItems = true;
+			return [];
+		}
+		const seen = new Set(log.seenVaultKeys);
+		const events = [];
+		for (const game of games) {
+			const key = vaultItemKey(game);
+			if (seen.has(key)) continue;
+			seen.add(key);
+			events.push({
+				id: `vault-item:${key}`,
+				kind: "vault",
+				fireAt: now,
+				title: "New Game Vault item",
+				body: game.name,
+				url: notifyUrlForKind("vault")
+			});
+		}
+		log.seenVaultKeys = [...seen];
+		return events;
+	}
+	function pruneSeenIds(ids, keep, max) {
+		const keepSet = new Set(keep);
+		const extras = ids.filter((id) => !keepSet.has(id));
+		const extraBudget = Math.max(0, max - keep.length);
+		return [...keep, ...extras.slice(-extraBudget)];
+	}
+	function isGiveawayCheckDue(log, now) {
+		if (notifyRuntime.shouldForceGiveawayCheck || !log.hasSeededGiveaways) return true;
+		if (log.lastGiveawayCheckAt === void 0) return true;
+		return now - log.lastGiveawayCheckAt >= GIVEAWAY_CHECK_MS;
+	}
+	async function collectNewGiveaways(log, now) {
+		const shouldCheck = isGiveawayCheckDue(log, now);
+		notifyRuntime.shouldForceGiveawayCheck = false;
+		if (!shouldCheck) return [];
+		const posts = await loadOfficialGiveaways();
+		log.lastGiveawayCheckAt = now;
+		if (posts.length === 0) return [];
+		const postIds = posts.map((post) => post.id);
+		if (!log.hasSeededGiveaways) {
+			log.seenGiveawayIds = [...new Set([...log.seenGiveawayIds, ...postIds])];
+			log.hasSeededGiveaways = true;
+			return [];
+		}
+		const seen = new Set(log.seenGiveawayIds);
+		const events = [];
+		for (const post of posts) {
+			if (seen.has(post.id)) continue;
+			seen.add(post.id);
+			if (post.isClaimed === true) continue;
+			events.push({
+				id: `giveaway:${post.id}`,
+				kind: "giveaway",
+				fireAt: now,
+				title: "New giveaway",
+				body: post.title,
+				url: post.url
+			});
+		}
+		log.seenGiveawayIds = pruneSeenIds([...seen], postIds, SEEN_GIVEAWAY_KEEP);
+		return events;
+	}
+	function isSwapStillRelevant(event, source) {
+		const best = source.result.best;
+		const current = source.result.current;
+		if (!best || isSameLoadout(best.artifacts, current?.artifacts)) return false;
+		if (!event.artifactIds || event.artifactIds.length === 0) return true;
+		const bestIds = new Set(best.artifacts.map((artifact) => artifact.instanceId));
+		return event.artifactIds.some((id) => bestIds.has(id));
+	}
+	function isCommunityStillRelevant(source) {
+		const community = source.siteState.communityEvent;
+		if (!community || !canEarnCommunityEventArp(community)) return false;
+		const pending = breakDownCommunityEventPending(community);
+		return pending.waitingCommunityArp > 0 || pending.imminentArp > 0;
+	}
+	function isVaultStillRelevant(event, source) {
+		if (event.id.startsWith("vault-item:")) return true;
+		return gameVaultOpensAtMs(source.siteState) !== void 0;
+	}
+	function isEventStillRelevant(event, source) {
+		if (!isKindEnabled(source, event.kind)) return false;
+		if (event.kind === "swap") return isSwapStillRelevant(event, source);
+		if (event.kind === "vault") return isVaultStillRelevant(event, source);
+		if (event.kind === "community") return isCommunityStillRelevant(source);
+		return true;
+	}
+	function mergeUpcomingIntoLog(log, upcoming, source, now) {
+		const upcomingIds = new Set(upcoming.map((event) => event.id));
+		for (const event of upcoming) log.scheduled[event.id] = event;
+		for (const [id, event] of Object.entries(log.scheduled)) {
+			if (upcomingIds.has(id)) continue;
+			if (isEventStillRelevant(event, source)) {
+				event.fireAt = Math.min(event.fireAt, now);
+				continue;
+			}
+			delete log.scheduled[id];
+		}
+	}
+	async function didFireDueEvents(log, source, generation, now) {
+		for (const [id, event] of Object.entries(log.scheduled)) {
+			if (event.fireAt > now) continue;
+			if (log.fired[id] !== void 0 || !isEventStillRelevant(event, source)) {
+				delete log.scheduled[id];
+				continue;
+			}
+			if (generation !== notifyRuntime.syncGeneration) return false;
+			if (didShowBrowserNotification({
+				title: event.title,
+				text: event.body,
+				tag: event.id,
+				url: event.url
+			})) log.fired[id] = Date.now();
+			delete log.scheduled[id];
+		}
+		return true;
+	}
+	function armTimers(log) {
+		clearPendingTimers();
+		const now = Date.now();
+		for (const event of Object.values(log.scheduled)) {
+			const delay = Math.max(0, event.fireAt - now);
+			pendingTimers.set(event.id, setTimeout(() => {
+				pendingTimers.delete(event.id);
+				const source = notifyRuntime.lastSource;
+				if (!source) return;
+				syncBrowserNotifications(source);
+			}, delay));
+		}
+	}
+	function clearGiveawayPoll() {
+		if (notifyRuntime.giveawayPollId === void 0) return;
+		clearInterval(notifyRuntime.giveawayPollId);
+		delete notifyRuntime.giveawayPollId;
+	}
+	function armGiveawayPoll() {
+		if (notifyRuntime.giveawayPollId !== void 0) return;
+		notifyRuntime.giveawayPollId = setInterval(() => {
+			const source = notifyRuntime.lastSource;
+			if (!source?.settings.browserNotifications) return;
+			if (!isNotificationTypeEnabled(source.settings, "giveaways")) return;
+			syncBrowserNotifications(source);
+		}, GIVEAWAY_CHECK_MS);
+	}
+	function wakeScheduledNotifications() {
+		const source = notifyRuntime.lastSource;
+		if (!source?.settings.browserNotifications) return;
+		syncBrowserNotifications(source);
+	}
+	function bindWakeListeners() {
+		if (notifyRuntime.didBindWake) return;
+		notifyRuntime.didBindWake = true;
+		document.addEventListener("visibilitychange", () => {
+			if (document.visibilityState === "visible") wakeScheduledNotifications();
+		});
+		window.addEventListener("focus", wakeScheduledNotifications);
+	}
+	function sourceWithNotificationsOn(source) {
+		return {
+			...source,
+			settings: {
+				...source.settings,
+				browserNotifications: true
+			}
+		};
+	}
+	async function syncBrowserNotifications(source) {
+		notifyRuntime.syncGeneration += 1;
+		if (!source.settings.browserNotifications) {
+			clearPendingTimers();
+			clearGiveawayPoll();
+			return;
+		}
+		const generation = notifyRuntime.syncGeneration;
+		bindWakeListeners();
+		armGiveawayPoll();
+		const now = Date.now();
+		const log = await loadNotifyLog();
+		if (generation !== notifyRuntime.syncGeneration) return;
+		const upcoming = collectUpcomingEvents(source, now);
+		if (isKindEnabled(source, "vault")) upcoming.push(...collectNewVaultItems(source, log, now));
+		if (isKindEnabled(source, "giveaway")) upcoming.push(...await collectNewGiveaways(log, now));
+		if (generation !== notifyRuntime.syncGeneration) return;
+		mergeUpcomingIntoLog(log, upcoming, source, now);
+		if (!await didFireDueEvents(log, source, generation, now)) return;
+		pruneFired(log, Date.now());
+		await saveNotifyLog(log);
+		if (generation !== notifyRuntime.syncGeneration) return;
+		armTimers(log);
+	}
+	function scheduleBrowserNotifications(source) {
+		notifyRuntime.lastSource = source;
+		syncBrowserNotifications(source);
+	}
+	async function didGrantWebNotificationPermission() {
+		if (typeof Notification === "undefined") return typeof _GM.notification === "function";
+		if (Notification.permission === "granted") return true;
+		if (Notification.permission === "denied") return false;
+		return await Notification.requestPermission() === "granted";
+	}
+	async function didDisableBrowserNotifications() {
+		clearPendingTimers();
+		clearGiveawayPoll();
+		await saveArtifactSettings({ browserNotifications: false });
+		const previous = notifyRuntime.lastSource;
+		if (previous) notifyRuntime.lastSource = {
+			...previous,
+			settings: {
+				...previous.settings,
+				browserNotifications: false
+			}
+		};
+		return true;
+	}
+	async function didSetBrowserNotifications(isEnabled, source) {
+		if (!isEnabled) return didDisableBrowserNotifications();
+		if (!await didGrantWebNotificationPermission()) return false;
+		if (!didShowBrowserNotification({
+			title: NOTIFY_TITLE,
+			text: "Notifications are on. Use the switches below to choose recommended swap, community, Game Vault, and new giveaways.",
+			tag: "awa-toolkit-test",
+			url: notifyUrlForKind("community")
+		})) return false;
+		await saveArtifactSettings({ browserNotifications: true });
+		const nextSource = source ?? notifyRuntime.lastSource;
+		if (nextSource) {
+			notifyRuntime.lastSource = sourceWithNotificationsOn(nextSource);
+			if (isNotificationTypeEnabled(nextSource.settings, "giveaways")) notifyRuntime.shouldForceGiveawayCheck = true;
+			scheduleBrowserNotifications(notifyRuntime.lastSource);
+		}
+		return true;
+	}
+	async function saveNotificationType(key, isEnabled) {
+		const notificationTypes = {
+			...(await getArtifactSettings()).notificationTypes,
+			[key]: isEnabled
+		};
+		await saveArtifactSettings({ notificationTypes });
+		if (key === "giveaways" && isEnabled) notifyRuntime.shouldForceGiveawayCheck = true;
+		const previous = notifyRuntime.lastSource;
+		if (!previous) return;
+		notifyRuntime.lastSource = {
+			...previous,
+			settings: {
+				...previous.settings,
+				notificationTypes
+			}
+		};
+		scheduleBrowserNotifications(notifyRuntime.lastSource);
 	}
 	var MODAL_ID = "alienware-artifact-optimizer";
 	var INLINE_ID = "alienware-artifact-optimizer-inline";
@@ -6605,6 +7422,112 @@
       margin-right: 6px;
       accent-color: #00bc8c;
     }
+    .ao-notify {
+      display: block;
+      margin: 0 0 12px;
+      padding: 10px 12px;
+      background: #222;
+      border: 1px solid #333;
+      border-radius: 8px;
+    }
+    .ao-switch {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 14px;
+      margin: 0;
+      cursor: pointer;
+      color: #fff !important;
+    }
+    .ao-switch-copy {
+      display: flex;
+      flex-direction: column;
+      gap: 3px;
+      min-width: 0;
+      flex: 1 1 auto;
+    }
+    .ao-switch-title {
+      font-weight: 600;
+      color: #fff !important;
+    }
+    .ao-switch-hint {
+      color: #aaa !important;
+      font-size: 0.88em !important;
+      line-height: 1.4;
+    }
+    .ao-switch-input {
+      position: absolute;
+      width: 1px;
+      height: 1px;
+      padding: 0;
+      margin: -1px;
+      overflow: hidden;
+      clip: rect(0, 0, 0, 0);
+      white-space: nowrap;
+      border: 0;
+    }
+    .ao-switch-track {
+      position: relative;
+      flex: 0 0 auto;
+      width: 44px;
+      height: 24px;
+      border-radius: 999px;
+      background: #3a3a3a;
+      box-shadow: inset 0 0 0 1px #555;
+      transition: background 0.16s ease, box-shadow 0.16s ease;
+    }
+    .ao-switch-knob {
+      position: absolute;
+      top: 2px;
+      left: 2px;
+      width: 20px;
+      height: 20px;
+      border-radius: 50%;
+      background: #fff;
+      box-shadow: 0 1px 3px rgba(0, 0, 0, 0.45);
+      transition: transform 0.16s ease;
+    }
+    .ao-switch-input:checked + .ao-switch-track {
+      background: #00bc8c;
+      box-shadow: inset 0 0 0 1px #00bc8c;
+    }
+    .ao-switch-input:checked + .ao-switch-track .ao-switch-knob {
+      transform: translateX(20px);
+    }
+    .ao-switch-input:focus-visible + .ao-switch-track {
+      outline: 2px solid #00bc8c;
+      outline-offset: 3px;
+    }
+    .ao-notify-types {
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      margin-top: 10px;
+      padding-top: 10px;
+      border-top: 1px solid #333;
+    }
+    .ao-notify-types[data-off] {
+      opacity: 0.45;
+      pointer-events: none;
+    }
+    .ao-switch-sm .ao-switch-title {
+      font-weight: 500;
+      font-size: 0.92em !important;
+    }
+    .ao-switch-sm .ao-switch-hint {
+      font-size: 0.8em !important;
+    }
+    .ao-switch-sm .ao-switch-track {
+      width: 36px;
+      height: 20px;
+    }
+    .ao-switch-sm .ao-switch-knob {
+      width: 16px;
+      height: 16px;
+    }
+    .ao-switch-sm .ao-switch-input:checked + .ao-switch-track .ao-switch-knob {
+      transform: translateX(16px);
+    }
     details {
       display: block;
       width: 100%;
@@ -6680,6 +7603,10 @@
       .ao-spinner,
       .ao-skel {
         animation: none;
+      }
+      .ao-switch-track,
+      .ao-switch-knob {
+        transition: none;
       }
     }
   `;
@@ -6874,9 +7801,17 @@
 		if (/^nexus\b/i.test(label)) return "nexus";
 		if (/^partners?\b/i.test(label)) return "partner";
 	}
+	function twitchWatchUrl(href, login) {
+		try {
+			const url = new URL(href, location.origin);
+			if (TWITCH_HOST.test(url.hostname)) return url.href;
+		} catch {}
+		return `https://www.twitch.tv/${login}`;
+	}
 	function streamFromRow(row, group) {
 		const link = row.querySelector("a[href*=\"twitch.tv\"]");
-		const login = twitchLoginFromHref(link?.getAttribute("href") ?? "");
+		const href = link?.getAttribute("href") ?? "";
+		const login = twitchLoginFromHref(href);
 		if (!login) return;
 		const details = row.querySelector(".quest-list__quest-details");
 		const nameText = [...details?.children ?? []].find((child) => !child.classList.contains("small"))?.textContent ?? row.querySelector("img")?.getAttribute("alt") ?? link?.textContent;
@@ -6885,7 +7820,7 @@
 			login,
 			displayName: nameText?.replaceAll(/\s+/g, " ").trim() || login,
 			title,
-			url: `https://www.twitch.tv/${login}`,
+			url: twitchWatchUrl(href, login),
 			group
 		};
 	}
@@ -7009,8 +7944,11 @@
 		if (isRemote) return ensureArtifactSnapshot({ force: options.force === true });
 		return loadSnapshot();
 	}
+	function hasGmStorage() {
+		return typeof _GM?.getValue === "function";
+	}
 	function assertGmStorage() {
-		if (typeof _GM?.getValue !== "function") throw new TypeError("GM storage is unavailable. For pnpm run dev, install the userscript served at http://localhost:3000 (named server:AWA Toolkit). A custom stub that only @requires that file does not get @grant, so recommendations never load.");
+		if (!hasGmStorage()) throw new TypeError("GM storage is unavailable. For pnpm run dev, install the userscript served at http://localhost:3000 (named server:AWA Toolkit). A custom stub that only @requires that file does not get @grant, so recommendations never load.");
 	}
 	async function gatherData(options) {
 		assertGmStorage();
@@ -7046,7 +7984,15 @@
 	var gatheredCache = {};
 	function rememberGathered(data) {
 		gatheredCache.current = data;
+		scheduleBrowserNotifications(data);
 		return data;
+	}
+	async function warmNotificationSchedule() {
+		if (!hasGmStorage() || gatheredCache.current) return;
+		try {
+			if (!(await getArtifactSettings()).browserNotifications) return;
+			await gatherData({ remote: false });
+		} catch {}
 	}
 	function snapshotForOptimize(data) {
 		return data.snapshot ?? {
@@ -7087,6 +8033,33 @@
 	function renderSectionDivider() {
 		return "<hr class=\"ao-divider\" />";
 	}
+	function renderNotifySwitch(options) {
+		return `
+      <label class="ao-switch${options.isSmall === true ? " ao-switch-sm" : ""}">
+        <span class="ao-switch-copy">
+          <span class="ao-switch-title">${escapeHtml(options.title)}</span>
+          <span class="ao-switch-hint">${escapeHtml(options.hint)}</span>
+        </span>
+        <input type="checkbox" id="${escapeHtml(options.id)}" class="ao-switch-input" ${options.isChecked ? "checked" : ""}/>
+        <span class="ao-switch-track" aria-hidden="true"><span class="ao-switch-knob"></span></span>
+      </label>`;
+	}
+	function renderNotifyTypeSwitches(settings) {
+		const switches = NOTIFICATION_TYPE_KEYS.map((key) => {
+			const copy = NOTIFICATION_TYPE_COPY[key];
+			return renderNotifySwitch({
+				id: `ao-notify-type-${key}`,
+				title: copy.title,
+				hint: copy.hint,
+				isChecked: settings.notificationTypes[key],
+				isSmall: true
+			});
+		}).join("");
+		return `
+      <div class="ao-notify-types"${settings.browserNotifications ? "" : " data-off=\"\""}>
+        ${switches}
+      </div>`;
+	}
 	var SKELETON_BAR_WIDTHS = [
 		"88%",
 		"72%",
@@ -7101,13 +8074,13 @@
 	}
 	function renderPanelError(message) {
 		return `
-    <div class="ao-heading">Artifact Optimizer</div>
+    <div class="ao-heading">AWA Toolkit</div>
     <div class="ao-note">${escapeHtml(message)}</div>
   `;
 	}
 	function renderPanelSkeleton(message = "Loading recommendations…") {
 		return `
-    <div class="ao-heading">Artifact Optimizer</div>
+    <div class="ao-heading">AWA Toolkit</div>
     ${renderHydrateBanner(message)}
     <div id="ao-action-plan" class="ao-skel-block">
       <div class="ao-heading">What to do</div>
@@ -7374,7 +8347,6 @@
 		const scrapedAt = snapshot?.scrapedAt ? new Date(snapshot.scrapedAt).toLocaleString() : "never";
 		const fragments = settings.manualFragments ?? snapshot?.fragments ?? 0;
 		const hydrateBanner = options.isHydrating ? renderHydrateBanner("Updating in the background…") : "";
-		const actionPlan = renderActionPlan(buildActionPlan(result, settings, siteState ?? emptySiteState()));
 		const extras = supplementalNotes(result.notes).map((n) => `<div class="ao-note">${escapeHtml(n)}</div>`).join("");
 		const vaultDiscount = renderVaultDiscountBlock(result);
 		const upgrades = renderUpgradePath(result.upgrades, fragments);
@@ -7395,9 +8367,17 @@
         </label>`;
 		}).join("");
 		return `
+    <div class="ao-notify">
+      ${renderNotifySwitch({
+			id: "ao-browser-notifications",
+			title: "Desktop notifications",
+			hint: "Master switch. Turning this on asks the browser for permission.",
+			isChecked: settings.browserNotifications
+		})}
+      ${renderNotifyTypeSwitches(settings)}
+    </div>
     ${hydrateBanner}
     <div class="ao-muted">Inventory snapshot: ${scrapedAt} · Fragments: ${fragments}</div>
-    ${actionPlan}
     ${vaultDiscount}
     ${extras}
     ${renderSectionDivider()}
@@ -7635,7 +8615,72 @@
 		if (isControlCenterPage()) injectControlCenterPanel({ force: true });
 		else if (isArtifactsShowroomPage()) injectShowroomPanel({ force: true });
 	}
+	function syncNotifyTypesEnabled(root, isMasterOn) {
+		const types = root.querySelector(".ao-notify-types");
+		if (!(types instanceof HTMLElement)) return;
+		if (isMasterOn) {
+			delete types.dataset.off;
+			return;
+		}
+		types.dataset.off = "";
+	}
+	function bindNotificationTypeSwitches(root) {
+		for (const key of NOTIFICATION_TYPE_KEYS) root.querySelector(`#ao-notify-type-${CSS.escape(key)}`)?.addEventListener("change", (event) => {
+			const input = event.currentTarget;
+			if (!(input instanceof HTMLInputElement)) return;
+			saveNotificationType(key, input.checked);
+		});
+	}
+	function notificationBlockedHelp() {
+		return [
+			"The browser blocked notifications, or the test ping did not appear.",
+			"",
+			"1. If a permission popup appeared, click Allow.",
+			`2. ${/Mac|iPhone|iPad/i.test(navigator.userAgent) ? "Open System Settings → Notifications. Find your browser (Zen, Firefox, Chrome, or Edge) and allow notifications." : "Open your system notification settings and allow this browser."}`,
+			"3. Flip Desktop notifications on again."
+		].join("\n");
+	}
 	function bindDynamicBody(root, onChanged) {
+		root.querySelector("#ao-browser-notifications")?.addEventListener("change", (event) => {
+			const input = event.currentTarget;
+			if (!(input instanceof HTMLInputElement)) return;
+			(async () => {
+				if (!input.checked) {
+					await didSetBrowserNotifications(false);
+					syncNotifyTypesEnabled(root, false);
+					return;
+				}
+				if (!isNotificationPermissionGranted()) {
+					if (!await didConfirmAoDialog([
+						"AWA Toolkit can ping you when:",
+						"",
+						"• A recommended swap is ready after a 24h lock",
+						"• Community hours unlock",
+						"• Game Vault opens or new games appear",
+						"• A new official key giveaway is posted",
+						"",
+						"Your browser will ask for permission next. Click Allow.",
+						"",
+						"You should then see a test notification. If you do not, we will show how to turn them on in system settings."
+					].join("\n"), {
+						title: "Enable desktop notifications?",
+						confirmLabel: "Enable"
+					})) {
+						input.checked = false;
+						return;
+					}
+				}
+				if (await didSetBrowserNotifications(true, gatheredCache.current)) {
+					syncNotifyTypesEnabled(root, true);
+					return;
+				}
+				input.checked = false;
+				await didSetBrowserNotifications(false);
+				syncNotifyTypesEnabled(root, false);
+				await showAoAlert(notificationBlockedHelp(), "Notifications blocked");
+			})();
+		});
+		bindNotificationTypeSwitches(root);
 		root.querySelector("#ao-add-manual")?.addEventListener("click", () => {
 			handleAddManual(root).then(onChanged);
 		});
@@ -7772,7 +8817,7 @@
 			shadow.innerHTML = `
       <style>${buildModalShadowCss()}</style>
       <div class="ao-panel">
-        <div class="ao-title" id="ao-title">Artifact Optimizer</div>
+        <div class="ao-title" id="ao-title">AWA Toolkit</div>
         ${renderCredits()}
         <div id="ao-body">
           ${renderModalSkeleton()}
@@ -8221,6 +9266,7 @@
 			})();
 		}
 		await createOptimizerModal();
+		warmNotificationSchedule();
 	}
 	var defaultSettings = {
 		higherTier: "hide",
@@ -8283,17 +9329,18 @@
 		if (match?.[1]) return Number(match[1]);
 	}
 	function readPageUserTier() {
-		const arpTier = globalThis.arp_tier;
-		if (typeof arpTier === "number" && !Number.isNaN(arpTier)) return arpTier;
-		const tierImg = document.querySelector("img[src*=\"/images/content/tier-tags/\"]");
-		if (!tierImg) return;
-		const tierMatch = /tier-tags\/(\d+)\.png/.exec(tierImg.src);
-		if (!tierMatch?.[1]) return;
-		const userTier = Number(tierMatch[1]);
-		return Number.isNaN(userTier) ? void 0 : userTier;
+		return readPageArpTier();
 	}
 	async function checkAndStoreTier() {
-		const userTier = readPageUserTier();
+		let userTier = readPageUserTier();
+		if (userTier === void 0 && document.readyState !== "complete") {
+			await new Promise((resolve) => {
+				window.addEventListener("load", () => {
+					resolve();
+				}, { once: true });
+			});
+			userTier = readPageUserTier();
+		}
 		if (userTier === void 0) return;
 		await saveSettings({ userTier });
 		console.log("Stored user tier:", userTier);

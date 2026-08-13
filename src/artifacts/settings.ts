@@ -66,7 +66,56 @@ export interface ArtifactOptimizerSettings {
   Twitch logins to open first when picking a Watch Twitch stream (list order).
   */
   preferredTwitchStreamers: string[];
+  /**
+  OS desktop notifications via GM.notification for known times (recommended
+  swap, vault open). An AWA tab must stay open to schedule them.
+  */
+  browserNotifications: boolean;
+  /**
+  Which events fire while `browserNotifications` is on. Missing keys default on.
+  */
+  notificationTypes: NotificationTypeToggles;
 }
+
+export const NOTIFICATION_TYPE_KEYS = [
+  'swap',
+  'community',
+  'vault',
+  'giveaways',
+] as const;
+
+export type NotificationTypeKey = (typeof NOTIFICATION_TYPE_KEYS)[number];
+
+export type NotificationTypeToggles = Record<NotificationTypeKey, boolean>;
+
+export const NOTIFICATION_TYPE_COPY: Record<
+  NotificationTypeKey,
+  { title: string; hint: string }
+> = {
+  swap: {
+    title: 'Recommended swap',
+    hint: 'When a better loadout is waiting on a 24h lock — not every unlock.',
+  },
+  community: {
+    title: 'Community Event',
+    hint: 'When community hours unlock pending ARP.',
+  },
+  vault: {
+    title: 'Game Vault',
+    hint: 'When the vault opens or new games appear.',
+  },
+  giveaways: {
+    title: 'New giveaways',
+    hint: 'Official Alienware key giveaways — not community giveaways.',
+  },
+};
+
+const DEFAULT_NOTIFICATION_TYPES: NotificationTypeToggles = {
+  swap: true,
+  community: true,
+  vault: true,
+  giveaways: true,
+};
 
 const DEFAULT_ACTIVITIES: Record<ActivityKey, ActivityToggle> = {
   timeOnSite: { enabled: true, frequency: 1 },
@@ -85,6 +134,8 @@ export const defaultArtifactSettings: ArtifactOptimizerSettings = {
   preferScraped: true,
   slotCooldowns: [],
   preferredTwitchStreamers: [],
+  browserNotifications: false,
+  notificationTypes: { ...DEFAULT_NOTIFICATION_TYPES },
 };
 
 function isPartialSettings(
@@ -162,6 +213,29 @@ function applyParsedSettings(
     settings.preferredTwitchStreamers =
       parsePreferredTwitchStreamers(rawLogins.join('\n'));
   }
+  if (typeof parsed.browserNotifications === 'boolean') {
+    settings.browserNotifications = parsed.browserNotifications;
+  }
+  settings.notificationTypes = mergeNotificationTypes(
+    settings.notificationTypes,
+    parsed.notificationTypes,
+  );
+}
+
+function mergeNotificationTypes(
+  base: NotificationTypeToggles,
+  incoming: Partial<NotificationTypeToggles> | undefined,
+): NotificationTypeToggles {
+  if (!incoming) {
+    return base;
+  }
+  const next = { ...base };
+  for (const key of NOTIFICATION_TYPE_KEYS) {
+    if (typeof incoming[key] === 'boolean') {
+      next[key] = incoming[key];
+    }
+  }
+  return next;
 }
 
 /**
@@ -205,6 +279,7 @@ export async function getArtifactSettings(): Promise<ArtifactOptimizerSettings> 
     manualArtifacts: [],
     slotCooldowns: [],
     preferredTwitchStreamers: [],
+    notificationTypes: { ...DEFAULT_NOTIFICATION_TYPES },
   };
 
   if (!raw) {
@@ -235,6 +310,9 @@ export async function saveArtifactSettings(
     activities: patch.activities
       ? { ...previous.activities, ...patch.activities }
       : previous.activities,
+    notificationTypes: patch.notificationTypes
+      ? { ...previous.notificationTypes, ...patch.notificationTypes }
+      : previous.notificationTypes,
   };
   await GM.setValue(SETTINGS_KEY, JSON.stringify(next));
   return next;
@@ -391,6 +469,13 @@ export async function syncSlotLocksFromScrape(
   if (previousKey !== nextKey) {
     await saveArtifactSettings({ slotCooldowns: next });
   }
+}
+
+export function isNotificationTypeEnabled(
+  settings: ArtifactOptimizerSettings,
+  key: NotificationTypeKey,
+): boolean {
+  return settings.notificationTypes[key] ?? true;
 }
 
 export { COOLDOWN_MS };

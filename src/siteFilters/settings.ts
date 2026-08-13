@@ -1,6 +1,8 @@
-import { GM } from '$';
+import { GM } from "$";
 
-export type FilterMode = 'off' | 'dim' | 'hide';
+import { readPageArpTier } from "../pageGlobals";
+
+export type FilterMode = "off" | "dim" | "hide";
 
 export interface FilterSettings {
   higherTier: FilterMode;
@@ -15,22 +17,22 @@ export interface FilterSettings {
 export const DEFAULT_USER_TIER = 99;
 
 export const defaultSettings: FilterSettings = {
-  higherTier: 'hide',
+  higherTier: "hide",
   autoSyncTier: true,
-  outOfStock: 'hide',
-  claimed: 'hide',
-  closedGiveaways: 'hide',
-  enteredGiveaways: 'hide',
+  outOfStock: "hide",
+  claimed: "hide",
+  closedGiveaways: "hide",
+  enteredGiveaways: "hide",
 };
 
-const FILTER_MODES = new Set<string>(['off', 'dim', 'hide']);
+const FILTER_MODES = new Set<string>(["off", "dim", "hide"]);
 
 export function isFilterMode(value: unknown): value is FilterMode {
-  return typeof value === 'string' && FILTER_MODES.has(value);
+  return typeof value === "string" && FILTER_MODES.has(value);
 }
 
 function isSettingsRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null;
+  return typeof value === "object" && value !== null;
 }
 
 function filterModeFromSaved(
@@ -43,15 +45,15 @@ function filterModeFromSaved(
     return parsed[modeKey];
   }
   const legacyHide = parsed[legacyHideKey];
-  if (typeof legacyHide === 'boolean') {
-    return legacyHide ? 'hide' : 'off';
+  if (typeof legacyHide === "boolean") {
+    return legacyHide ? "hide" : "off";
   }
   return fallback;
 }
 
 export async function getSettings(): Promise<FilterSettings> {
   const savedSettings: string | Partial<FilterSettings> | undefined =
-    await GM.getValue('filterSettings');
+    await GM.getValue("filterSettings");
   const settings: FilterSettings = { ...defaultSettings };
 
   if (!savedSettings) {
@@ -60,7 +62,7 @@ export async function getSettings(): Promise<FilterSettings> {
 
   try {
     const parsedUnknown: unknown =
-      typeof savedSettings === 'string'
+      typeof savedSettings === "string"
         ? JSON.parse(savedSettings)
         : savedSettings;
     if (!isSettingsRecord(parsedUnknown)) {
@@ -69,32 +71,32 @@ export async function getSettings(): Promise<FilterSettings> {
     const parsed = parsedUnknown;
     settings.higherTier = filterModeFromSaved(
       parsed,
-      'higherTier',
-      'hideTierRestricted',
+      "higherTier",
+      "hideTierRestricted",
       defaultSettings.higherTier,
     );
     settings.outOfStock = filterModeFromSaved(
       parsed,
-      'outOfStock',
-      'hideOutOfStock',
+      "outOfStock",
+      "hideOutOfStock",
       defaultSettings.outOfStock,
     );
     settings.claimed = filterModeFromSaved(
       parsed,
-      'claimed',
-      'hideClaimed',
+      "claimed",
+      "hideClaimed",
       defaultSettings.claimed,
     );
     settings.closedGiveaways = filterModeFromSaved(
       parsed,
-      'closedGiveaways',
-      'hideClosedGiveaways',
+      "closedGiveaways",
+      "hideClosedGiveaways",
       defaultSettings.closedGiveaways,
     );
     settings.enteredGiveaways = isFilterMode(parsed.enteredGiveaways)
       ? parsed.enteredGiveaways
       : defaultSettings.enteredGiveaways;
-    if (typeof parsed.autoSyncTier === 'boolean') {
+    if (typeof parsed.autoSyncTier === "boolean") {
       settings.autoSyncTier = parsed.autoSyncTier;
     }
     if (parsed.userTier !== undefined) {
@@ -104,7 +106,7 @@ export async function getSettings(): Promise<FilterSettings> {
       }
     }
   } catch (error) {
-    console.error('Error parsing saved settings:', error);
+    console.error("Error parsing saved settings:", error);
     return defaultSettings;
   }
 
@@ -119,7 +121,7 @@ export async function saveSettings(
     ...previousSettings,
     ...settings,
   };
-  await GM.setValue('filterSettings', JSON.stringify(newSettings));
+  await GM.setValue("filterSettings", JSON.stringify(newSettings));
 }
 
 export function extractTier(text: string): number | undefined {
@@ -131,34 +133,27 @@ export function extractTier(text: string): number | undefined {
 }
 
 function readPageUserTier(): number | undefined {
-  const arpTier = (globalThis as typeof globalThis & { arp_tier?: unknown })
-    .arp_tier;
-  if (typeof arpTier === 'number' && !Number.isNaN(arpTier)) {
-    return arpTier;
-  }
-
-  const tierImg = document.querySelector<HTMLImageElement>(
-    'img[src*="/images/content/tier-tags/"]',
-  );
-  if (!tierImg) {
-    return undefined;
-  }
-
-  const tierMatch = /tier-tags\/(\d+)\.png/.exec(tierImg.src);
-  if (!tierMatch?.[1]) {
-    return undefined;
-  }
-
-  const userTier = Number(tierMatch[1]);
-  return Number.isNaN(userTier) ? undefined : userTier;
+  return readPageArpTier();
 }
 
 export async function checkAndStoreTier(): Promise<void> {
-  const userTier = readPageUserTier();
+  let userTier = readPageUserTier();
+  if (userTier === undefined && document.readyState !== "complete") {
+    await new Promise<void>((resolve) => {
+      window.addEventListener(
+        "load",
+        () => {
+          resolve();
+        },
+        { once: true },
+      );
+    });
+    userTier = readPageUserTier();
+  }
   if (userTier === undefined) {
     return;
   }
 
   await saveSettings({ userTier });
-  console.log('Stored user tier:', userTier);
+  console.log("Stored user tier:", userTier);
 }

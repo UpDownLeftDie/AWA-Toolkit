@@ -17,6 +17,7 @@ import {
   scrapeAndPersist,
   type ArtifactSnapshot,
 } from '../scraper';
+import { scheduleBrowserNotifications } from '../notifications';
 import {
   getArtifactSettings,
   syncSlotLocksFromScrape,
@@ -62,8 +63,12 @@ function loadCachedOrRemoteSnapshot(
   return loadSnapshot();
 }
 
+export function hasGmStorage(): boolean {
+  return typeof GM?.getValue === 'function';
+}
+
 function assertGmStorage(): void {
-  if (typeof GM?.getValue !== 'function') {
+  if (!hasGmStorage()) {
     throw new TypeError(
       'GM storage is unavailable. For pnpm run dev, install the userscript served at http://localhost:3000 (named server:AWA Toolkit). A custom stub that only @requires that file does not get @grant, so recommendations never load.',
     );
@@ -147,7 +152,28 @@ export const gatheredCache: { current?: GatheredData } = {};
 
 export function rememberGathered(data: GatheredData): GatheredData {
   gatheredCache.current = data;
+  scheduleBrowserNotifications(data);
   return data;
+}
+
+/**
+ * Cache-only gather so a background AWA tab can arm notification timers.
+ * Skips when GM is missing (dev HMR / stub without @grant) so we do not
+ * paint the panel error on pages that never needed a gather.
+ */
+export async function warmNotificationSchedule(): Promise<void> {
+  if (!hasGmStorage() || gatheredCache.current) {
+    return;
+  }
+  try {
+    const settings = await getArtifactSettings();
+    if (!settings.browserNotifications) {
+      return;
+    }
+    await gatherData({ remote: false });
+  } catch {
+    // Inject / Open Full Panel will gather once GM is ready.
+  }
 }
 
 export function snapshotForOptimize(data: GatheredData): ArtifactSnapshot {

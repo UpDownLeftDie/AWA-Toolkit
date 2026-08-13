@@ -7,7 +7,13 @@ import {
 } from '../remoteScrape';
 import { applySnapshotUpgrade, isArtifactsShowroomPage } from '../scraper';
 import {
+  didSetBrowserNotifications,
+  saveNotificationType,
+  isNotificationPermissionGranted,
+} from '../notifications';
+import {
   getArtifactSettings,
+  NOTIFICATION_TYPE_KEYS,
   parsePreferredTwitchStreamers,
   saveArtifactSettings,
   type ArtifactOptimizerSettings,
@@ -15,7 +21,7 @@ import {
 import { bindClaimAllButtons } from './battlePassClaim';
 import { bindOpenTwitchButtons } from './twitchPick';
 import { didConfirmAoDialog, showAoAlert, showAoToast } from './dialog';
-import { isControlCenterPage } from './gather';
+import { gatheredCache, isControlCenterPage } from './gather';
 import {
   formatLockedSlotParts,
   isSameLoadout,
@@ -424,10 +430,103 @@ export async function handleUpgradeClick(
   }
 }
 
+function syncNotifyTypesEnabled(root: HTMLElement, isMasterOn: boolean): void {
+  const types = root.querySelector('.ao-notify-types');
+  if (!(types instanceof HTMLElement)) {
+    return;
+  }
+  if (isMasterOn) {
+    delete types.dataset.off;
+    return;
+  }
+  types.dataset.off = '';
+}
+
+function bindNotificationTypeSwitches(root: HTMLElement): void {
+  for (const key of NOTIFICATION_TYPE_KEYS) {
+    root
+      .querySelector<HTMLInputElement>(`#ao-notify-type-${CSS.escape(key)}`)
+      ?.addEventListener('change', (event) => {
+        const input = event.currentTarget;
+        if (!(input instanceof HTMLInputElement)) {
+          return;
+        }
+        void saveNotificationType(key, input.checked);
+      });
+  }
+}
+
+function notificationBlockedHelp(): string {
+  const isMac = /Mac|iPhone|iPad/i.test(navigator.userAgent);
+  const systemStep = isMac
+    ? 'Open System Settings → Notifications. Find your browser (Zen, Firefox, Chrome, or Edge) and allow notifications.'
+    : 'Open your system notification settings and allow this browser.';
+  return [
+    'The browser blocked notifications, or the test ping did not appear.',
+    '',
+    '1. If a permission popup appeared, click Allow.',
+    `2. ${systemStep}`,
+    '3. Flip Desktop notifications on again.',
+  ].join('\n');
+}
+
 export function bindDynamicBody(
   root: HTMLElement,
   onChanged: () => Promise<void>,
 ): void {
+  root
+    .querySelector<HTMLInputElement>('#ao-browser-notifications')
+    ?.addEventListener('change', (event) => {
+      const input = event.currentTarget;
+      if (!(input instanceof HTMLInputElement)) {
+        return;
+      }
+      void (async () => {
+        if (!input.checked) {
+          await didSetBrowserNotifications(false);
+          syncNotifyTypesEnabled(root, false);
+          return;
+        }
+        if (!isNotificationPermissionGranted()) {
+          const didAgree = await didConfirmAoDialog(
+            [
+              'AWA Toolkit can ping you when:',
+              '',
+              '• A recommended swap is ready after a 24h lock',
+              '• Community hours unlock',
+              '• Game Vault opens or new games appear',
+              '• A new official key giveaway is posted',
+              '',
+              'Your browser will ask for permission next. Click Allow.',
+              '',
+              'You should then see a test notification. If you do not, we will show how to turn them on in system settings.',
+            ].join('\n'),
+            {
+              title: 'Enable desktop notifications?',
+              confirmLabel: 'Enable',
+            },
+          );
+          if (!didAgree) {
+            input.checked = false;
+            return;
+          }
+        }
+        const didEnable = await didSetBrowserNotifications(
+          true,
+          gatheredCache.current,
+        );
+        if (didEnable) {
+          syncNotifyTypesEnabled(root, true);
+          return;
+        }
+        input.checked = false;
+        await didSetBrowserNotifications(false);
+        syncNotifyTypesEnabled(root, false);
+        await showAoAlert(notificationBlockedHelp(), 'Notifications blocked');
+      })();
+    });
+  bindNotificationTypeSwitches(root);
+
   root.querySelector('#ao-add-manual')?.addEventListener('click', () => {
     void handleAddManual(root).then(onChanged);
   });

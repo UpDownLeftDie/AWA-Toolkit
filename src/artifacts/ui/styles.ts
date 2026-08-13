@@ -461,6 +461,112 @@ function buildPanelShadowCss(variant: PanelShadowVariant): string {
       margin-right: 6px;
       accent-color: #00bc8c;
     }
+    .ao-notify {
+      display: block;
+      margin: 0 0 12px;
+      padding: 10px 12px;
+      background: #222;
+      border: 1px solid #333;
+      border-radius: 8px;
+    }
+    .ao-switch {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 14px;
+      margin: 0;
+      cursor: pointer;
+      color: #fff !important;
+    }
+    .ao-switch-copy {
+      display: flex;
+      flex-direction: column;
+      gap: 3px;
+      min-width: 0;
+      flex: 1 1 auto;
+    }
+    .ao-switch-title {
+      font-weight: 600;
+      color: #fff !important;
+    }
+    .ao-switch-hint {
+      color: #aaa !important;
+      font-size: 0.88em !important;
+      line-height: 1.4;
+    }
+    .ao-switch-input {
+      position: absolute;
+      width: 1px;
+      height: 1px;
+      padding: 0;
+      margin: -1px;
+      overflow: hidden;
+      clip: rect(0, 0, 0, 0);
+      white-space: nowrap;
+      border: 0;
+    }
+    .ao-switch-track {
+      position: relative;
+      flex: 0 0 auto;
+      width: 44px;
+      height: 24px;
+      border-radius: 999px;
+      background: #3a3a3a;
+      box-shadow: inset 0 0 0 1px #555;
+      transition: background 0.16s ease, box-shadow 0.16s ease;
+    }
+    .ao-switch-knob {
+      position: absolute;
+      top: 2px;
+      left: 2px;
+      width: 20px;
+      height: 20px;
+      border-radius: 50%;
+      background: #fff;
+      box-shadow: 0 1px 3px rgba(0, 0, 0, 0.45);
+      transition: transform 0.16s ease;
+    }
+    .ao-switch-input:checked + .ao-switch-track {
+      background: #00bc8c;
+      box-shadow: inset 0 0 0 1px #00bc8c;
+    }
+    .ao-switch-input:checked + .ao-switch-track .ao-switch-knob {
+      transform: translateX(20px);
+    }
+    .ao-switch-input:focus-visible + .ao-switch-track {
+      outline: 2px solid #00bc8c;
+      outline-offset: 3px;
+    }
+    .ao-notify-types {
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      margin-top: 10px;
+      padding-top: 10px;
+      border-top: 1px solid #333;
+    }
+    .ao-notify-types[data-off] {
+      opacity: 0.45;
+      pointer-events: none;
+    }
+    .ao-switch-sm .ao-switch-title {
+      font-weight: 500;
+      font-size: 0.92em !important;
+    }
+    .ao-switch-sm .ao-switch-hint {
+      font-size: 0.8em !important;
+    }
+    .ao-switch-sm .ao-switch-track {
+      width: 36px;
+      height: 20px;
+    }
+    .ao-switch-sm .ao-switch-knob {
+      width: 16px;
+      height: 16px;
+    }
+    .ao-switch-sm .ao-switch-input:checked + .ao-switch-track .ao-switch-knob {
+      transform: translateX(16px);
+    }
     details {
       display: block;
       width: 100%;
@@ -536,6 +642,10 @@ function buildPanelShadowCss(variant: PanelShadowVariant): string {
       .ao-spinner,
       .ao-skel {
         animation: none;
+      }
+      .ao-switch-track,
+      .ao-switch-knob {
+        transition: none;
       }
     }
   `;

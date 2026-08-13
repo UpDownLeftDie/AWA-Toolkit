@@ -1,6 +1,7 @@
-import { parseTimestamp } from './shared';
-import { applyRedeemableArpFromDocument } from './arpLog';
-import type { SiteState } from './types';
+import { readPageArpTier } from "../../pageGlobals";
+import { parseTimestamp } from "./shared";
+import { applyRedeemableArpFromDocument } from "./arpLog";
+import type { SiteState } from "./types";
 
 export interface GameVaultItem {
   name: string;
@@ -66,7 +67,7 @@ earnings to include quests still left today. Unknown ARP/tier does not exclude.
 */
 export function isAffordableVaultOffer(
   game: GameVaultItem,
-  state: Pick<SiteState, 'userArpTier' | 'arpLog'>,
+  state: Pick<SiteState, "userArpTier" | "arpLog">,
   discountPct = 0,
   availableArp: number | undefined = state.arpLog?.redeemableArp,
 ): boolean {
@@ -99,7 +100,7 @@ tier + enough redeemable ARP. `discountPct` is the market % off they would pay.
 */
 export function isClaimableVaultGame(
   game: GameVaultItem,
-  state: Pick<SiteState, 'userArpTier' | 'arpLog'>,
+  state: Pick<SiteState, "userArpTier" | "arpLog">,
   discountPct = 0,
 ): boolean {
   return (
@@ -155,7 +156,7 @@ export function gameVaultCycleId(state: SiteState): string | undefined {
     return state.gameVaultOpensAt;
   }
   if (isGameVaultStockOpen(state)) {
-    return 'open';
+    return "open";
   }
   return undefined;
 }
@@ -193,7 +194,7 @@ export function gameVaultCatalogPrice(
 export function scrapeGameVaultTimerMsFromDocument(
   document_: Document,
 ): number | undefined {
-  const timer = document_.querySelector<HTMLElement>('#game-vault-timer');
+  const timer = document_.querySelector<HTMLElement>("#game-vault-timer");
   const raw =
     timer?.dataset.unlockDate ??
     timer?.dataset.endDate ??
@@ -208,9 +209,9 @@ export function scrapeGameVaultFromDocument(
 ): GameVaultItem[] {
   const items = document_.querySelectorAll<HTMLElement>(
     [
-      '.gamevault-marketplace-product[data-product-price]',
-      '.marketplace-game-product[data-product-price]',
-    ].join(', '),
+      ".gamevault-marketplace-product[data-product-price]",
+      ".marketplace-game-product[data-product-price]",
+    ].join(", "),
   );
 
   const result: GameVaultItem[] = [];
@@ -225,25 +226,25 @@ export function scrapeGameVaultFromDocument(
       continue;
     }
     const id =
-      item.dataset.productId ?? `${price}:${item.dataset.productName ?? ''}`;
+      item.dataset.productId ?? `${price}:${item.dataset.productName ?? ""}`;
     if (seen.has(id)) {
       continue;
     }
     seen.add(id);
     const isAuction =
-      item.dataset.isBlindAuction === 'true' ||
-      item.classList.contains('auction-game');
-    const isInStock = item.dataset.productInStock !== 'false';
-    const isDisabled = item.dataset.productDisabled === 'true';
+      item.dataset.isBlindAuction === "true" ||
+      item.classList.contains("auction-game");
+    const isInStock = item.dataset.productInStock !== "false";
+    const isDisabled = item.dataset.productDisabled === "true";
     const minTierRaw = item.dataset.arpTier;
     const minTier = minTierRaw === undefined ? undefined : Number(minTierRaw);
     const name =
       item.dataset.productName?.trim() ||
       item
-        .querySelector('.product-name, .gv-product-name, h3, h4')
+        .querySelector(".product-name, .gv-product-name, h3, h4")
         ?.textContent?.trim() ||
-      item.getAttribute('title') ||
-      'Game Vault item';
+      item.getAttribute("title") ||
+      "Game Vault item";
     const nextItem: GameVaultItem = {
       name,
       price,
@@ -266,34 +267,7 @@ export function scrapeGameVault(): GameVaultItem[] {
 export function scrapeUserArpTierFromDocument(
   document_: Document,
 ): number | undefined {
-  if (document_ === document) {
-    const arpTier = (globalThis as typeof globalThis & { arp_tier?: unknown })
-      .arp_tier;
-    if (
-      typeof arpTier === 'number' &&
-      Number.isFinite(arpTier) &&
-      arpTier >= 0
-    ) {
-      return arpTier;
-    }
-  }
-  for (const script of document_.querySelectorAll('script')) {
-    const match = /(?:var\s+|window\.)?arp_tier\s*=\s*(\d+)/.exec(
-      script.textContent ?? '',
-    );
-    if (match?.[1]) {
-      return Number(match[1]);
-    }
-  }
-  const tierImg = document_.querySelector<HTMLImageElement>(
-    'img[src*="/images/content/tier-tags/"]',
-  );
-  const tierMatch = /tier-tags\/(\d+)\.png/.exec(tierImg?.src ?? '');
-  if (!tierMatch?.[1]) {
-    return undefined;
-  }
-  const tier = Number(tierMatch[1]);
-  return Number.isFinite(tier) ? tier : undefined;
+  return readPageArpTier(document_);
 }
 
 function applyGameVaultSchedule(

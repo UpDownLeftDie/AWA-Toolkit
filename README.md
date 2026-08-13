@@ -27,6 +27,7 @@ Open the user menu gear and choose **Artifact Optimizer** or **Filter Settings**
 * Shows a **long-term META upgrade path** (HPC → Pn295 Twitch → Chai → …). That list is a plan only — fragments are never spent unless you confirm **Upgrade**. Leftover shards are not suggested on cheaper sidegrades. Equip recommendations use the tiers you actually own.
 * Reads Control Center activity caps, Game Vault prices, and Battle Pass claim status from those pages (live when you are on them; otherwise via background fetch).
 * One-click equip / upgrade via the site's real APIs, with confirmation and best-effort local 24h slot-cooldown tracking (seeded from Showroom lock icons when Unequip is hidden). On the Artifact Showroom, **Equip Monthly META** puts on Megumin's standing 3-set (HPC + Chai + Pn295, or Pn295 + Chai + Ba'li, or Zorathian) for people who want the all-month loadout instead of today's 24h recommendation. If slots are stuck on a 24h lock, the Showroom task list mentions Megumin's workaround: click Upgrade on a maxed artifact (0 fragments) to clear it.
+* Optional **desktop notifications** (userscript manager → OS notification center) when a pending artifact swap's 24h slot cooldown ends, community hours unlock, Game Vault opens or adds games, or a new official key giveaway is posted on [`/ucf/Giveaway`](https://na.alienwarearena.com/ucf/Giveaway). Enable the master toggle in the full panel, then use the smaller per-type switches. An Alienware Arena tab must stay open for the timer to fire; once shown, the notification can persist after that tab closes. The first giveaway / vault-catalog check only seeds what is already posted so you are not flooded.
 
 ## UCF Posts
 
@@ -41,6 +42,7 @@ Layout choices are remembered for all UCF posts.
 ## Limitations
 
 * Server-side slot cooldowns are not exposed in the DOM; cooldown warnings use a local action log.
+* Desktop notifications can only be *scheduled* while an Alienware Arena tab is open. Once fired they persist in the OS notification center (Tampermonkey `tag`/`url`, Violentmonkey `zombieTimeout`).
 * Some activity signals are best-effort and default to "still available" when markup differs.
 * Steam Quests and Steam Community Events require **owning the game** on the linked Steam account (family sharing doesn't count). Upcoming titles aren't known until AWA posts them. **Check Game** / **Visit Steam** / **Sync Games** means the game isn't showing as owned yet (play ~10 min after adding it). Paid games are skipped; Steam `is_free` (or currently $0 / 100% off) titles stay on the list. Choose Your Own Game stays eligible.
 * Battle Pass milestone thresholds are not hardcoded (season-dependent); ready-to-claim counts are informational.

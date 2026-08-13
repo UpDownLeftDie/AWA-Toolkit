@@ -1,5 +1,6 @@
-import { GM } from '$';
+import { GM } from "$";
 
+import { readPageFragmentBalance } from "../pageGlobals";
 import {
   type ArtifactCategory,
   ArtifactTier,
@@ -7,10 +8,10 @@ import {
   fragmentCostToUpgradeFrom,
   getArtifactById,
   resolveArtifactByDisplayName,
-} from './data';
-import { syncSlotLocksFromScrape } from './settings';
+} from "./data";
+import { syncSlotLocksFromScrape } from "./settings";
 
-const SNAPSHOT_KEY = 'artifactSnapshot';
+const SNAPSHOT_KEY = "artifactSnapshot";
 
 export type ArtifactSlotIndex = 1 | 2 | 3;
 
@@ -48,11 +49,11 @@ export interface ArtifactSnapshot {
 }
 
 function isArtifactSnapshot(value: unknown): value is ArtifactSnapshot {
-  if (typeof value !== 'object' || !value) {
+  if (typeof value !== "object" || !value) {
     return false;
   }
   const v = value as Record<string, unknown>;
-  return Array.isArray(v.artifacts) && typeof v.fragments === 'number';
+  return Array.isArray(v.artifacts) && typeof v.fragments === "number";
 }
 
 export async function loadSnapshot(): Promise<ArtifactSnapshot | undefined> {
@@ -62,7 +63,7 @@ export async function loadSnapshot(): Promise<ArtifactSnapshot | undefined> {
     return undefined;
   }
   try {
-    const parsed: unknown = typeof raw === 'string' ? JSON.parse(raw) : raw;
+    const parsed: unknown = typeof raw === "string" ? JSON.parse(raw) : raw;
     return isArtifactSnapshot(parsed) ? parsed : undefined;
   } catch {
     return undefined;
@@ -119,18 +120,14 @@ export async function applySnapshotUpgrade(
 }
 
 function readFragmentBalance(document_: Document): number {
-  if (document_ === document) {
-    const win = globalThis as typeof globalThis & {
-      fragment_balance?: unknown;
-    };
-    if (typeof win.fragment_balance === 'number') {
-      return win.fragment_balance;
-    }
+  const fromPage = readPageFragmentBalance(document_);
+  if (fromPage !== undefined) {
+    return fromPage;
   }
-  const text = document_.body?.textContent ?? '';
+  const text = document_.body?.textContent ?? "";
   const match = /Fragments:\s*([\d,]+)/i.exec(text);
   if (match?.[1]) {
-    return Number(match[1].replaceAll(',', ''));
+    return Number(match[1].replaceAll(",", ""));
   }
   return 0;
 }
@@ -149,7 +146,7 @@ function readUsernameFrom(
     'a[href*="/member/"][href$="/artifacts"]',
   );
   const hrefMatch = link
-    ? /\/member\/([^/]+)\/artifacts/.exec(link.getAttribute('href') ?? '')
+    ? /\/member\/([^/]+)\/artifacts/.exec(link.getAttribute("href") ?? "")
     : undefined;
   return hrefMatch?.[1];
 }
@@ -162,7 +159,7 @@ function readUsername(): string | undefined {
  * Site redirect to the logged-in user's Artifact Showroom
  * (`/member/<you>/artifacts`).
  */
-export const USER_ARTIFACTS_ROOM_PATH = '/user-artifacts-room';
+export const USER_ARTIFACTS_ROOM_PATH = "/user-artifacts-room";
 
 /**
  * Artifact Showroom path for the logged-in user.
@@ -190,7 +187,7 @@ function parseEquippedPosition(card: Element): ArtifactSlotIndex | undefined {
     return undefined;
   }
   const match = /unequipArtifact\s*\(\s*\d+\s*,\s*([123])\s*\)/.exec(
-    unequip.getAttribute('onclick') ?? '',
+    unequip.getAttribute("onclick") ?? "",
   );
   if (!match?.[1]) {
     return undefined;
@@ -199,7 +196,7 @@ function parseEquippedPosition(card: Element): ArtifactSlotIndex | undefined {
 }
 
 function normalizeName(value: string): string {
-  return value.replaceAll(/\s+/g, ' ').trim().toLowerCase();
+  return value.replaceAll(/\s+/g, " ").trim().toLowerCase();
 }
 
 interface ShowcaseSlot {
@@ -213,10 +210,10 @@ interface ShowcaseSlot {
  * `fa-lock` token), so "has fa-lock and not fa-lock-open" is the locked state.
  */
 function isShowcaseSlotLocked(slot: Element): boolean {
-  if (slot.querySelector(':scope i.fa-lock-open, :scope i.fa-unlock')) {
+  if (slot.querySelector(":scope i.fa-lock-open, :scope i.fa-unlock")) {
     return false;
   }
-  return Boolean(slot.querySelector(':scope i.fa-lock'));
+  return Boolean(slot.querySelector(":scope i.fa-lock"));
 }
 
 /**
@@ -224,10 +221,10 @@ function isShowcaseSlotLocked(slot: Element): boolean {
  * is hidden during the 24h cooldown.
  */
 function scrapeShowcaseSlots(document_: Document): ShowcaseSlot[] {
-  const root = document_.querySelector('.slots');
+  const root = document_.querySelector(".slots");
   const slots = root
-    ? [...root.querySelectorAll(':scope > .slot')]
-    : [...document_.querySelectorAll('.slot')];
+    ? [...root.querySelectorAll(":scope > .slot")]
+    : [...document_.querySelectorAll(".slot")];
   const result: ShowcaseSlot[] = [];
   let position = 1 as ArtifactSlotIndex;
   for (const slot of slots) {
@@ -235,9 +232,9 @@ function scrapeShowcaseSlots(document_: Document): ShowcaseSlot[] {
       break;
     }
     const img =
-      slot.querySelector<HTMLImageElement>(':scope .slot-front img') ??
-      slot.querySelector<HTMLImageElement>(':scope img');
-    const displayName = (img?.alt ?? '').trim();
+      slot.querySelector<HTMLImageElement>(":scope .slot-front img") ??
+      slot.querySelector<HTMLImageElement>(":scope img");
+    const displayName = (img?.alt ?? "").trim();
     if (!displayName || /^artifact$/i.test(displayName)) {
       position = (position + 1) as ArtifactSlotIndex;
       continue;
@@ -283,8 +280,8 @@ function applyShowcaseEquips(
 
 function parseFooterTier(card: Element): ArtifactTier | undefined {
   const tip =
-    card.querySelector<HTMLImageElement>('img[data-original-title]')?.dataset
-      .originalTitle ?? '';
+    card.querySelector<HTMLImageElement>("img[data-original-title]")?.dataset
+      .originalTitle ?? "";
   const footerMatch =
     /(Weapon|Clothing|Power|Language|Precious Gems|Tech|Knowledge|Social|Architecture)\s*-\s*(Rust|Bronze|Silver|Gold|Platinum|Interstellar)/i.exec(
       tip,
@@ -312,7 +309,7 @@ export function scrapeShowroomFromDocument(
   pathHint?: string,
 ): ArtifactSnapshot {
   const cards = document_.querySelectorAll<HTMLAnchorElement>(
-    'a.artifact-list-item.change-artifact-modal',
+    "a.artifact-list-item.change-artifact-modal",
   );
 
   const artifacts: OwnedArtifact[] = [];
@@ -323,7 +320,7 @@ export function scrapeShowroomFromDocument(
       continue;
     }
 
-    const displayName = (card.dataset.title ?? '').trim();
+    const displayName = (card.dataset.title ?? "").trim();
     if (!displayName) {
       continue;
     }
@@ -332,21 +329,21 @@ export function scrapeShowroomFromDocument(
     const footerTier = parseFooterTier(card);
     const tier = resolved?.tier ?? footerTier;
     if (tier === undefined || !resolved) {
-      console.warn('[Artifact Optimizer] Unrecognized artifact:', displayName);
+      console.warn("[Artifact Optimizer] Unrecognized artifact:", displayName);
       continue;
     }
 
     const upgradeCostRaw = card.dataset.upgradeCost;
     const parsedUpgradeCost =
-      upgradeCostRaw === undefined || upgradeCostRaw === ''
+      upgradeCostRaw === undefined || upgradeCostRaw === ""
         ? undefined
         : Number(upgradeCostRaw);
     const upgradeCost = Number.isNaN(parsedUpgradeCost as number)
       ? undefined
       : parsedUpgradeCost;
     const isMaxLevel =
-      card.dataset.maxLevel === 'true' ||
-      card.dataset.maxLevel === '1' ||
+      card.dataset.maxLevel === "true" ||
+      card.dataset.maxLevel === "1" ||
       upgradeCost === 0;
 
     const owned: OwnedArtifact = {
@@ -356,7 +353,7 @@ export function scrapeShowroomFromDocument(
       tier,
       category: resolved.definition.category,
       maxLevel: isMaxLevel,
-      perkDescription: card.dataset.descriptionPerk ?? '',
+      perkDescription: card.dataset.descriptionPerk ?? "",
     };
     if (upgradeCost !== undefined) {
       owned.upgradeCost = upgradeCost;
@@ -387,7 +384,7 @@ export function scrapeShowroom(): ArtifactSnapshot {
 export function isShowroomDocumentReady(document_: Document): boolean {
   return Boolean(
     document_.querySelector(
-      'a.artifact-list-item.change-artifact-modal, #weapon-section',
+      "a.artifact-list-item.change-artifact-modal, #weapon-section",
     ),
   );
 }

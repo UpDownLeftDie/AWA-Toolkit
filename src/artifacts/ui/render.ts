@@ -5,17 +5,22 @@ import type {
   UpgradeSuggestion,
 } from '../optimizer';
 import type { ArtifactSnapshot } from '../scraper';
-import type { ArtifactOptimizerSettings } from '../settings';
-import { saveArtifactSettings } from '../settings';
+import {
+  NOTIFICATION_TYPE_COPY,
+  NOTIFICATION_TYPE_KEYS,
+  saveArtifactSettings,
+  type ArtifactOptimizerSettings,
+} from '../settings';
 import {
   type ActivityKey,
   battlePassRemainingMs,
   describeCommunityEventPendingParts,
-  emptySiteState,
   type SiteState,
 } from '../siteState';
-import { shouldShowBattlePassClaimAll, shouldSkipArpInBattlePassClaimAll } from '../siteState/battlePass';
-import { buildActionPlan, renderActionPlan } from './actionPlan';
+import {
+  shouldShowBattlePassClaimAll,
+  shouldSkipArpInBattlePassClaimAll,
+} from '../siteState/battlePass';
 import {
   comboLabel,
   escapeHtml,
@@ -26,6 +31,46 @@ import {
 
 export function renderSectionDivider(): string {
   return '<hr class="ao-divider" />';
+}
+
+function renderNotifySwitch(options: {
+  id: string;
+  title: string;
+  hint: string;
+  isChecked: boolean;
+  isSmall?: boolean;
+}): string {
+  const sizeClass = options.isSmall === true ? ' ao-switch-sm' : '';
+  return `
+      <label class="ao-switch${sizeClass}">
+        <span class="ao-switch-copy">
+          <span class="ao-switch-title">${escapeHtml(options.title)}</span>
+          <span class="ao-switch-hint">${escapeHtml(options.hint)}</span>
+        </span>
+        <input type="checkbox" id="${escapeHtml(options.id)}" class="ao-switch-input" ${
+          options.isChecked ? 'checked' : ''
+        }/>
+        <span class="ao-switch-track" aria-hidden="true"><span class="ao-switch-knob"></span></span>
+      </label>`;
+}
+
+function renderNotifyTypeSwitches(settings: ArtifactOptimizerSettings): string {
+  const switches = NOTIFICATION_TYPE_KEYS.map((key) => {
+    const copy = NOTIFICATION_TYPE_COPY[key];
+    return renderNotifySwitch({
+      id: `ao-notify-type-${key}`,
+      title: copy.title,
+      hint: copy.hint,
+      isChecked: settings.notificationTypes[key],
+      isSmall: true,
+    });
+  }).join('');
+  return `
+      <div class="ao-notify-types"${
+        settings.browserNotifications ? '' : ' data-off=""'
+      }>
+        ${switches}
+      </div>`;
 }
 
 const SKELETON_BAR_WIDTHS = ['88%', '72%', '64%', '48%'] as const;
@@ -42,7 +87,7 @@ function renderSkeletonBars(): string {
 
 export function renderPanelError(message: string): string {
   return `
-    <div class="ao-heading">Artifact Optimizer</div>
+    <div class="ao-heading">AWA Toolkit</div>
     <div class="ao-note">${escapeHtml(message)}</div>
   `;
 }
@@ -51,7 +96,7 @@ export function renderPanelSkeleton(
   message = 'Loading recommendations…',
 ): string {
   return `
-    <div class="ao-heading">Artifact Optimizer</div>
+    <div class="ao-heading">AWA Toolkit</div>
     ${renderHydrateBanner(message)}
     <div id="ao-action-plan" class="ao-skel-block">
       <div class="ao-heading">What to do</div>
@@ -530,9 +575,6 @@ export function renderResultBody(
     ? renderHydrateBanner('Updating in the background…')
     : '';
 
-  const actionPlan = renderActionPlan(
-    buildActionPlan(result, settings, siteState ?? emptySiteState()),
-  );
   const extras = supplementalNotes(result.notes)
     .map((n) => `<div class="ao-note">${escapeHtml(n)}</div>`)
     .join('');
@@ -541,21 +583,16 @@ export function renderResultBody(
   const upgrades = renderUpgradePath(result.upgrades, fragments);
 
   const swap = formatSwapMessage(result);
-  const status = renderStatusSection(
-    settings,
-    siteState,
-    snapshot?.slotLocks,
-    {
-      showBattlePassClaimAll: shouldShowBattlePassClaimAll(
-        siteState?.battlePass,
-        result.deferBattlePassClaims === true,
-      ),
-      shouldSkipArpBoosts: shouldSkipArpInBattlePassClaimAll(
-        siteState?.battlePass,
-        result.deferBattlePassClaims === true,
-      ),
-    },
-  );
+  const status = renderStatusSection(settings, siteState, snapshot?.slotLocks, {
+    showBattlePassClaimAll: shouldShowBattlePassClaimAll(
+      siteState?.battlePass,
+      result.deferBattlePassClaims === true,
+    ),
+    shouldSkipArpBoosts: shouldSkipArpInBattlePassClaimAll(
+      siteState?.battlePass,
+      result.deferBattlePassClaims === true,
+    ),
+  });
   const equippedLabel = formatEquippedLabel(result);
 
   const activityToggles = (
@@ -574,9 +611,17 @@ export function renderResultBody(
     .join('');
 
   return `
+    <div class="ao-notify">
+      ${renderNotifySwitch({
+        id: 'ao-browser-notifications',
+        title: 'Desktop notifications',
+        hint: 'Master switch. Turning this on asks the browser for permission.',
+        isChecked: settings.browserNotifications,
+      })}
+      ${renderNotifyTypeSwitches(settings)}
+    </div>
     ${hydrateBanner}
     <div class="ao-muted">Inventory snapshot: ${scrapedAt} · Fragments: ${fragments}</div>
-    ${actionPlan}
     ${vaultDiscount}
     ${extras}
     ${renderSectionDivider()}

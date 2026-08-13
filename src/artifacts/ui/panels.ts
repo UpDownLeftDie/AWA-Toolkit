@@ -12,7 +12,10 @@ import {
   watchBattlePassPage,
   watchControlCenterPage,
 } from '../siteState';
-import { shouldShowBattlePassClaimAll, shouldSkipArpInBattlePassClaimAll } from '../siteState/battlePass';
+import {
+  shouldShowBattlePassClaimAll,
+  shouldSkipArpInBattlePassClaimAll,
+} from '../siteState/battlePass';
 import {
   buildActionPlan,
   isKeepingCurrentLoadout,
@@ -29,15 +32,15 @@ import {
   bindClaimAllButtons,
   consumePendingBattlePassClaimAll,
 } from './battlePassClaim';
-import { bindOpenTwitchButtons } from './twitchPick';
 import { showAoToast } from './dialog';
 import {
-  gatheredCache,
   gatherData,
+  gatheredCache,
   hydrateGatheredData,
   isControlCenterPage,
   isSiteStatePage,
   requiresBackgroundHydrate,
+  warmNotificationSchedule,
   type GatheredData,
 } from './gather';
 import { comboLabel, escapeHtml } from './loadoutPlan';
@@ -67,6 +70,7 @@ import {
   buildModalShadowCss,
   ensureOptimizerStyles,
 } from './styles';
+import { bindOpenTwitchButtons } from './twitchPick';
 
 function ensureOptimizerBackdrop(): HTMLElement {
   let backdrop = document.querySelector<HTMLElement>(`#${BACKDROP_ID}`);
@@ -279,7 +283,7 @@ async function openOptimizerModal(): Promise<void> {
     shadow.innerHTML = `
       <style>${buildModalShadowCss()}</style>
       <div class="ao-panel">
-        <div class="ao-title" id="ao-title">Artifact Optimizer</div>
+        <div class="ao-title" id="ao-title">AWA Toolkit</div>
         ${renderCredits()}
         <div id="ao-body">
           ${renderModalSkeleton()}
@@ -671,7 +675,10 @@ async function fillPanelFromCacheThenHydrate(
     if (!isPanelGenerationCurrent(panel, generation)) {
       return;
     }
-    replaceInlinePanelBody(panel, renderPanelError(formatPanelLoadError(error)));
+    replaceInlinePanelBody(
+      panel,
+      renderPanelError(formatPanelLoadError(error)),
+    );
   }
 }
 
@@ -1007,4 +1014,5 @@ export async function initArtifactOptimizer(): Promise<void> {
   }
 
   await createOptimizerModal();
+  void warmNotificationSchedule();
 }
