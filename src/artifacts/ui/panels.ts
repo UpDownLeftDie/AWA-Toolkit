@@ -13,6 +13,7 @@ import {
   watchControlCenterPage,
 } from "../siteState";
 import {
+  battlePassClaimButtonLabel,
   shouldShowBattlePassClaimAll,
   shouldSkipArpInBattlePassClaimAll,
 } from "../siteState/battlePass";
@@ -526,7 +527,7 @@ function compactClaimAllBpButton(data: GatheredData): string {
   const title = shouldSkipArpBoosts
     ? ' title="Claims cosmetics and fragments; leaves ARP Boosts until All-ARP% is equipped"'
     : "";
-  return `<button type="button" class="ao-claim-btn ao-secondary"${skipArp}${title}>Claim all BP</button>`;
+  return `<button type="button" class="ao-claim-btn ao-secondary"${skipArp}${title}>${battlePassClaimButtonLabel(shouldSkipArpBoosts, { compact: true })}</button>`;
 }
 
 function renderControlCenterPanelBody(
@@ -933,7 +934,7 @@ function renderBattlePassClaimBarBody(): string {
   );
   const skipArp = shouldSkipArpBoosts ? ' data-skip-arp="1"' : "";
   const claimButton = shouldShowClaimAll
-    ? `<div class="ao-actions"><button type="button" class="ao-claim-btn"${skipArp}>Claim all</button></div>`
+    ? `<div class="ao-actions"><button type="button" class="ao-claim-btn"${skipArp}>${battlePassClaimButtonLabel(shouldSkipArpBoosts)}</button></div>`
     : '<div class="ao-muted">Wait to claim ARP Boosts until All-ARP% is equipped</div>';
   return `
     <div class="ao-heading">Battle Pass</div>

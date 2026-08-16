@@ -21,7 +21,7 @@ export interface CreditSource {
 /**
 Attribution sources for optimizer math / META guidance. Expand as needed.
 */
-export const ARTIFACT_CREDITS: readonly CreditSource[] = [
+export const CREDIT_SOURCES: readonly CreditSource[] = [
   {
     id: 'megumin-tools',
     label: "Megumin's Tools",

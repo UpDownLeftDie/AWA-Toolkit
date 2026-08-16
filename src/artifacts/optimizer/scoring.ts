@@ -38,6 +38,32 @@ import type {
   ScoredCombo,
 } from './types';
 
+/**
+ * Base ARP per ready Battle Pass ARP Boost (pre All-ARP% multiplier).
+ */
+export const BATTLE_PASS_BOOST_ARP = 40;
+
+/**
+ * A dedicated 24h All-ARP% lock is only worth it when the extra multiplier on
+ * ready BP boosts beats the lock-window ARP lost vs the recommended set.
+ */
+export function isAllArpLockWorthBattlePassBoost(
+  best: ScoredCombo | undefined,
+  allArp: ScoredCombo | undefined,
+  readyBoosts: number,
+): boolean {
+  if (!best || !allArp || allArp.allArpPct <= 0 || readyBoosts <= 0) {
+    return false;
+  }
+  const extraOnBoost =
+    readyBoosts * BATTLE_PASS_BOOST_ARP * (allArp.allArpPct - best.allArpPct);
+  if (extraOnBoost <= 0) {
+    return false;
+  }
+  const lockCost = best.weeklyArp - allArp.weeklyArp;
+  return extraOnBoost > lockCost;
+}
+
 function scoreSteamQuestBases(
   breakdown: Record<string, RawBreakdownParts>,
   bonuses: BonusBuckets,
@@ -127,7 +153,7 @@ function scoreSecondaryActivities(
       flatSum += setBreakdownParts(
         breakdown,
         'battlePassClaims',
-        readyClaims * 40,
+        readyClaims * BATTLE_PASS_BOOST_ARP,
       );
     }
   }

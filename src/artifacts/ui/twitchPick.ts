@@ -7,7 +7,7 @@ import { showAoAlert, showAoToast } from "./dialog";
 const QUESTS_PATH = "/quests";
 const TWITCH_HOST = /(^|\.)twitch\.tv$/i;
 
-export type TwitchStreamGroup = "hive" | "nexus" | "partner";
+export type TwitchStreamGroup = "featured" | "hive" | "nexus" | "partner";
 
 export type TwitchPickReason =
   "preferred" | "doubleArpDrops" | "doubleArp" | "drops" | "random";
@@ -43,6 +43,9 @@ function twitchLoginFromHref(href: string): string | undefined {
 
 function headingGroup(text: string): TwitchStreamGroup | undefined {
   const label = text.replaceAll(/\s+/g, " ").trim();
+  if (/^featured\b/i.test(label)) {
+    return "featured";
+  }
   if (/^hive\b/i.test(label)) {
     return "hive";
   }
@@ -90,12 +93,18 @@ function streamFromRow(
       ?.textContent?.replaceAll(/\s+/g, " ")
       .trim() ?? "";
   const displayName = nameText?.replaceAll(/\s+/g, " ").trim() || login;
+  const resolvedGroup =
+    group === "partner" &&
+    (row.classList.contains("speed-boost") ||
+      row.querySelector(".featured") !== null)
+      ? "featured"
+      : group;
   return {
     login,
     displayName,
     title,
     url: twitchWatchUrl(href, login),
-    group,
+    group: resolvedGroup,
   };
 }
 
@@ -140,8 +149,14 @@ function hasDropsInTitle(stream: TwitchStream): boolean {
   return /drops/i.test(stream.title);
 }
 
+const DOUBLE_ARP_GROUPS: ReadonlySet<TwitchStreamGroup> = new Set([
+  "featured",
+  "hive",
+  "nexus",
+]);
+
 function isDoubleArp(stream: TwitchStream): boolean {
-  return stream.group === "hive" || stream.group === "nexus";
+  return DOUBLE_ARP_GROUPS.has(stream.group);
 }
 
 function isPreferredMatch(
@@ -198,7 +213,13 @@ export function pickTwitchStream(
 }
 
 function doubleArpGroupLabel(stream: TwitchStream): string {
-  return stream.group === "nexus" ? "Nexus" : "Hive";
+  if (stream.group === "featured") {
+    return "Featured";
+  }
+  if (stream.group === "nexus") {
+    return "Nexus";
+  }
+  return "Hive";
 }
 
 function pickReasonLabel(pick: TwitchPick): string {

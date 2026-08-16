@@ -1,3 +1,4 @@
+import { battlePassClaimableArp } from '../siteState';
 import {
   combinationsWithPinned,
   currentLoadout,
@@ -18,7 +19,10 @@ import {
   suggestDailySwap,
   suggestUpgrades,
 } from './search';
-import { scoreCombo } from './scoring';
+import {
+  isAllArpLockWorthBattlePassBoost,
+  scoreCombo,
+} from './scoring';
 import type { OptimizerContext, OptimizerResult, ScoredCombo } from './types';
 import { resolveVaultDiscountBest } from './vaultDiscount';
 
@@ -82,6 +86,14 @@ export function optimize(context: OptimizerContext): OptimizerResult {
     alternatives.push(marketDiscountLoadout);
   }
 
+  const deferredAllArp = resolveDeferredAllArp(owned, context);
+  const shouldDeferBattlePassClaims = shouldDeferBattlePassForContext(context);
+  const isDedicatedLockWorthIt = isAllArpLockWorthBattlePassBoost(
+    best,
+    allArpLoadout,
+    battlePassClaimableArp(context.siteState.battlePass),
+  );
+
   const notes = collectNotes(owned, equipped, best, context);
 
   const result: OptimizerResult = {
@@ -93,15 +105,17 @@ export function optimize(context: OptimizerContext): OptimizerResult {
     notes,
     hasAllArpOwned: hasInventoryAllArp(owned),
     hasAllArpEquipped: hasAllArpEffect(equipped),
-    deferBattlePassClaims: shouldDeferBattlePassForContext(context),
+    deferBattlePassClaims: shouldDeferBattlePassClaims,
   };
+  if (isDedicatedLockWorthIt) {
+    result.worthDedicatedAllArpForBattlePass = true;
+  }
   if (context.snapshot.slotLocks) {
     result.slotLocks = context.snapshot.slotLocks;
   }
   if (allArpLoadout) {
     result.allArpLoadout = allArpLoadout;
   }
-  const deferredAllArp = resolveDeferredAllArp(owned, context);
   if (deferredAllArp) {
     result.deferredAllArp = deferredAllArp;
   }

@@ -2,6 +2,18 @@ import { claimBattlePassReward } from '../api';
 import { pageText } from './shared';
 import type { SiteState } from './types';
 
+export interface BattlePassReadyClaim {
+  milestoneId: string;
+  isArp: boolean;
+  /**
+   * Form `action` (`/battle-pass/claim/{instanceId}`). The path id is a
+   * per-user claim instance, not `milestoneId`.
+   */
+  claimPath?: string;
+  csrfToken?: string;
+  body?: Record<string, unknown>;
+}
+
 export interface BattlePassState {
   tokens?: number;
   tokensMax?: number;
@@ -13,6 +25,10 @@ export interface BattlePassState {
   Claimable ARP Boost (or flat ARP) milestones — these are multiplied by All-ARP%.
   */
   readyToClaimArp: number;
+  /**
+  Ready CLAIM targets scraped from the track (form action + csrf for POSTs).
+  */
+  readyClaims?: BattlePassReadyClaim[];
   endsInText?: string;
   /**
   Absolute end from the on-page countdown at scrape time (not a 24h slot lock).
@@ -35,6 +51,7 @@ export function scrapeBattlePassFromDocument(
     return undefined;
   }
 
+  const readyClaims = listReadyClaimsFromDocument(document_);
   const { readyToClaim, readyToClaimArp } = countBattlePassClaims(document_);
 
   const state: BattlePassState = {
@@ -43,6 +60,9 @@ export function scrapeBattlePassFromDocument(
     url: '/control-center/battle-pass/1',
     scrapedAt: new Date().toISOString(),
   };
+  if (readyClaims.length > 0) {
+    state.readyClaims = readyClaims;
+  }
 
   if (tokensMatch?.[1] && tokensMatch[2]) {
     state.tokens = Number(tokensMatch[1].replaceAll(',', ''));
@@ -144,32 +164,79 @@ export function applyBattlePassEndFromDocument(
 
 /**
  * Battle Pass track popups use `.bp-popup__claim-btn` (often hidden until opened).
- * Free and premium tracks can share a milestone id — count each popup.
+ * Free and premium tracks share one form action — count unique claim POSTs.
  */
+function listReadyClaimsFromDocument(
+  document_: Document,
+): BattlePassReadyClaim[] {
+  const claims: BattlePassReadyClaim[] = [];
+  const popups = document_.querySelectorAll('.bp-popup[data-milestone-id]');
+  for (const popup of popups) {
+    if (!(popup instanceof HTMLElement)) {
+      continue;
+    }
+    const milestoneId = popup.dataset.milestoneId ?? '';
+    if (!milestoneId) {
+      continue;
+    }
+    claims.push(...readyClaimsFromPopup(popup));
+  }
+  return uniqueReadyClaims(claims);
+}
+
+function readyClaimFromButton(
+  button: HTMLElement,
+  popup: HTMLElement,
+): BattlePassReadyClaim {
+  const form = button.closest('form');
+  const claimPath = form?.getAttribute('action')?.trim() || undefined;
+  const csrfToken = form
+    ?.querySelector<HTMLInputElement>('input[name="_csrf_token"]')
+    ?.value;
+  const milestoneId =
+    (form instanceof HTMLElement ? form.dataset.milestoneId : undefined) ??
+    popup.dataset.milestoneId ??
+    '';
+  const claim: BattlePassReadyClaim = {
+    milestoneId,
+    isArp: isArpClaimPopup(popup),
+  };
+  if (claimPath) {
+    claim.claimPath = claimPath;
+  }
+  if (csrfToken) {
+    claim.csrfToken = csrfToken;
+  }
+  if (!claimPath) {
+    claim.body = {
+      ...datasetRecord(popup),
+      ...datasetRecord(button),
+    };
+  }
+  return claim;
+}
+
+function readyClaimsFromPopup(popup: HTMLElement): BattlePassReadyClaim[] {
+  return [...popup.querySelectorAll('.bp-popup__claim-btn')].flatMap(
+    (button) => {
+      if (!(button instanceof HTMLElement)) {
+        return [];
+      }
+      return [readyClaimFromButton(button, popup)];
+    },
+  );
+}
+
 function countBattlePassClaims(document_: Document): {
   readyToClaim: number;
   readyToClaimArp: number;
 } {
-  const popups = document_.querySelectorAll('.bp-popup[data-milestone-id]');
-  if (popups.length > 0) {
-    let readyToClaim = 0;
-    let readyToClaimArp = 0;
-    for (const popup of popups) {
-      if (!(popup instanceof HTMLElement)) {
-        continue;
-      }
-      const claimCount = popup.querySelectorAll('.bp-popup__claim-btn').length;
-      if (claimCount === 0) {
-        continue;
-      }
-      readyToClaim += claimCount;
-      const title =
-        popup.querySelector('.bp-popup__title')?.textContent?.trim() ?? '';
-      if (isBattlePassArpRewardTitle(title)) {
-        readyToClaimArp += claimCount;
-      }
-    }
-    return { readyToClaim, readyToClaimArp };
+  const readyClaims = listReadyClaimsFromDocument(document_);
+  if (readyClaims.length > 0) {
+    return {
+      readyToClaim: readyClaims.length,
+      readyToClaimArp: readyClaims.filter((claim) => claim.isArp).length,
+    };
   }
 
   // Legacy / alternate copy.
@@ -193,6 +260,48 @@ function isArpClaimPopup(popup: HTMLElement): boolean {
   return isBattlePassArpRewardTitle(battlePassPopupTitle(popup));
 }
 
+function claimIdentity(claim: BattlePassReadyClaim): string {
+  return claim.claimPath ?? claim.milestoneId;
+}
+
+function uniqueReadyClaims(
+  claims: BattlePassReadyClaim[],
+): BattlePassReadyClaim[] {
+  const seen = new Set<string>();
+  const unique: BattlePassReadyClaim[] = [];
+  for (const claim of claims) {
+    const key = claimIdentity(claim);
+    if (!key || seen.has(key)) {
+      continue;
+    }
+    seen.add(key);
+    unique.push(claim);
+  }
+  return unique;
+}
+
+function claimButtonIdentity(button: HTMLElement, popup: HTMLElement): string {
+  const form = button.closest('form');
+  return form?.getAttribute('action')?.trim() || popup.dataset.milestoneId || '';
+}
+
+function pushUniqueClaimButton(
+  items: { button: HTMLElement; popup: HTMLElement }[],
+  seen: Set<string>,
+  button: Element,
+  popup: HTMLElement,
+): void {
+  if (!(button instanceof HTMLElement)) {
+    return;
+  }
+  const key = claimButtonIdentity(button, popup);
+  if (!key || seen.has(key)) {
+    return;
+  }
+  seen.add(key);
+  items.push({ button, popup });
+}
+
 export function listBattlePassClaimButtons(
   document_: Document = document,
   options: { shouldSkipArpBoosts?: boolean } = {},
@@ -200,6 +309,7 @@ export function listBattlePassClaimButtons(
   const shouldSkipArpBoosts = options.shouldSkipArpBoosts === true;
   const popups = document_.querySelectorAll('.bp-popup[data-milestone-id]');
   const items: { button: HTMLElement; popup: HTMLElement }[] = [];
+  const seen = new Set<string>();
   for (const popup of popups) {
     if (!(popup instanceof HTMLElement)) {
       continue;
@@ -208,9 +318,7 @@ export function listBattlePassClaimButtons(
       continue;
     }
     for (const button of popup.querySelectorAll('.bp-popup__claim-btn')) {
-      if (button instanceof HTMLElement) {
-        items.push({ button, popup });
-      }
+      pushUniqueClaimButton(items, seen, button, popup);
     }
   }
   return items;
@@ -221,6 +329,12 @@ function delay(ms: number): Promise<void> {
     setTimeout(resolve, ms);
   });
 }
+
+/**
+ * Gap between Battle Pass claim POSTs. Claiming several in one burst has
+ * triggered a site-side bug for other users.
+ */
+const CLAIM_QUEUE_GAP_MS = 1500;
 
 async function waitWhile(
   isWaiting: () => boolean,
@@ -256,6 +370,19 @@ function datasetRecord(element: HTMLElement): Record<string, unknown> {
   return record;
 }
 
+function isBattlePassClaimPath(path: string): boolean {
+  const normalized = path.toLowerCase();
+  if (
+    /giveaway|marketplace|ucf\/show|community-giveaway|vote\//.test(normalized)
+  ) {
+    return false;
+  }
+  const hasClaim = /claim/.test(normalized);
+  const hasBattlePass = /battle-?pass/.test(normalized);
+  const hasMilestone = /milestone/.test(normalized);
+  return hasClaim && (hasBattlePass || hasMilestone);
+}
+
 function endpointFromHref(raw: string): BattlePassClaimEndpoint | undefined {
   let path = raw.trim();
   try {
@@ -267,7 +394,7 @@ function endpointFromHref(raw: string): BattlePassClaimEndpoint | undefined {
   } catch {
     return undefined;
   }
-  if (!/battle-pass/i.test(path) || !/claim/i.test(path)) {
+  if (!isBattlePassClaimPath(path)) {
     return undefined;
   }
   const hasIdInPath = /\/\d+\/?$/.test(urlPathname(path));
@@ -303,6 +430,7 @@ function endpointFromClaimMarkup(
 ): BattlePassClaimEndpoint | undefined {
   for (const item of listBattlePassClaimButtons(document_)) {
     const endpoint = firstClaimEndpoint([
+      item.button.closest('form')?.getAttribute('action') ?? undefined,
       item.button.getAttribute('href') ?? undefined,
       item.button.getAttribute('formaction') ?? undefined,
       item.button.dataset.url,
@@ -319,46 +447,99 @@ function endpointFromClaimMarkup(
   return undefined;
 }
 
-function endpointFromScripts(source: string): BattlePassClaimEndpoint | undefined {
-  const concat =
-    /['"](\/(?:control-center\/)?battle-pass\/[^'"]*claim[^'"]*)['"]\s*\+/i.exec(
-      source,
-    );
-  if (concat?.[1]) {
-    return {
-      path: concat[1].replace(/\/$/, ''),
-      hasIdInPath: true,
-      idParameter: 'milestoneId',
-    };
-  }
-  const quoted =
-    /['"](\/(?:control-center\/)?battle-pass\/[^'"]*claim[^'"]*)['"]/i.exec(
-      source,
-    );
-  if (!quoted?.[1]) {
+function idParameterFromSource(source: string): string {
+  const match = /(?:milestoneId|milestone_id|rewardId)\s*:/i.exec(source);
+  return /rewardId/i.test(match?.[0] ?? '') ? 'rewardId' : 'milestoneId';
+}
+
+function endpointFromQuotedPath(
+  path: string,
+  source: string,
+  hasIdInPathHint = false,
+): BattlePassClaimEndpoint | undefined {
+  if (!isBattlePassClaimPath(path)) {
     return undefined;
   }
-  const path = quoted[1];
   const hasIdInPath =
+    hasIdInPathHint ||
     /\/\d+\/?$/.test(urlPathname(path)) ||
     /\$\{|\{id\}|\{milestone/i.test(path);
-  const parameterMatch = /(?:milestoneId|milestone_id|rewardId)\s*:/i.exec(
-    source,
-  );
-  const idParameter = /rewardId/i.test(parameterMatch?.[0] ?? '')
-    ? 'rewardId'
-    : 'milestoneId';
   return {
     path: hasIdInPath ? path.replace(/\/\d+\/?$/, '').replace(/\/$/, '') : path,
     hasIdInPath,
-    idParameter,
+    idParameter: idParameterFromSource(source),
   };
+}
+
+function endpointFromScripts(source: string): BattlePassClaimEndpoint | undefined {
+  const concat =
+    /['"](\/[^'"]*(?:claim[^'"]*(?:battle|milestone)|(?:battle-pass|milestone)[^'"]*claim)[^'"]*)['"]\s*\+/i.exec(
+      source,
+    );
+  if (concat?.[1]) {
+    const fromConcat = endpointFromQuotedPath(concat[1], source, true);
+    if (fromConcat) {
+      return fromConcat;
+    }
+  }
+  const quotedPath =
+    /['"](\/[^'"]*(?:claim[^'"]*(?:battle|milestone)|(?:battle-pass|milestone)[^'"]*claim)[^'"]*)['"]/gi;
+  let match: RegExpExecArray | null;
+  while ((match = quotedPath.exec(source))) {
+    const endpoint = endpointFromQuotedPath(match[1] ?? '', source);
+    if (endpoint) {
+      return endpoint;
+    }
+  }
+  const ajaxPath =
+    /(?:\.post|\.ajax|fetch)\(\s*['"](\/[^'"]+)['"]/gi;
+  while ((match = ajaxPath.exec(source))) {
+    const endpoint = endpointFromQuotedPath(match[1] ?? '', source);
+    if (endpoint) {
+      return endpoint;
+    }
+  }
+  return undefined;
 }
 
 function collectInlineScriptText(document_: Document): string {
   return [...document_.querySelectorAll('script:not([src])')]
     .map((script) => script.textContent ?? '')
     .join('\n');
+}
+
+function pageScriptUrls(document_: Document): string[] {
+  const urls: string[] = [];
+  const add = (raw: string | null): void => {
+    if (!raw) {
+      return;
+    }
+    try {
+      const url = new URL(raw, location.origin);
+      if (url.origin !== location.origin) {
+        return;
+      }
+      urls.push(url.href);
+    } catch {
+      // Ignore malformed script URLs.
+    }
+  };
+  for (const script of document_.querySelectorAll('script[src]')) {
+    add(script.getAttribute('src'));
+  }
+  for (const link of document_.querySelectorAll(
+    'link[rel="preload"][as="script"], link[as="script"]',
+  )) {
+    add(link.getAttribute('href'));
+  }
+  return [...new Set(urls)]
+    .filter(
+      (href) =>
+        !/jquery|bootstrap|gtag|gtm|recaptcha|cloudflare|analytics|hotjar|sentry/i.test(
+          href,
+        ),
+    )
+    .slice(0, 24);
 }
 
 interface JQueryEventBag {
@@ -400,40 +581,88 @@ function endpointFromJquery(
   return undefined;
 }
 
-async function discoverBattlePassClaimEndpoint(
+async function endpointFromPageScripts(
   document_: Document,
 ): Promise<BattlePassClaimEndpoint | undefined> {
-  if (claimEndpointCache.value) {
-    return claimEndpointCache.value;
-  }
-  const found =
-    endpointFromClaimMarkup(document_) ??
-    endpointFromScripts(collectInlineScriptText(document_)) ??
-    endpointFromJquery(document_);
-  if (found) {
-    claimEndpointCache.value = found;
-    return found;
-  }
-  const sources = [...document_.querySelectorAll('script[src]')]
-    .map((script) => script.getAttribute('src'))
-    .filter((source): source is string => Boolean(source))
-    .filter((source) => /battle|pass|control-center|app|main|site/i.test(source))
-    .slice(0, 8);
-  for (const source of sources) {
+  for (const href of pageScriptUrls(document_)) {
     try {
-      const url = new URL(source, location.origin);
-      if (url.origin !== location.origin) {
-        continue;
-      }
-      const response = await fetch(url.href);
+      const response = await fetch(href);
       const text = await response.text();
-      const fromFile = endpointFromScripts(text);
+      const handlerAt = text.search(/bp-popup__claim-btn|claim-btn/i);
+      const fromFile =
+        handlerAt >= 0
+          ? (endpointFromScripts(
+              text.slice(Math.max(0, handlerAt - 2000), handlerAt + 4000),
+            ) ?? endpointFromScripts(text))
+          : endpointFromScripts(text);
       if (fromFile) {
-        claimEndpointCache.value = fromFile;
         return fromFile;
       }
     } catch {
       // Same-origin script fetch can fail on hashed chunks; keep looking.
+    }
+  }
+  return undefined;
+}
+
+async function fetchBattlePassDocument(): Promise<Document | undefined> {
+  try {
+    const response = await fetch('/control-center/battle-pass/1', {
+      headers: { Accept: 'text/html' },
+    });
+    if (!response.ok) {
+      return undefined;
+    }
+    return new DOMParser().parseFromString(await response.text(), 'text/html');
+  } catch {
+    return undefined;
+  }
+}
+
+function cacheClaimEndpoint(
+  endpoint: BattlePassClaimEndpoint,
+): BattlePassClaimEndpoint {
+  claimEndpointCache.value = endpoint;
+  console.info(
+    '[AWA Toolkit] Battle Pass claim POST',
+    endpoint.path,
+    endpoint.hasIdInPath ? '(id in path)' : '',
+  );
+  return endpoint;
+}
+
+async function searchDocumentForClaimEndpoint(
+  document_: Document,
+): Promise<BattlePassClaimEndpoint | undefined> {
+  return (
+    endpointFromClaimMarkup(document_) ??
+    endpointFromScripts(collectInlineScriptText(document_)) ??
+    endpointFromJquery(document_) ??
+    (await endpointFromPageScripts(document_))
+  );
+}
+
+async function discoverBattlePassClaimEndpoint(
+  document_?: Document,
+): Promise<BattlePassClaimEndpoint | undefined> {
+  if (claimEndpointCache.value) {
+    return claimEndpointCache.value;
+  }
+  if (document_) {
+    const found = await searchDocumentForClaimEndpoint(document_);
+    if (found) {
+      return cacheClaimEndpoint(found);
+    }
+  }
+  const isOnBattlePassPage = location.pathname.includes('/battle-pass');
+  const hasSearchedFetchedPage = Boolean(document_ && document_ !== document);
+  if (!isOnBattlePassPage && !hasSearchedFetchedPage) {
+    const fetched = await fetchBattlePassDocument();
+    if (fetched) {
+      const found = await searchDocumentForClaimEndpoint(fetched);
+      if (found) {
+        return cacheClaimEndpoint(found);
+      }
     }
   }
   return undefined;
@@ -454,178 +683,225 @@ function resolveClaimPath(
 }
 
 function resolveClaimBody(
-  endpoint: BattlePassClaimEndpoint,
-  popup: HTMLElement,
-  button: HTMLElement,
+  endpoint: BattlePassClaimEndpoint | undefined,
+  claim: BattlePassReadyClaim,
 ): Record<string, unknown> {
-  const body = {
-    ...datasetRecord(popup),
-    ...datasetRecord(button),
-  };
-  const milestoneId = popup.dataset.milestoneId;
-  if (milestoneId && body[endpoint.idParameter] === undefined) {
-    body[endpoint.idParameter] = jsonishId(milestoneId);
+  if (claim.csrfToken) {
+    return { _csrf_token: claim.csrfToken };
+  }
+  const body: Record<string, unknown> = { ...claim.body };
+  if (endpoint && body[endpoint.idParameter] === undefined) {
+    body[endpoint.idParameter] = jsonishId(claim.milestoneId);
   }
   return body;
 }
 
-async function claimTargetsViaApi(
-  document_: Document,
-  items: { button: HTMLElement; popup: HTMLElement }[],
-): Promise<number> {
-  const endpoint = await discoverBattlePassClaimEndpoint(document_);
-  if (!endpoint) {
-    return 0;
+function claimKey(claim: BattlePassReadyClaim): string {
+  return claimIdentity(claim);
+}
+
+function claimPostPath(
+  claim: BattlePassReadyClaim,
+  endpoint: BattlePassClaimEndpoint | undefined,
+): string | undefined {
+  if (claim.claimPath) {
+    return claim.claimPath;
   }
+  if (endpoint && claim.milestoneId) {
+    return resolveClaimPath(endpoint, claim.milestoneId);
+  }
+  return undefined;
+}
+
+async function claimReadyViaApi(
+  claims: BattlePassReadyClaim[],
+  endpoint: BattlePassClaimEndpoint | undefined,
+): Promise<{ claimed: number; postedPaths: Set<string> }> {
   const seen = new Set<string>();
+  const postedPaths = new Set<string>();
   let claimed = 0;
-  for (const item of items) {
-    const milestoneId = item.popup.dataset.milestoneId ?? '';
-    const key = `${milestoneId}:${JSON.stringify(datasetRecord(item.popup))}`;
-    if (!milestoneId || seen.has(key)) {
+  let hasPosted = false;
+  for (const claim of uniqueReadyClaims(claims)) {
+    const path = claimPostPath(claim, endpoint);
+    const key = claimKey(claim);
+    if (!path || seen.has(key)) {
       continue;
     }
     seen.add(key);
+    if (hasPosted) {
+      await delay(CLAIM_QUEUE_GAP_MS);
+    }
+    hasPosted = true;
     const result = await claimBattlePassReward(
-      resolveClaimPath(endpoint, milestoneId),
-      resolveClaimBody(endpoint, item.popup, item.button),
+      path,
+      resolveClaimBody(endpoint, claim),
     );
+    postedPaths.add(path);
     if (!result.ok) {
       continue;
     }
     claimed += 1;
-    await delay(200);
   }
-  return claimed;
+  return { claimed, postedPaths };
+}
+
+function claimsFromLiveButtons(
+  items: { button: HTMLElement; popup: HTMLElement }[],
+): BattlePassReadyClaim[] {
+  return uniqueReadyClaims(
+    items.map((item) => readyClaimFromButton(item.button, item.popup)),
+  );
 }
 
 async function clickRemainingClaimButtons(
   document_: Document,
-  options: { shouldSkipArpBoosts?: boolean } = {},
+  options: {
+    shouldSkipArpBoosts?: boolean;
+    skipPaths?: Set<string>;
+  } = {},
 ): Promise<number> {
   const attempted = new WeakSet<HTMLElement>();
+  const skipPaths = options.skipPaths ?? new Set<string>();
   let claimed = 0;
+  let hasClicked = false;
   while (claimed < 40) {
     const next = listBattlePassClaimButtons(document_, options).find(
-      (item) => item.button.isConnected && !attempted.has(item.button),
+      (item) => {
+        if (!item.button.isConnected || attempted.has(item.button)) {
+          return false;
+        }
+        const path = claimButtonIdentity(item.button, item.popup);
+        return !path || !skipPaths.has(path);
+      },
     );
     if (!next) {
       break;
     }
     attempted.add(next.button);
     const { button, popup } = next;
+    const path = claimButtonIdentity(button, popup);
+    if (path) {
+      skipPaths.add(path);
+    }
+    if (hasClicked) {
+      await delay(CLAIM_QUEUE_GAP_MS);
+    }
+    hasClicked = true;
+    if (button.offsetParent === null) {
+      popup.click();
+      await delay(250);
+    }
     button.click();
-    claimed += 1;
     await waitWhile(() => button.isConnected && popup.contains(button), 4000);
-    await delay(200);
+    if (!button.isConnected || !popup.contains(button)) {
+      claimed += 1;
+    }
   }
   return claimed;
 }
 
-const BATTLE_PASS_PATH = '/control-center/battle-pass/1';
-
-async function openHiddenBattlePassFrame(): Promise<HTMLIFrameElement | undefined> {
-  return new Promise((resolve) => {
-    const iframe = document.createElement('iframe');
-    iframe.setAttribute('aria-hidden', 'true');
-    iframe.style.cssText =
-      'position:fixed;width:1px;height:1px;left:-9999px;top:0;opacity:0;pointer-events:none;border:0';
-    const finish = (frame: HTMLIFrameElement | undefined): void => {
-      iframe.removeEventListener('load', onLoad);
-      iframe.removeEventListener('error', onError);
-      resolve(frame);
-    };
-    const timer = setTimeout(() => {
-      iframe.remove();
-      finish(undefined);
-    }, 15_000);
-    const onError = (): void => {
-      clearTimeout(timer);
-      iframe.remove();
-      finish(undefined);
-    };
-    const onLoad = (): void => {
-      clearTimeout(timer);
-      void (async () => {
-        const document_ = iframe.contentDocument;
-        if (!document_) {
-          iframe.remove();
-          finish(undefined);
-          return;
-        }
-        const started = Date.now();
-        while (
-          Date.now() - started < 8000 &&
-          !isBattlePassDocumentReady(document_)
-        ) {
-          await delay(250);
-        }
-        finish(iframe);
-      })();
-    };
-    iframe.addEventListener('load', onLoad);
-    iframe.addEventListener('error', onError);
-    document.body.append(iframe);
-    iframe.src = BATTLE_PASS_PATH;
-  });
-}
-
-async function claimOnDocument(
+async function waitForBattlePassClaimButtons(
   document_: Document,
   options: { shouldSkipArpBoosts?: boolean } = {},
-): Promise<{
-  claimed: number;
-  remaining: number;
-}> {
-  const items = listBattlePassClaimButtons(document_, options);
-  const viaApi = await claimTargetsViaApi(document_, items);
-  await waitWhile(
-    () => listBattlePassClaimButtons(document_, options).length > 0,
-    2000,
-  );
-  let remaining = listBattlePassClaimButtons(document_, options).length;
-  let viaClick = 0;
-  if (remaining > 0) {
-    viaClick = await clickRemainingClaimButtons(document_, options);
-    await waitWhile(
-      () => listBattlePassClaimButtons(document_, options).length > 0,
-      1500,
-    );
-    remaining = listBattlePassClaimButtons(document_, options).length;
+  timeoutMs = 8000,
+): Promise<number> {
+  const startedAt = Date.now();
+  while (Date.now() - startedAt < timeoutMs) {
+    const count = listBattlePassClaimButtons(document_, options).length;
+    if (count > 0) {
+      return count;
+    }
+    await delay(250);
   }
-  return {
-    claimed: viaApi + viaClick,
-    remaining,
-  };
+  return listBattlePassClaimButtons(document_, options).length;
 }
 
 /**
- * Claim ready Battle Pass rewards. Prefers the site's claim POST (same style
- * as artifact equip); clicks CLAIM buttons if the route isn't in the page JS.
- * `shouldSkipArpBoosts` leaves ARP Boosts unclaimed (All-ARP% wait).
- * Off the Battle Pass page, loads it in a hidden iframe first.
+ * Claim ready Battle Pass rewards with the site's same-origin form POST
+ * (`/battle-pass/claim/{instanceId}` + `_csrf_token`). From Control Center,
+ * fetch the Battle Pass HTML for those forms — do not open the BP page.
  */
 export async function claimAllBattlePassRewards(
-  options: { shouldSkipArpBoosts?: boolean } = {},
+  options: {
+    shouldSkipArpBoosts?: boolean;
+    readyClaims?: BattlePassReadyClaim[];
+  } = {},
 ): Promise<{
   claimed: number;
   remaining: number;
   needsBattlePassPage?: boolean;
 }> {
-  if (location.pathname.includes('/battle-pass')) {
-    return claimOnDocument(document, options);
+  const shouldSkipArpBoosts = options.shouldSkipArpBoosts === true;
+  const isOnBattlePassPage = location.pathname.includes('/battle-pass');
+  if (isOnBattlePassPage) {
+    await waitForBattlePassClaimButtons(document, { shouldSkipArpBoosts });
   }
-  const frame = await openHiddenBattlePassFrame();
-  const document_ = frame?.contentDocument;
-  if (!document_ || !isBattlePassDocumentReady(document_)) {
-    frame?.remove();
-    return { claimed: 0, remaining: 0, needsBattlePassPage: true };
+
+  const liveDocument = isOnBattlePassPage ? document : undefined;
+  let fetchedDocument: Document | undefined;
+  let targets: BattlePassReadyClaim[];
+  if (isOnBattlePassPage) {
+    targets = claimsFromLiveButtons(
+      listBattlePassClaimButtons(document, { shouldSkipArpBoosts }),
+    );
+  } else {
+    fetchedDocument = await fetchBattlePassDocument();
+    targets = fetchedDocument
+      ? listReadyClaimsFromDocument(fetchedDocument).filter(
+          (claim) => !shouldSkipArpBoosts || !claim.isArp,
+        )
+      : [];
+    if (targets.every((claim) => !claim.claimPath)) {
+      targets = (options.readyClaims ?? []).filter(
+        (claim) =>
+          Boolean(claim.claimPath) &&
+          (!shouldSkipArpBoosts || !claim.isArp),
+      );
+    }
   }
-  try {
-    return await claimOnDocument(document_, options);
-  } finally {
-    frame.remove();
+
+  const endpoint = await discoverBattlePassClaimEndpoint(
+    liveDocument ?? fetchedDocument,
+  );
+  const posted =
+    targets.length > 0
+      ? await claimReadyViaApi(targets, endpoint)
+      : { claimed: 0, postedPaths: new Set<string>() };
+  let claimed = posted.claimed;
+
+  if (isOnBattlePassPage) {
+    await waitWhile(
+      () => listBattlePassClaimButtons(document, { shouldSkipArpBoosts }).length > 0,
+      1500,
+    );
+    let remaining = listBattlePassClaimButtons(document, {
+      shouldSkipArpBoosts,
+    }).length;
+    if (remaining > 0) {
+      claimed += await clickRemainingClaimButtons(document, {
+        shouldSkipArpBoosts,
+        skipPaths: posted.postedPaths,
+      });
+      await waitWhile(
+        () =>
+          listBattlePassClaimButtons(document, { shouldSkipArpBoosts }).length >
+          0,
+        1500,
+      );
+      remaining = listBattlePassClaimButtons(document, {
+        shouldSkipArpBoosts,
+      }).length;
+    }
+    return { claimed, remaining };
   }
+
+  const uniqueTargets = new Set(
+    targets.map((claim) => claimIdentity(claim)),
+  ).size;
+  return {
+    claimed,
+    remaining: Math.max(0, uniqueTargets - claimed),
+  };
 }
 
 /**
@@ -655,7 +931,7 @@ export function shouldSkipArpInBattlePassClaimAll(
 }
 
 /**
- * Claim all is offered when something is ready, except ARP-only while waiting
+ * Claim is offered when something is ready, except ARP-only while waiting
  * for an All-ARP% swap. Non-ARP rewards can still be claimed in that wait.
  */
 export function shouldShowBattlePassClaimAll(
@@ -667,6 +943,19 @@ export function shouldShowBattlePassClaimAll(
   }
   const ready = battlePass?.readyToClaim ?? 0;
   return ready > 0 && !shouldWaitForAllArpSwap;
+}
+
+/**
+ * Skip-ARP must not say "all" — that implies claiming the boosts we are holding.
+ */
+export function battlePassClaimButtonLabel(
+  shouldSkipArpBoosts: boolean,
+  options?: { compact?: boolean },
+): string {
+  if (shouldSkipArpBoosts) {
+    return 'Claim rewards';
+  }
+  return options?.compact === true ? 'Claim all BP' : 'Claim all';
 }
 
 export function scrapeBattlePass(): BattlePassState | undefined {

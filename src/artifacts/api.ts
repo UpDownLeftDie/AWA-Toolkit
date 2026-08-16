@@ -14,13 +14,74 @@ interface SiteJsonResponse {
   message?: string;
 }
 
+function serializePostBody(
+  body: Record<string, unknown>,
+  encoding: 'json' | 'form',
+): string {
+  if (encoding === 'json') {
+    return JSON.stringify(body);
+  }
+  const parameters = new URLSearchParams();
+  for (const [key, value] of Object.entries(body)) {
+    if (
+      typeof value !== 'string' &&
+      typeof value !== 'number' &&
+      typeof value !== 'boolean'
+    ) {
+      continue;
+    }
+    parameters.set(key, String(value));
+  }
+  return parameters.toString();
+}
+
+function resultFromResponse(
+  status: number,
+  parsed: SiteJsonResponse | undefined,
+): ApiResult {
+  if (status < 200 || status >= 300) {
+    const result: ApiResult = {
+      ok: false,
+      status,
+      error: parsed?.message ?? `Request failed (${status})`,
+    };
+    if (parsed?.message) {
+      result.message = parsed.message;
+    }
+    return result;
+  }
+  if (parsed?.success === false) {
+    const result: ApiResult = {
+      ok: false,
+      status,
+      error:
+        parsed.message ??
+        'Request rejected (slot may be on 24h cooldown or already set).',
+    };
+    if (parsed.message) {
+      result.message = parsed.message;
+    }
+    return result;
+  }
+  const result: ApiResult = {
+    ok: true,
+    status,
+  };
+  if (parsed?.message) {
+    result.message = parsed.message;
+  }
+  return result;
+}
+
 /**
- * AWA returns HTTP 200 with `{ success: false }` for locked slots / rejected equips.
- * Match the site's jQuery POST encoding (JSON body + form content-type).
+ * AWA artifact POSTs: HTTP 200 with `{ success: false }` for locked slots.
+ * Match the site's jQuery encoding (JSON body + form content-type).
+ * Battle Pass claim forms are real `application/x-www-form-urlencoded`.
  */
-async function postJson(
+async function postRequest(
   path: string,
   body: Record<string, unknown>,
+  encoding: 'json' | 'form',
 ): Promise<ApiResult> {
   try {
     const response = await fetch(path, {
@@ -30,7 +91,7 @@ async function postJson(
         Accept: 'application/json, text/javascript, */*; q=0.01',
         'X-Requested-With': 'XMLHttpRequest',
       },
-      body: JSON.stringify(body),
+      body: serializePostBody(body, encoding),
     });
 
     const text = await response.text();
@@ -40,41 +101,7 @@ async function postJson(
     } catch {
       parsed = undefined;
     }
-
-    if (!response.ok) {
-      const result: ApiResult = {
-        ok: false,
-        status: response.status,
-        error: parsed?.message ?? `Request failed (${response.status})`,
-      };
-      if (parsed?.message) {
-        result.message = parsed.message;
-      }
-      return result;
-    }
-
-    if (parsed?.success === false) {
-      const result: ApiResult = {
-        ok: false,
-        status: response.status,
-        error:
-          parsed.message ??
-          'Request rejected (slot may be on 24h cooldown or already set).',
-      };
-      if (parsed.message) {
-        result.message = parsed.message;
-      }
-      return result;
-    }
-
-    const result: ApiResult = {
-      ok: true,
-      status: response.status,
-    };
-    if (parsed?.message) {
-      result.message = parsed.message;
-    }
-    return result;
+    return resultFromResponse(response.status, parsed);
   } catch (error) {
     return {
       ok: false,
@@ -82,6 +109,20 @@ async function postJson(
       error: error instanceof Error ? error.message : 'Network error',
     };
   }
+}
+
+async function postJson(
+  path: string,
+  body: Record<string, unknown>,
+): Promise<ApiResult> {
+  return postRequest(path, body, 'json');
+}
+
+async function postForm(
+  path: string,
+  body: Record<string, unknown>,
+): Promise<ApiResult> {
+  return postRequest(path, body, 'form');
 }
 
 /**
@@ -126,14 +167,14 @@ export async function upgradeArtifact(artifactId: number): Promise<ApiResult> {
 }
 
 /**
- * POST the site's Battle Pass claim route (same encoding as artifact equip).
- * Path comes from the live page's markup/JS — not a guessed URL.
+ * POST the live Battle Pass claim form (`/battle-pass/claim/{instanceId}` +
+ * `_csrf_token`). Path comes from `form[data-claim-form]` — not a guessed URL.
  */
 export async function claimBattlePassReward(
   path: string,
   body: Record<string, unknown> = {},
 ): Promise<ApiResult> {
-  return postJson(path, body);
+  return postForm(path, body);
 }
 
 /**

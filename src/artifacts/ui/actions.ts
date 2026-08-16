@@ -1,16 +1,16 @@
 import { applyLoadout, upgradeArtifact } from '../api';
 import type { ArtifactTier } from '../data';
+import {
+  didSetBrowserNotifications,
+  isNotificationPermissionGranted,
+  saveNotificationType,
+} from '../notifications';
 import type { OptimizerResult, ScoredCombo } from '../optimizer';
 import {
   confirmShowroomLoadout,
   resyncShowroomSnapshot,
 } from '../remoteScrape';
 import { applySnapshotUpgrade, isArtifactsShowroomPage } from '../scraper';
-import {
-  didSetBrowserNotifications,
-  saveNotificationType,
-  isNotificationPermissionGranted,
-} from '../notifications';
 import {
   getArtifactSettings,
   NOTIFICATION_TYPE_KEYS,
@@ -19,7 +19,6 @@ import {
   type ArtifactOptimizerSettings,
 } from '../settings';
 import { bindClaimAllButtons } from './battlePassClaim';
-import { bindOpenTwitchButtons } from './twitchPick';
 import { didConfirmAoDialog, showAoAlert, showAoToast } from './dialog';
 import { gatheredCache, isControlCenterPage } from './gather';
 import {
@@ -37,6 +36,7 @@ import {
   reloadOptimizerFromCache,
 } from './panels';
 import { bindVaultDiscountActions } from './render';
+import { bindOpenTwitchButtons } from './twitchPick';
 
 export async function persistFormSettings(root: ParentNode): Promise<void> {
   const settings = await getArtifactSettings();
@@ -155,7 +155,9 @@ export async function confirmAndApplyCombo(
       ),
     );
   if (isAlreadyOn) {
-    showAoToast('Those artifacts were already equipped. Recommendations updated.');
+    showAoToast(
+      'Those artifacts were already equipped. Recommendations updated.',
+    );
     return;
   }
   if (didChange) {

@@ -553,10 +553,11 @@ export function allArpEquipWaitMs(
 }
 
 /**
- * Hold BP claims while All-ARP% is off and the season still has time.
- * Not a reason to swap onto All-ARP% — more boosts may unlock, and twitch /
- * community can be worth more right now. Claim when already wearing All-ARP%
- * (or when the season ends before it can go on).
+ * Hold BP ARP Boosts while All-ARP% is off and the season still has time.
+ * Also used while scoring so All-ARP% is not inflated by a claim that may wait.
+ * Do not swap onto All-ARP% just because a boost is ready — twitch / community
+ * can be worth more, and All-ARP% may go on later for those. Claim when already
+ * wearing it, or when the season ends before it can go on.
  */
 export function shouldWaitForAllArpBeforeBattlePass(
   owned: OwnedArtifact[],

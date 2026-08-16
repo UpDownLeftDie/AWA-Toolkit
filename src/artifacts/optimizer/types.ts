@@ -103,11 +103,17 @@ export interface OptimizerResult {
   */
   hasAllArpEquipped?: boolean;
   /**
-  Hold BP claims at 0% All-ARP% while the season still has time.
-  Not a reason to swap onto All-ARP%. False when already wearing it, or
-  the season ends before All-ARP% can go on (claim on the current set).
+  Hold BP ARP Boosts while All-ARP% is off and the season still has time.
+  Not a reason to swap onto All-ARP% unless a dedicated lock nets more ARP.
+  False when already wearing it, or the season ends before All-ARP% can go on.
   */
   deferBattlePassClaims?: boolean;
+  /**
+  A dedicated 24h All-ARP% lock would net more lifetime ARP from ready BP
+  boosts than it costs vs the recommended set. Used to offer that swap;
+  claims still wait even when this is false (All-ARP% may go on later).
+  */
+  worthDedicatedAllArpForBattlePass?: boolean;
   /**
   Best owned loadout maximizing All-ARP% (HPC / Zorathian / etc.), for claim windows.
   Pinned to currently locked slots — empty when a lock blocks the set.

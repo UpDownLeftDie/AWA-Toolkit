@@ -1,4 +1,4 @@
-import { ARTIFACT_CREDITS, ARTIFACTS, TIER_LABELS } from '../data';
+import { ARTIFACTS, CREDIT_SOURCES, TIER_LABELS } from '../data';
 import type {
   BreakdownLine,
   OptimizerResult,
@@ -6,18 +6,20 @@ import type {
 } from '../optimizer';
 import type { ArtifactSnapshot } from '../scraper';
 import {
+  isNotificationTypeEnabled,
   NOTIFICATION_TYPE_COPY,
   NOTIFICATION_TYPE_KEYS,
   saveArtifactSettings,
   type ArtifactOptimizerSettings,
 } from '../settings';
 import {
-  type ActivityKey,
   battlePassRemainingMs,
   describeCommunityEventPendingParts,
+  type ActivityKey,
   type SiteState,
 } from '../siteState';
 import {
+  battlePassClaimButtonLabel,
   shouldShowBattlePassClaimAll,
   shouldSkipArpInBattlePassClaimAll,
 } from '../siteState/battlePass';
@@ -57,11 +59,14 @@ function renderNotifySwitch(options: {
 function renderNotifyTypeSwitches(settings: ArtifactOptimizerSettings): string {
   const switches = NOTIFICATION_TYPE_KEYS.map((key) => {
     const copy = NOTIFICATION_TYPE_COPY[key];
+    if (!copy) {
+      return '';
+    }
     return renderNotifySwitch({
       id: `ao-notify-type-${key}`,
       title: copy.title,
       hint: copy.hint,
-      isChecked: settings.notificationTypes[key],
+      isChecked: isNotificationTypeEnabled(settings, key),
       isSmall: true,
     });
   }).join('');
@@ -217,11 +222,11 @@ export function renderTextLink(
 }
 
 export function renderCredits(options?: { compact?: boolean }): string {
-  if (ARTIFACT_CREDITS.length === 0) {
+  if (CREDIT_SOURCES.length === 0) {
     return '';
   }
 
-  const sourceLinks = ARTIFACT_CREDITS.map((source) =>
+  const sourceLinks = CREDIT_SOURCES.map((source) =>
     renderTextLink(source.label, source.url, source.dateAccessed),
   ).join(', ');
 
@@ -229,7 +234,7 @@ export function renderCredits(options?: { compact?: boolean }): string {
     return `<div class="ao-muted ao-credit">Sources: ${sourceLinks}</div>`;
   }
 
-  const detailLinks = ARTIFACT_CREDITS.flatMap((source) => source.links ?? [])
+  const detailLinks = CREDIT_SOURCES.flatMap((source) => source.links ?? [])
     .map((link) => renderTextLink(link.label, link.url))
     .join(', ');
   const details = detailLinks ? ` · ${detailLinks}` : '';
@@ -379,7 +384,7 @@ function renderBattlePassBlock(
     const skipArp =
       options.shouldSkipArpBoosts === true ? ' data-skip-arp="1"' : '';
     lines.push(
-      `<div class="ao-note-actions"><button type="button" class="ao-claim-btn"${skipArp}>Claim all</button></div>`,
+      `<div class="ao-note-actions"><button type="button" class="ao-claim-btn"${skipArp}>${battlePassClaimButtonLabel(options.shouldSkipArpBoosts === true)}</button></div>`,
     );
   }
   lines.push(`<div>${renderTextLink('Open Battle Pass', bp.url)}</div>`);
@@ -652,7 +657,7 @@ export function renderResultBody(
         }" placeholder="auto"/>
       </div>
       <div class="ao-heading">Preferred Twitch streamers</div>
-      <div class="ao-muted">One login per line. Live preferred channels open first (top to bottom). If none are live: random Hive/Nexus with "drops" in the title, then any Hive/Nexus, then any "drops" title, then a random remaining stream.</div>
+      <div class="ao-muted">One login per line. Live preferred channels open first (top to bottom). If none are live: random Featured/Hive/Nexus with "drops" in the title, then any Featured/Hive/Nexus, then any "drops" title, then a random remaining stream.</div>
       <textarea id="ao-preferred-twitch" class="ao-textarea" rows="4" placeholder="ludwig">${escapeHtml(settings.preferredTwitchStreamers.join('\n'))}</textarea>
       <div class="ao-heading">Manual artifacts</div>
       <div class="ao-muted">Only needed if auto-scrape fails.</div>

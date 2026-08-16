@@ -534,7 +534,7 @@ export {
   scrapeUserArpTierFromDocument,
   applyGameVaultDocument,
 } from "./gameVault";
-export type { BattlePassState } from "./battlePass";
+export type { BattlePassReadyClaim, BattlePassState } from "./battlePass";
 export {
   scrapeBattlePassFromDocument,
   parseBattlePassCountdownMs,
@@ -545,6 +545,7 @@ export {
   battlePassReadyNonArp,
   shouldShowBattlePassClaimAll,
   shouldSkipArpInBattlePassClaimAll,
+  battlePassClaimButtonLabel,
   scrapeBattlePass,
   isBattlePassDocumentReady,
   waitForBattlePassDocument,

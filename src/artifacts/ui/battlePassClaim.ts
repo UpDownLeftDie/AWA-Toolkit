@@ -13,6 +13,51 @@ import { didConfirmAoDialog, showAoAlert, showAoToast } from './dialog';
 const BP_CLAIM_ALL_PENDING_KEY = 'ao-bp-claim-all';
 const BP_CLAIM_SKIP_ARP_VALUE = 'skip-arp';
 
+async function persistBattlePassAfterClaim(options: {
+  claimed: number;
+  remaining: number;
+  shouldSkipArpBoosts: boolean;
+}): Promise<void> {
+  const state = await refreshSiteStateFromPage();
+  const battlePass = state.battlePass;
+  if (
+    battlePass &&
+    options.claimed > 0 &&
+    !location.pathname.includes('/battle-pass')
+  ) {
+    if (options.shouldSkipArpBoosts) {
+      const leftover = (battlePass.readyClaims ?? []).filter(
+        (claim) => claim.isArp,
+      );
+      const next = {
+        ...battlePass,
+        readyToClaim: leftover.length,
+        readyToClaimArp: leftover.length,
+      };
+      if (leftover.length > 0) {
+        next.readyClaims = leftover;
+      } else {
+        delete next.readyClaims;
+      }
+      state.battlePass = next;
+    } else if (options.remaining === 0) {
+      const next = {
+        ...battlePass,
+        readyToClaim: 0,
+        readyToClaimArp: 0,
+      };
+      delete next.readyClaims;
+      state.battlePass = next;
+    } else {
+      state.battlePass = {
+        ...battlePass,
+        readyToClaim: Math.max(0, battlePass.readyToClaim - options.claimed),
+      };
+    }
+  }
+  await saveSiteState(state);
+}
+
 async function runBattlePassClaims(options: {
   shouldSkipArpBoosts: boolean;
 }): Promise<void> {
@@ -22,9 +67,15 @@ async function runBattlePassClaims(options: {
       ? 'Claiming Battle Pass rewards (leaving ARP Boosts)…'
       : 'Claiming Battle Pass rewards…',
   );
+  const siteState = await loadSiteState();
+  const readyClaims = siteState?.battlePass?.readyClaims;
   const { claimed, remaining, needsBattlePassPage } =
-    await claimAllBattlePassRewards({ shouldSkipArpBoosts });
+    await claimAllBattlePassRewards({
+      shouldSkipArpBoosts,
+      ...(readyClaims && { readyClaims }),
+    });
   if (needsBattlePassPage === true) {
+    showAoToast('Opening Battle Pass to claim…');
     sessionStorage.setItem(
       BP_CLAIM_ALL_PENDING_KEY,
       shouldSkipArpBoosts ? BP_CLAIM_SKIP_ARP_VALUE : '1',
@@ -34,8 +85,11 @@ async function runBattlePassClaims(options: {
     return;
   }
   try {
-    const state = await refreshSiteStateFromPage();
-    await saveSiteState(state);
+    await persistBattlePassAfterClaim({
+      claimed,
+      remaining,
+      shouldSkipArpBoosts,
+    });
   } catch (error) {
     console.error(
       '[AWA Toolkit] Failed to refresh Battle Pass after claim',
@@ -107,15 +161,9 @@ export async function consumePendingBattlePassClaimAll(): Promise<void> {
   }
   sessionStorage.removeItem(BP_CLAIM_ALL_PENDING_KEY);
   await waitForBattlePassDocument();
-  const shouldSkipArpBoosts = pending === BP_CLAIM_SKIP_ARP_VALUE;
-  const ready = listBattlePassClaimButtons(document, {
-    shouldSkipArpBoosts,
-  }).length;
-  if (ready === 0) {
-    await showAoAlert('No Battle Pass CLAIM buttons were found on the page.');
-    return;
-  }
-  await runBattlePassClaims({ shouldSkipArpBoosts });
+  await runBattlePassClaims({
+    shouldSkipArpBoosts: pending === BP_CLAIM_SKIP_ARP_VALUE,
+  });
 }
 
 export function bindClaimAllButtons(root: ParentNode): void {

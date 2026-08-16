@@ -14,7 +14,11 @@ import {
   type UpgradeSuggestion,
 } from "../optimizer";
 import { isArtifactsShowroomPage, type OwnedArtifact } from "../scraper";
-import type { ArtifactOptimizerSettings } from "../settings";
+import {
+  COOLDOWN_MS,
+  showroomCooldownRemainingMs,
+  type ArtifactOptimizerSettings,
+} from "../settings";
 import {
   type ActivityKey,
   battlePassClaimableArp,
@@ -34,7 +38,10 @@ import {
   type SiteState,
   twitchWatchRemainingMs,
 } from "../siteState";
-import { shouldShowBattlePassClaimAll } from "../siteState/battlePass";
+import {
+  battlePassClaimButtonLabel,
+  shouldShowBattlePassClaimAll,
+} from "../siteState/battlePass";
 import { describeWaitingCommunityArpLine } from "../siteState/communityEvent";
 import { STEAM_LIBRARY_PENDING_HINT } from "../steamApp";
 import {
@@ -141,7 +148,7 @@ export interface ActionTodo {
   */
   upgradeInstanceId?: number;
   /**
-  Ready Battle Pass rewards — renders a Claim all button on this step.
+  Ready Battle Pass rewards — renders a claim button on this step.
   */
   claimBattlePass?: boolean;
   /**
@@ -334,6 +341,59 @@ function battlePassClaimCountLabel(readyAll: number, readyArp: number): string {
   return `${readyAll} Battle Pass rewards (${boosts})`;
 }
 
+function holdArpBoostReason(readyArp: number): string {
+  const arpLabel = readyArp === 1 ? "1 ARP Boost" : `${readyArp} ARP Boosts`;
+  return `Hold ${arpLabel} until All-ARP% is on`;
+}
+
+/**
+ * All-ARP% is owned but not equipped, and the season still has time.
+ * Claim cosmetics/fragments now; leave ARP Boosts until All-ARP% is on.
+ */
+function pushHeldArpBattlePassTodos(
+  todos: ActionTodo[],
+  siteState: SiteState,
+  readyArp: number,
+  hasScheduledAllArp: boolean,
+  allArpReadyAtMs = 0,
+): void {
+  const nonArp = battlePassReadyNonArp(siteState.battlePass);
+  if (nonArp > 0) {
+    const reasons: ActionTodoReason[] = [
+      { text: holdArpBoostReason(readyArp) },
+    ];
+    if (!hasScheduledAllArp) {
+      reasons.push({
+        text: "More boosts may unlock — claim those when All-ARP% is already on",
+      });
+    }
+    todos.push({
+      text: `Claim ${battlePassClaimCountLabel(nonArp, 0)} now`,
+      reasons,
+      claimBattlePass: true,
+      claimBattlePassSkipArp: true,
+      urgency: {
+        kind: "action",
+        readyAtMs: 0,
+        durationMs: 0,
+        chain: "before",
+      },
+    });
+  }
+  if (hasScheduledAllArp) {
+    todos.push({
+      text: `Claim ${battlePassClaimCountLabel(readyArp, readyArp)}`,
+      urgency: {
+        kind: "schedule",
+        readyAtMs: allArpReadyAtMs,
+        durationMs: 0,
+        arp: readyArp,
+        chain: "after",
+      },
+    });
+  }
+}
+
 function pushBattlePassTodo(
   todos: ActionTodo[],
   siteState: SiteState,
@@ -344,6 +404,10 @@ function pushBattlePassTodo(
     Claim comes after a planned All-ARP% equip step — don't restate unlock timing.
     */
     afterAllArpEquipped?: boolean;
+    /**
+    When All-ARP% is a later step, align the claim step with that wait.
+    */
+    allArpReadyAtMs?: number;
     /**
     Season ends before All-ARP% can be equipped — claim on the current set.
     */
@@ -361,6 +425,7 @@ function pushBattlePassTodo(
     hasAllArpEquipped,
     afterAllArpEquipped = false,
     seasonEndsBeforeAllArp = false,
+    allArpReadyAtMs = 0,
   } = options;
   const shouldWaitForAllArpSwap =
     ownsAllArp && !hasAllArpEquipped && !seasonEndsBeforeAllArp;
@@ -422,32 +487,13 @@ function pushBattlePassTodo(
   }
 
   if (ownsAllArp) {
-    const nonArp = battlePassReadyNonArp(siteState.battlePass);
-    if (nonArp > 0) {
-      todos.push({
-        text: `Claim ${battlePassClaimCountLabel(nonArp, 0)} now — leave ARP Boosts until All-ARP% is on`,
-        claimBattlePass: true,
-        claimBattlePassSkipArp: true,
-        urgency: {
-          kind: "action",
-          readyAtMs: 0,
-          durationMs: 0,
-          chain: "before",
-        },
-      });
-    }
-    if (afterAllArpEquipped) {
-      todos.push({
-        text: `Claim ${battlePassClaimCountLabel(readyArp, readyArp)} after All-ARP% is on`,
-        urgency: {
-          kind: "schedule",
-          readyAtMs: 0,
-          durationMs: 0,
-          arp: readyArp,
-          chain: "after",
-        },
-      });
-    }
+    pushHeldArpBattlePassTodos(
+      todos,
+      siteState,
+      readyArp,
+      afterAllArpEquipped,
+      allArpReadyAtMs,
+    );
     return;
   }
 
@@ -1370,6 +1416,160 @@ function deferredAllArpTodo(
   });
 }
 
+function allArpArtifactsFromResult(
+  result: OptimizerResult,
+): OwnedArtifact[] | undefined {
+  const loadout = result.allArpLoadout;
+  if (loadout && loadout.artifacts.length > 0 && loadout.allArpPct > 0) {
+    return loadout.artifacts;
+  }
+  const deferred = result.deferredAllArp?.artifacts;
+  if (deferred && deferred.length > 0) {
+    return deferred;
+  }
+  return undefined;
+}
+
+function battlePassAllArpEquipWaitMs(options: {
+  result: OptimizerResult;
+  plan: LoadoutChangePlan | undefined;
+  isNeedsSwap: boolean;
+  settings: ArtifactOptimizerSettings;
+  allArpArtifacts: OwnedArtifact[];
+}): number {
+  const { result, plan, isNeedsSwap, settings, allArpArtifacts } = options;
+  const best = result.best;
+  const willWearOtherSetFirst =
+    isNeedsSwap &&
+    best !== undefined &&
+    best.allArpPct <= 0 &&
+    !isSameLoadout(best.artifacts, allArpArtifacts);
+  if (willWearOtherSetFirst) {
+    return (plan?.waitMs ?? 0) + COOLDOWN_MS;
+  }
+
+  const wearing = result.current?.artifacts;
+  const targetIds = new Set(
+    allArpArtifacts.map((artifact) => artifact.instanceId),
+  );
+  let waitMs = 0;
+  for (const position of [1, 2, 3] as const) {
+    const equipped = wearing?.find(
+      (artifact) => artifact.equippedPosition === position,
+    );
+    if (equipped && targetIds.has(equipped.instanceId)) {
+      continue;
+    }
+    waitMs = Math.max(
+      waitMs,
+      showroomCooldownRemainingMs(settings, position, {
+        ...(result.slotLocks && { slotLocks: result.slotLocks }),
+        ...(typeof equipped?.slotLocked === "boolean" && {
+          equippedSlotLocked: equipped.slotLocked,
+        }),
+      }),
+    );
+  }
+  return waitMs;
+}
+
+function battlePassAllArpEquipTodo(options: {
+  result: OptimizerResult;
+  settings: ArtifactOptimizerSettings;
+  siteState: SiteState;
+  plan: LoadoutChangePlan | undefined;
+  isNeedsSwap: boolean;
+}): ActionTodo | undefined {
+  const artifacts = allArpArtifactsFromResult(options.result);
+  const waitMs = battlePassAllArpEquipWaitMs({
+    result: options.result,
+    plan: options.plan,
+    isNeedsSwap: options.isNeedsSwap,
+    settings: options.settings,
+    allArpArtifacts: artifacts ?? [],
+  });
+  const arpReady = battlePassClaimableArp(options.siteState.battlePass);
+  const headline =
+    waitMs > 0 ? `Equip All-ARP% in ${formatMs(waitMs)}` : "Equip All-ARP%";
+  return buildEquipTodo({
+    headline,
+    loadout: artifacts ? loadoutLabel(artifacts) : "All-ARP% set",
+    reasons: [],
+    urgency: actionUrgency({
+      kind: waitMs > 0 ? "schedule" : "action",
+      readyAtMs: waitMs,
+      durationMs: 0,
+      ...(arpReady > 0 && { arp: arpReady }),
+      chain: "equip",
+    }),
+  });
+}
+
+function battlePassAllArpSchedule(options: {
+  result: OptimizerResult;
+  plan: LoadoutChangePlan | undefined;
+  isNeedsSwap: boolean;
+  settings: ArtifactOptimizerSettings;
+  waitMs: number;
+  hasPlannedAllArp: boolean;
+  shouldDeferBattlePassClaim: boolean;
+}): {
+  hasScheduledAllArp: boolean;
+  readyAtMs: number;
+  shouldAddEquipTodo: boolean;
+} {
+  const deferred = options.result.deferredAllArp;
+  const artifacts = allArpArtifactsFromResult(options.result);
+  const shouldAddEquipTodo =
+    options.shouldDeferBattlePassClaim &&
+    options.result.worthDedicatedAllArpForBattlePass === true &&
+    !options.hasPlannedAllArp &&
+    deferred === undefined &&
+    (artifacts !== undefined || options.result.hasAllArpOwned === true);
+  const hasScheduledAllArp =
+    options.hasPlannedAllArp ||
+    deferred !== undefined ||
+    shouldAddEquipTodo;
+
+  if (options.hasPlannedAllArp) {
+    return {
+      hasScheduledAllArp,
+      readyAtMs: options.waitMs,
+      shouldAddEquipTodo,
+    };
+  }
+  if (deferred) {
+    return {
+      hasScheduledAllArp,
+      readyAtMs: deferred.waitMs,
+      shouldAddEquipTodo,
+    };
+  }
+  if (shouldAddEquipTodo && artifacts) {
+    return {
+      hasScheduledAllArp,
+      readyAtMs: battlePassAllArpEquipWaitMs({
+        result: options.result,
+        plan: options.plan,
+        isNeedsSwap: options.isNeedsSwap,
+        settings: options.settings,
+        allArpArtifacts: artifacts,
+      }),
+      shouldAddEquipTodo,
+    };
+  }
+  if (shouldAddEquipTodo) {
+    return {
+      hasScheduledAllArp,
+      readyAtMs:
+        (options.plan?.waitMs ?? 0) +
+        (options.isNeedsSwap ? COOLDOWN_MS : 0),
+      shouldAddEquipTodo,
+    };
+  }
+  return { hasScheduledAllArp, readyAtMs: 0, shouldAddEquipTodo };
+}
+
 function pushCommunityAllArpGuards(
   todos: ActionTodo[],
   siteState: SiteState,
@@ -1423,6 +1623,7 @@ function pushAllArpGuardTodos(
     deferBattlePassClaims: boolean;
     hasPlannedAllArp?: boolean;
     hasDeferredAllArp?: boolean;
+    hasScheduledAllArp?: boolean;
   },
 ): void {
   const { ownsAllArp, hasAllArpEquipped, isLocked, deferBattlePassClaims } =
@@ -1430,19 +1631,21 @@ function pushAllArpGuardTodos(
   if (!ownsAllArp || hasAllArpEquipped) {
     return;
   }
-  const hasPlannedAllArp = options.hasPlannedAllArp === true;
+  const hasScheduledAllArp =
+    options.hasScheduledAllArp === true || options.hasPlannedAllArp === true;
   if (
     deferBattlePassClaims &&
-    battlePassClaimableArp(siteState.battlePass) > 0
+    battlePassClaimableArp(siteState.battlePass) > 0 &&
+    battlePassReadyNonArp(siteState.battlePass) === 0
   ) {
     const arpReady = battlePassClaimableArp(siteState.battlePass);
     todos.push({
       kind: "caution",
-      tone: hasPlannedAllArp ? "warn" : "muted",
+      tone: hasScheduledAllArp ? "warn" : "muted",
       text: `Don't claim Battle Pass ARP Boost yet (${arpReady} ready)`,
       reasons: [
         {
-          text: hasPlannedAllArp
+          text: hasScheduledAllArp
             ? "Claim after All-ARP% is on"
             : "More boosts may unlock — claim when All-ARP% is already on",
         },
@@ -1990,6 +2193,17 @@ export function buildActionPlan(
   const shouldDeferBattlePassClaim = result.deferBattlePassClaims === true;
   const hasPlannedAllArp = (best?.allArpPct ?? 0) > 0;
   const deferredAllArp = result.deferredAllArp;
+  const allArpSchedule = battlePassAllArpSchedule({
+    result,
+    plan,
+    isNeedsSwap,
+    settings,
+    waitMs,
+    hasPlannedAllArp,
+    shouldDeferBattlePassClaim,
+  });
+  const hasScheduledAllArp = allArpSchedule.hasScheduledAllArp;
+  const allArpEquipReadyAtMs = allArpSchedule.readyAtMs;
 
   const sequenced = buildSequencedActivityTodos(result, settings, siteState, {
     needsSwap: isNeedsSwap,
@@ -2046,16 +2260,19 @@ export function buildActionPlan(
     deferBattlePassClaims: shouldDeferBattlePassClaim,
     hasPlannedAllArp,
     hasDeferredAllArp: deferredAllArp !== undefined,
+    hasScheduledAllArp,
   });
 
   // Claim BP when All-ARP% is already on, or after a swap that was planned
-  // for something else (community). Don't swap onto All-ARP% just for BP.
-  // Season ending before All-ARP% can go on → claim on the current set.
+  // for something else (community / recommended All-ARP%). Don't swap onto
+  // All-ARP% just for a boost unless that lock strictly nets more ARP.
+  // Hold ARP Boosts while the season has time — All-ARP% may go on later.
   if (shouldDeferBattlePassClaim) {
     pushBattlePassTodo(todos, siteState, {
       ownsAllArp: hasOwnedAllArp,
       hasAllArpEquipped: false,
-      afterAllArpEquipped: hasPlannedAllArp,
+      afterAllArpEquipped: hasScheduledAllArp,
+      allArpReadyAtMs: allArpEquipReadyAtMs,
     });
   } else {
     pushBattlePassTodo(todos, siteState, {
@@ -2070,6 +2287,17 @@ export function buildActionPlan(
 
   if (deferredAllArp) {
     todos.push(deferredAllArpTodo(deferredAllArp));
+  } else if (allArpSchedule.shouldAddEquipTodo) {
+    const allArpTodo = battlePassAllArpEquipTodo({
+      result,
+      settings,
+      siteState,
+      plan,
+      isNeedsSwap,
+    });
+    if (allArpTodo) {
+      todos.push(allArpTodo);
+    }
   }
 
   if (todos.length === 0) {
@@ -2129,7 +2357,7 @@ function renderTodoActionButton(todo: ActionTodo): string {
   if (todo.claimBattlePass === true) {
     const skipArp =
       todo.claimBattlePassSkipArp === true ? ' data-skip-arp="1"' : "";
-    return `<button type="button" class="ao-claim-btn"${skipArp}>Claim all</button>`;
+    return `<button type="button" class="ao-claim-btn"${skipArp}>${battlePassClaimButtonLabel(todo.claimBattlePassSkipArp === true)}</button>`;
   }
   if (todo.openTwitchStream === true) {
     return '<button type="button" class="ao-twitch-btn">Open stream</button>';
