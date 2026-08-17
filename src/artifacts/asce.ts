@@ -7,12 +7,15 @@
  * Slot-align to the reported `hour` so fetch jitter does not skew the rate.
  */
 import { GM, GM_xmlhttpRequest } from '$';
+import type { SiteState } from './siteState/types';
 import {
   computePendingCommunityEventArp,
+  type CommunityEventMilestoneGate,
   type CommunityEventState,
   type CommunityHoursSample,
-  type SiteState,
-} from './siteState';
+  reconcileCommunityEventWithArpLog,
+  upsertCommunityEventMilestoneGates,
+} from './siteState/communityEvent';
 
 const ASCE_CACHE_KEY = 'asceCommunityHours';
 const ASCE_HOURS_URL =
@@ -33,6 +36,7 @@ export interface AsceCommunityFeed {
   goalHours?: number;
   samples: CommunityHoursSample[];
   unlockedHours: number[];
+  gates?: CommunityEventMilestoneGate[];
 }
 
 interface AsceCache {
@@ -212,41 +216,82 @@ function parseAsceHours(raw: unknown): CommunityHoursSample[] {
   return samples;
 }
 
-function parseUnlockedHours(milestones: unknown): number[] {
-  if (!Array.isArray(milestones)) {
+function parseAsceArpReward(message: string): number {
+  const arpAt = message.toUpperCase().indexOf(' ARP');
+  if (arpAt === -1) {
+    return 0;
+  }
+  const token = message.slice(0, arpAt).trim().split(' ').at(-1);
+  const reward = Number(token);
+  return Number.isFinite(reward) && reward > 0 ? reward : 0;
+}
+
+function parseAsceGates(rows: unknown): CommunityEventMilestoneGate[] {
+  if (!Array.isArray(rows)) {
     return [];
   }
-  const unlockedHours: number[] = [];
-  for (const row of milestones) {
-    if (!isRecord(row) || row.unlocked !== true) {
+  const byHours = new Map<number, CommunityEventMilestoneGate>();
+  for (const row of rows) {
+    if (!isRecord(row)) {
       continue;
     }
     const hours = row.current_hours;
-    if (typeof hours === 'number' && Number.isFinite(hours) && hours > 0) {
-      unlockedHours.push(hours);
+    if (typeof hours !== 'number' || !Number.isFinite(hours) || hours <= 0) {
+      continue;
     }
+    const label =
+      typeof row.milestone_message === 'string' &&
+      row.milestone_message.trim().length > 0
+        ? row.milestone_message.trim()
+        : `${hours.toLocaleString()}h`;
+    byHours.set(hours, {
+      hours,
+      arpReward: parseAsceArpReward(label),
+      label,
+      unlocked: row.unlocked === true,
+    });
   }
-  return unlockedHours;
+  return byHours
+    .values()
+    .toArray()
+    .toSorted((left, right) => left.hours - right.hours);
 }
 
 function parseAsceConfig(raw: unknown): {
   game?: string;
   goalHours?: number;
+  gates: CommunityEventMilestoneGate[];
   unlockedHours: number[];
 } {
   if (!isRecord(raw)) {
-    return { unlockedHours: [] };
+    return { gates: [], unlockedHours: [] };
   }
   const game = typeof raw.game === 'string' ? raw.game : undefined;
   const goalHours =
     typeof raw.goal_hours === 'number' && Number.isFinite(raw.goal_hours)
       ? raw.goal_hours
       : undefined;
+  const gates = [
+    ...parseAsceGates(raw.milestones),
+    ...parseAsceGates(raw.stretch_goals),
+  ];
+  const byHours = new Map(gates.map((gate) => [gate.hours, gate]));
+  const uniqueGates = byHours
+    .values()
+    .toArray()
+    .toSorted((left, right) => left.hours - right.hours);
   return {
     ...(game && { game }),
     ...(goalHours !== undefined && { goalHours }),
-    unlockedHours: parseUnlockedHours(raw.milestones),
+    gates: uniqueGates,
+    unlockedHours: uniqueGates
+      .filter((gate) => gate.unlocked)
+      .map((gate) => gate.hours),
   };
+}
+
+function requiresAsceGateRefresh(feed: AsceCommunityFeed | undefined): boolean {
+  return feed !== undefined && feed.gates === undefined;
 }
 
 async function fetchAsceFeed(): Promise<AsceCommunityFeed | undefined> {
@@ -263,6 +308,7 @@ async function fetchAsceFeed(): Promise<AsceCommunityFeed | undefined> {
     game: config.game,
     samples,
     unlockedHours: config.unlockedHours,
+    gates: config.gates,
     ...(config.goalHours !== undefined && { goalHours: config.goalHours }),
   };
 }
@@ -271,7 +317,11 @@ export async function loadAsceCommunityFeed(
   options: { force?: boolean } = {},
 ): Promise<AsceCommunityFeed | undefined> {
   const cache = await loadAsceCache();
-  if (!options.force && isCacheFresh(cache)) {
+  if (
+    !options.force &&
+    isCacheFresh(cache) &&
+    (cache.error || !requiresAsceGateRefresh(cache.feed))
+  ) {
     if (cache.error) {
       return;
     }
@@ -372,7 +422,10 @@ export function applyAsceFeedToEvent(
     lastAsceHours,
   );
 
-  const milestones = applyAsceUnlocks(event.milestones, feed.unlockedHours);
+  const milestones = upsertCommunityEventMilestoneGates(
+    applyAsceUnlocks(event.milestones, feed.unlockedHours),
+    feed.gates ?? [],
+  );
   const next: CommunityEventState = {
     ...event,
     milestones,
@@ -394,9 +447,15 @@ export function applyAsceFeedToEvent(
 
 function asceEventSignature(event: CommunityEventState): string {
   const last = event.communityHoursSamples?.at(-1);
+  const waitingHours = event.milestones
+    .filter((milestone) => !milestone.isAwarded && milestone.arpReward > 0)
+    .map((milestone) => milestone.communityHoursRequired ?? 0)
+    .join(',');
   return [
     event.communityHours ?? '',
     event.pendingArp,
+    event.milestones.length,
+    waitingHours,
     event.communityHoursSamples?.length ?? 0,
     last?.hours ?? '',
     last?.at ?? '',
@@ -412,12 +471,15 @@ function applyFeedIfLive(state: SiteState, feed: AsceCommunityFeed): void {
   if (!next) {
     return;
   }
-  state.communityEvent = next;
+  state.communityEvent = state.arpLog
+    ? reconcileCommunityEventWithArpLog(next, state.arpLog)
+    : next;
 }
 
 /**
  * Apply GM-cached ASCE if present (no GitHub wait). Starts a background
- * fetch when the cache is missing or stale so the task list can paint first.
+ * fetch when the cache is missing, stale, or from a build that dropped
+ * stretch goals.
  */
 export async function applyAsceCommunityHours(state: SiteState): Promise<void> {
   const event = state.communityEvent;
@@ -430,6 +492,14 @@ export async function applyAsceCommunityHours(state: SiteState): Promise<void> {
   }
   if (!isCacheFresh(cache)) {
     void loadAsceCommunityFeed();
+    return;
+  }
+  if (cache.error || !requiresAsceGateRefresh(cache.feed)) {
+    return;
+  }
+  const feed = await loadAsceCommunityFeed({ force: true });
+  if (feed) {
+    applyFeedIfLive(state, feed);
   }
 }
 

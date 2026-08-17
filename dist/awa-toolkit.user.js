@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         AWA Toolkit
 // @namespace    https://github.com/UpDownLeftDie/AWA-Toolkit
-// @version      2.0.12
+// @version      2.0.13
 // @author       jaredcat
 // @description  Artifact Optimizer, Control Center tasks, giveaway/vault filters, and UCF reading mode
 // @license      AGPL-3.0-or-later
@@ -235,100 +235,6 @@
 			...upgraded.libraryPending === true && { libraryPending: true }
 		};
 	}
-	function pageWindow() {
-		try {
-			return _unsafeWindow;
-		} catch {}
-		return globalThis;
-	}
-	function asFiniteNumber(value) {
-		if (typeof value === "number" && Number.isFinite(value)) return value;
-		if (typeof value === "string" && value.trim() !== "") {
-			const parsed = Number(value.replaceAll(",", ""));
-			if (Number.isFinite(parsed)) return parsed;
-		}
-	}
-	function readPageNumber(name) {
-		try {
-			return asFiniteNumber(pageWindow()[name]);
-		} catch {
-			return;
-		}
-	}
-	function parseInlineNumber(document_, names) {
-		const pattern = new RegExp(String.raw`(?:var\s+|window\.)?(?:${names.join("|")})\s*=\s*(\d+)`);
-		for (const script of document_.querySelectorAll("script")) {
-			const match = pattern.exec(script.textContent ?? "");
-			if (match?.[1]) return Number(match[1]);
-		}
-	}
-	function readPageArpTier(document_ = document) {
-		if (document_ === document) {
-			const tier = readPageNumber("arp_tier");
-			if (tier !== void 0 && tier >= 0) return tier;
-		}
-		const fromScript = parseInlineNumber(document_, ["arp_tier"]);
-		if (fromScript !== void 0) return fromScript;
-		const tierImg = document_.querySelector("img[src*=\"/images/content/tier-tags/\"]");
-		const tierMatch = /tier-tags\/(\d+)\.png/.exec(tierImg?.src ?? "");
-		if (!tierMatch?.[1]) return;
-		const tier = Number(tierMatch[1]);
-		return Number.isFinite(tier) ? tier : void 0;
-	}
-	function readPageFragmentBalance(document_ = document) {
-		if (document_ === document) {
-			const fragments = readPageNumber("fragment_balance");
-			if (fragments !== void 0 && fragments >= 0) return fragments;
-		}
-		const fromScript = parseInlineNumber(document_, ["fragment_balance"]);
-		return fromScript !== void 0 && fromScript >= 0 ? fromScript : void 0;
-	}
-	function readPageRedeemableArp(document_ = document) {
-		const names = [
-			"arp_balance",
-			"user_arp",
-			"arp_points",
-			"redeemable_arp"
-		];
-		if (document_ === document) for (const name of names) {
-			const value = readPageNumber(name);
-			if (value !== void 0 && value >= 0) return value;
-		}
-		const fromScript = parseInlineNumber(document_, names);
-		return fromScript !== void 0 && fromScript >= 0 ? fromScript : void 0;
-	}
-	function giveawayKeyFromUnknown(value) {
-		if (typeof value !== "object" || !value) return;
-		const row = value;
-		const id = row.giveaway_id ?? row.giveawayId ?? row.id;
-		if (id === void 0 || id === null) return;
-		const status = typeof row.status === "string" ? row.status : "";
-		const entry = {
-			giveawayId: String(id),
-			status
-		};
-		const remaining = asFiniteNumber(row.remaining);
-		if (remaining !== void 0) entry.remaining = remaining;
-		return entry;
-	}
-	function readPageGiveawayKeys() {
-		let raw;
-		try {
-			raw = pageWindow().giveawayKeys;
-		} catch {
-			return [];
-		}
-		if (!Array.isArray(raw)) return [];
-		const keys = [];
-		for (const item of raw) {
-			const entry = giveawayKeyFromUnknown(item);
-			if (entry) keys.push(entry);
-		}
-		return keys;
-	}
-	function giveawayKeyStatus(giveawayId) {
-		return readPageGiveawayKeys().find((entry) => entry.giveawayId === giveawayId);
-	}
 	function pageText(document_ = document) {
 		return document_.body?.textContent ?? "";
 	}
@@ -365,1028 +271,6 @@
 		if (!value) return NaN;
 		const ms = Date.parse(value);
 		return Number.isFinite(ms) ? ms : NaN;
-	}
-	var ARP_LOG_ROW_SELECTOR = ".card-table-row";
-	var ARP_LOG_AFTER_ROWS_SELECTOR = "#arp-logs-per-page, #arp-log-chart";
-	var ARP_LOG_DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
-	var ARP_LOG_AMOUNT_RE = /^[+]?\d[\d,]*$/;
-	var ARP_LOG_TOGGLE_RE = /^[▼▲^▾▴]$/;
-	function parseRedeemableArpText(text) {
-		const match = /Redeemable ARP:\s*([\d,]+)/i.exec(text);
-		if (!match?.[1]) return;
-		const value = Number(match[1].replaceAll(",", ""));
-		return Number.isFinite(value) ? value : void 0;
-	}
-	function scrapeRedeemableArpFromDocument(document_) {
-		const fromPage = readPageRedeemableArp(document_);
-		if (fromPage !== void 0) return fromPage;
-		return parseRedeemableArpText(pageText(document_));
-	}
-	function applyRedeemableArpFromDocument(next, document_) {
-		const arp = scrapeRedeemableArpFromDocument(document_);
-		if (arp === void 0) return;
-		next.arpLog = {
-			scrapedAt: next.arpLog?.scrapedAt ?? new Date().toISOString(),
-			recent: next.arpLog?.recent ?? [],
-			...next.arpLog,
-			redeemableArp: arp
-		};
-	}
-	function parseArpAmount(text) {
-		const value = Number(text.replaceAll(",", "").replace(/^\+/, ""));
-		return Number.isFinite(value) ? value : void 0;
-	}
-	function scrapeArpLogRowsFromTable(document_) {
-		const entries = [];
-		for (const row of document_.querySelectorAll(ARP_LOG_ROW_SELECTOR)) {
-			const cols = [...row.children].map((element) => (element.textContent ?? "").replaceAll(/\s+/g, " ").trim());
-			const date = cols.find((col) => ARP_LOG_DATE_RE.test(col));
-			const arpText = cols.findLast((col) => col !== date && ARP_LOG_AMOUNT_RE.test(col));
-			const action = cols.find((col) => col.length > 0 && col !== date && col !== arpText && !ARP_LOG_TOGGLE_RE.test(col));
-			if (!action || arpText === void 0) continue;
-			const arp = parseArpAmount(arpText);
-			if (arp === void 0) continue;
-			const entry = {
-				action,
-				arp
-			};
-			if (date) entry.date = date;
-			entries.push(entry);
-		}
-		return entries;
-	}
-	function scrapeArpLogRowsFromText(body) {
-		const actionNames = [
-			"Time On Site",
-			"Game Prize",
-			"Daily Login Calendar",
-			"Daily Login Streak",
-			"Discord Poll",
-			"Steam Community Event Reward",
-			"Steam Quest",
-			"Steam Quests",
-			"Twitch Passive",
-			"Watch Twitch",
-			"Community Event",
-			"Forum Post",
-			"Giveaway",
-			"Battle Pass Reward",
-			"Battle Pass",
-			"Quest"
-		].join("|");
-		const rowPattern = new RegExp(String.raw`(${actionNames})\s+(\d+)\s+(\d{4}-\d{2}-\d{2})`, "gi");
-		const entries = [];
-		for (const match of body.matchAll(rowPattern)) {
-			const entry = {
-				action: match[1] ?? "Unknown",
-				arp: Number(match[2])
-			};
-			if (match[3]) entry.date = match[3];
-			entries.push(entry);
-		}
-		return entries;
-	}
-	function isArpLogDocumentReady(document_) {
-		if (!document_.body) return false;
-		return Boolean(document_.querySelector(`${ARP_LOG_ROW_SELECTOR}, ${ARP_LOG_AFTER_ROWS_SELECTOR}`));
-	}
-	function arpLogSignature(document_) {
-		if (!isArpLogDocumentReady(document_)) return "";
-		return scrapeArpLogFromDocument(document_).recent.map((entry) => `${entry.date ?? ""}|${entry.action}|${entry.arp}`).join(";");
-	}
-	async function waitForArpLogDocument(timeoutMs = 12e3) {
-		if (isArpLogDocumentReady(document)) return;
-		await new Promise((resolve) => {
-			let isSettled = false;
-			const observer = new MutationObserver(() => {
-				if (isArpLogDocumentReady(document)) finish();
-			});
-			const timer = setTimeout(finish, timeoutMs);
-			function finish() {
-				if (isSettled) return;
-				isSettled = true;
-				observer.disconnect();
-				clearTimeout(timer);
-				resolve();
-			}
-			observer.observe(document.documentElement, {
-				childList: true,
-				subtree: true
-			});
-		});
-	}
-	function scrapeArpLogFromDocument(document_) {
-		const body = pageText(document_);
-		const state = {
-			scrapedAt: new Date().toISOString(),
-			recent: []
-		};
-		const redeemableArp = parseRedeemableArpText(body);
-		if (redeemableArp !== void 0) state.redeemableArp = redeemableArp;
-		const lifetime = /Lifetime ARP:\s*([\d,]+)/i.exec(body);
-		if (lifetime?.[1]) state.lifetimeArp = Number(lifetime[1].replaceAll(",", ""));
-		const todayTotal = /Total ARP earned today:\s*([\d,]+)/i.exec(body);
-		if (todayTotal?.[1]) state.todayDelta = Number(todayTotal[1].replaceAll(",", ""));
-		else {
-			const plusMatch = /Redeemable ARP:[\s\S]{0,80}?\+\s*([\d,]+)/i.exec(body);
-			if (plusMatch?.[1]) state.todayDelta = Number(plusMatch[1].replaceAll(",", ""));
-		}
-		const fromTable = scrapeArpLogRowsFromTable(document_);
-		state.recent = fromTable.length > 0 ? fromTable : scrapeArpLogRowsFromText(body);
-		return state;
-	}
-	var ARP_LOG_UNSEEN_SCRAPED_AT = new Date(0).toISOString();
-	function mergeArpLogScrapedAt(scraped, previous) {
-		if (scraped.recent.length > 0) return scraped.scrapedAt;
-		if (previous.recent.length > 0) return previous.scrapedAt;
-		return ARP_LOG_UNSEEN_SCRAPED_AT;
-	}
-	function mergeArpLogScrape(scraped, previous) {
-		if (!previous) {
-			if (scraped.recent.length === 0) return {
-				...scraped,
-				scrapedAt: ARP_LOG_UNSEEN_SCRAPED_AT
-			};
-			return scraped;
-		}
-		const seen = new Set();
-		const recent = [];
-		for (const entry of [...scraped.recent, ...previous.recent]) {
-			const key = `${entry.date ?? ""}|${entry.action}|${entry.arp}`;
-			if (seen.has(key)) continue;
-			seen.add(key);
-			recent.push(entry);
-		}
-		recent.sort((left, right) => (right.date ?? "").localeCompare(left.date ?? ""));
-		const redeemableArp = scraped.redeemableArp ?? previous.redeemableArp;
-		const lifetimeArp = scraped.lifetimeArp ?? previous.lifetimeArp;
-		const todayDelta = scraped.todayDelta ?? previous.todayDelta;
-		return {
-			scrapedAt: mergeArpLogScrapedAt(scraped, previous),
-			...redeemableArp !== void 0 && { redeemableArp },
-			...lifetimeArp !== void 0 && { lifetimeArp },
-			...todayDelta !== void 0 && { todayDelta },
-			recent
-		};
-	}
-	var SETTINGS_KEY = "artifactOptimizerSettings";
-	var COOLDOWN_MS = 864e5;
-	var NOTIFICATION_TYPE_KEYS = [
-		"swap",
-		"community",
-		"vault",
-		"giveaways"
-	];
-	var NOTIFICATION_TYPE_COPY = {
-		swap: {
-			title: "Recommended swap",
-			hint: "When a better loadout is waiting on a 24h lock — not every unlock."
-		},
-		community: {
-			title: "Community Event",
-			hint: "When community hours unlock pending ARP."
-		},
-		vault: {
-			title: "Game Vault",
-			hint: "When the vault opens or new games appear."
-		},
-		giveaways: {
-			title: "New giveaways",
-			hint: "Official Alienware key giveaways — not community giveaways."
-		}
-	};
-	var DEFAULT_NOTIFICATION_TYPES = {
-		swap: true,
-		community: true,
-		vault: true,
-		giveaways: true
-	};
-	var DEFAULT_ACTIVITIES = {
-		timeOnSite: {
-			enabled: true,
-			frequency: 1
-		},
-		steamQuests: {
-			enabled: true,
-			frequency: 1
-		},
-		watchTwitch: {
-			enabled: true,
-			frequency: 1
-		},
-		dailyCalendar: {
-			enabled: true,
-			frequency: 1
-		},
-		discordPoll: {
-			enabled: true,
-			frequency: 1
-		},
-		dailyQuests: {
-			enabled: true,
-			frequency: 1
-		},
-		steamCommunityEvent: {
-			enabled: true,
-			frequency: 1
-		}
-	};
-	var defaultArtifactSettings = {
-		activities: { ...DEFAULT_ACTIVITIES },
-		pendingVaultPurchaseArp: 0,
-		manualArtifacts: [],
-		preferScraped: true,
-		slotCooldowns: [],
-		preferredTwitchStreamers: [],
-		browserNotifications: false,
-		notificationTypes: { ...DEFAULT_NOTIFICATION_TYPES }
-	};
-	function isPartialSettings(value) {
-		return typeof value === "object" && !!value;
-	}
-	function mergeActivities(base, incoming) {
-		if (!incoming) return base;
-		const legacy = incoming;
-		const next = { ...base };
-		if (legacy.communityEvent && !legacy.dailyQuests) next.dailyQuests = {
-			enabled: legacy.communityEvent.enabled,
-			frequency: typeof legacy.communityEvent.frequency === "number" ? legacy.communityEvent.frequency : 1
-		};
-		for (const key of Object.keys(DEFAULT_ACTIVITIES)) {
-			const value = incoming[key];
-			if (!value) continue;
-			next[key] = {
-				enabled: value.enabled,
-				frequency: typeof value.frequency === "number" ? value.frequency : 1
-			};
-		}
-		return next;
-	}
-	function applyParsedSettings(settings, parsed) {
-		settings.activities = mergeActivities(settings.activities, parsed.activities);
-		if (typeof parsed.pendingVaultPurchaseArp === "number") settings.pendingVaultPurchaseArp = parsed.pendingVaultPurchaseArp;
-		if (typeof parsed.manualFragments === "number") settings.manualFragments = parsed.manualFragments;
-		if (Array.isArray(parsed.manualArtifacts)) settings.manualArtifacts = parsed.manualArtifacts;
-		if (typeof parsed.preferScraped === "boolean") settings.preferScraped = parsed.preferScraped;
-		if (Array.isArray(parsed.slotCooldowns)) settings.slotCooldowns = parsed.slotCooldowns;
-		if (typeof parsed.vaultDiscountDismissedCycle === "string") {
-			if (parsed.vaultDiscountDismissedCycle) settings.vaultDiscountDismissedCycle = parsed.vaultDiscountDismissedCycle;
-			else delete settings.vaultDiscountDismissedCycle;
-		}
-		if (Array.isArray(parsed.preferredTwitchStreamers)) settings.preferredTwitchStreamers = parsePreferredTwitchStreamers(parsed.preferredTwitchStreamers.filter((item) => typeof item === "string").join("\n"));
-		if (typeof parsed.browserNotifications === "boolean") settings.browserNotifications = parsed.browserNotifications;
-		settings.notificationTypes = mergeNotificationTypes(settings.notificationTypes, parsed.notificationTypes);
-	}
-	function mergeNotificationTypes(base, incoming) {
-		if (!incoming) return base;
-		const next = { ...base };
-		for (const key of NOTIFICATION_TYPE_KEYS) if (typeof incoming[key] === "boolean") next[key] = incoming[key];
-		return next;
-	}
-	function twitchLoginFromInput(value) {
-		let text = value.trim();
-		if (!text) return "";
-		text = text.replace(/^https?:\/\//i, "");
-		text = text.replace(/^(www\.)?twitch\.tv\//i, "");
-		text = text.replace(/^@/, "");
-		return (text.split(/[/?#]/, 1)[0] ?? "").trim().toLowerCase();
-	}
-	function parsePreferredTwitchStreamers(raw) {
-		const logins = [];
-		const seen = new Set();
-		for (const token of raw.split(/[\n,]+/)) {
-			const login = twitchLoginFromInput(token);
-			if (!login || seen.has(login)) continue;
-			seen.add(login);
-			logins.push(login);
-		}
-		return logins;
-	}
-	async function getArtifactSettings() {
-		const raw = await _GM.getValue(SETTINGS_KEY);
-		const settings = {
-			...defaultArtifactSettings,
-			activities: { ...DEFAULT_ACTIVITIES },
-			manualArtifacts: [],
-			slotCooldowns: [],
-			preferredTwitchStreamers: [],
-			notificationTypes: { ...DEFAULT_NOTIFICATION_TYPES }
-		};
-		if (!raw) return settings;
-		try {
-			const parsedUnknown = typeof raw === "string" ? JSON.parse(raw) : raw;
-			if (!isPartialSettings(parsedUnknown)) return settings;
-			applyParsedSettings(settings, parsedUnknown);
-		} catch (error) {
-			console.error("[Artifact Optimizer] Error parsing settings:", error);
-		}
-		return settings;
-	}
-	async function saveArtifactSettings(patch) {
-		const previous = await getArtifactSettings();
-		const next = {
-			...previous,
-			...patch,
-			activities: patch.activities ? {
-				...previous.activities,
-				...patch.activities
-			} : previous.activities,
-			notificationTypes: patch.notificationTypes ? {
-				...previous.notificationTypes,
-				...patch.notificationTypes
-			} : previous.notificationTypes
-		};
-		await _GM.setValue(SETTINGS_KEY, JSON.stringify(next));
-		return next;
-	}
-	function findCooldownEntry(settings, position) {
-		return settings.slotCooldowns.find((entry) => entry.position === position);
-	}
-	function isShowroomSlotLocked(position, options = {}) {
-		if (options.equippedSlotLocked === true) return true;
-		if (options.equippedSlotLocked === false) return false;
-		return options.slotLocks?.[position] === true;
-	}
-	function showroomCooldownRemainingMs(settings, position, options = {}) {
-		if (!isShowroomSlotLocked(position, options)) return 0;
-		return cooldownRemainingMs(settings, position, options.now);
-	}
-	function cooldownRemainingMs(settings, position, now = Date.now()) {
-		const entry = findCooldownEntry(settings, position);
-		if (!entry) return 0;
-		const changedAt = Date.parse(entry.changedAt);
-		if (Number.isNaN(changedAt)) return 0;
-		return Math.max(0, COOLDOWN_MS - (now - changedAt));
-	}
-	async function recordSlotChange(position, artifactInstanceId) {
-		const rest = (await getArtifactSettings()).slotCooldowns.filter((entry) => entry.position !== position);
-		const entry = {
-			position,
-			changedAt: new Date().toISOString()
-		};
-		if (artifactInstanceId !== void 0) entry.artifactInstanceId = artifactInstanceId;
-		rest.push(entry);
-		await saveArtifactSettings({ slotCooldowns: rest });
-	}
-	var SLOT_POSITIONS = [
-		1,
-		2,
-		3
-	];
-	function isCompleteSlotLockMap(slotLocks) {
-		return SLOT_POSITIONS.every((position) => typeof slotLocks[position] === "boolean");
-	}
-	async function syncSlotLocksFromScrape(slotLocks, now = Date.now()) {
-		const previous = (await getArtifactSettings()).slotCooldowns;
-		const next = [];
-		for (const position of SLOT_POSITIONS) {
-			if (slotLocks[position] !== true) continue;
-			const existing = previous.find((entry) => entry.position === position);
-			if (existing) {
-				next.push(existing);
-				continue;
-			}
-			next.push({
-				position,
-				changedAt: new Date(now).toISOString(),
-				estimated: true
-			});
-		}
-		if (!isCompleteSlotLockMap(slotLocks)) {
-			for (const entry of previous) if (slotLocks[entry.position] !== false && next.every((row) => row.position === entry.position)) next.push(entry);
-		}
-		if (JSON.stringify(previous) !== JSON.stringify(next)) await saveArtifactSettings({ slotCooldowns: next });
-	}
-	function isNotificationTypeEnabled(settings, key) {
-		return settings.notificationTypes[key] ?? true;
-	}
-	function serializePostBody(body, encoding) {
-		if (encoding === "json") return JSON.stringify(body);
-		const parameters = new URLSearchParams();
-		for (const [key, value] of Object.entries(body)) {
-			if (typeof value !== "string" && typeof value !== "number" && typeof value !== "boolean") continue;
-			parameters.set(key, String(value));
-		}
-		return parameters.toString();
-	}
-	function resultFromResponse(status, parsed) {
-		if (status < 200 || status >= 300) {
-			const result = {
-				ok: false,
-				status,
-				error: parsed?.message ?? `Request failed (${status})`
-			};
-			if (parsed?.message) result.message = parsed.message;
-			return result;
-		}
-		if (parsed?.success === false) {
-			const result = {
-				ok: false,
-				status,
-				error: parsed.message ?? "Request rejected (slot may be on 24h cooldown or already set)."
-			};
-			if (parsed.message) result.message = parsed.message;
-			return result;
-		}
-		const result = {
-			ok: true,
-			status
-		};
-		if (parsed?.message) result.message = parsed.message;
-		return result;
-	}
-	async function postRequest(path, body, encoding) {
-		try {
-			const response = await fetch(path, {
-				method: "POST",
-				headers: {
-					"Content-Type": "application/x-www-form-urlencoded; charset=UTF-8",
-					Accept: "application/json, text/javascript, */*; q=0.01",
-					"X-Requested-With": "XMLHttpRequest"
-				},
-				body: serializePostBody(body, encoding)
-			});
-			const text = await response.text();
-			let parsed;
-			try {
-				parsed = JSON.parse(text);
-			} catch {
-				parsed = void 0;
-			}
-			return resultFromResponse(response.status, parsed);
-		} catch (error) {
-			return {
-				ok: false,
-				status: 0,
-				error: error instanceof Error ? error.message : "Network error"
-			};
-		}
-	}
-	async function postJson(path, body) {
-		return postRequest(path, body, "json");
-	}
-	async function postForm(path, body) {
-		return postRequest(path, body, "form");
-	}
-	async function equipArtifact(artifactId, position) {
-		const result = await postJson("/change-user-artifacts", {
-			artifactId,
-			position
-		});
-		if (result.ok) await recordSlotChange(position, artifactId);
-		return result;
-	}
-	async function upgradeArtifact(artifactId) {
-		return postJson("/upgrade-user-artifact", { artifactId });
-	}
-	async function claimBattlePassReward(path, body = {}) {
-		return postForm(path, body);
-	}
-	function pickStuckLockNudgeTarget(artifacts) {
-		const maxed = artifacts.filter((artifact) => artifact.maxLevel || artifact.upgradeCost === 0);
-		if (maxed.length === 0) return;
-		const target = maxed.find((artifact) => /warrior script/i.test(artifact.displayName)) ?? maxed[0];
-		if (!target) return;
-		return {
-			instanceId: target.instanceId,
-			displayName: target.displayName
-		};
-	}
-	async function nudgeStuckSlotLocks(artifacts) {
-		const target = pickStuckLockNudgeTarget(artifacts);
-		if (!target) {
-			console.info("[Artifact Optimizer] Stuck-lock nudge skipped — no maxed 0-frag artifact");
-			return;
-		}
-		const result = await upgradeArtifact(target.instanceId);
-		console.info("[Artifact Optimizer] Stuck-lock nudge", {
-			name: target.displayName,
-			id: target.instanceId,
-			ok: result.ok,
-			message: result.message ?? result.error
-		});
-		return result;
-	}
-	async function applyLoadout(targets, currentlyEquipped) {
-		const results = [];
-		const applied = [];
-		for (const target of targets) {
-			if (currentlyEquipped.some((c) => c.artifactId === target.artifactId && c.position === target.position)) continue;
-			const equipResult = await equipArtifact(target.artifactId, target.position);
-			results.push(equipResult);
-			if (!equipResult.ok) return {
-				results,
-				allOk: false,
-				applied
-			};
-			applied.push(target);
-		}
-		return {
-			results,
-			allOk: results.every((result) => result.ok),
-			applied
-		};
-	}
-	function scrapeBattlePassFromDocument(document_) {
-		const body = pageText(document_);
-		const popups = document_.querySelectorAll(".bp-popup[data-milestone-id]");
-		const tokensMatch = /BATTLE TOKENS\s*([\d,]+)\s*\/\s*([\d,]+)/i.exec(body);
-		if ((body.match(/Ready to claim/gi) ?? []).length === 0 && popups.length === 0) return;
-		const readyClaims = listReadyClaimsFromDocument(document_);
-		const { readyToClaim, readyToClaimArp } = countBattlePassClaims(document_);
-		const state = {
-			readyToClaim,
-			readyToClaimArp,
-			url: "/control-center/battle-pass/1",
-			scrapedAt: new Date().toISOString()
-		};
-		if (readyClaims.length > 0) state.readyClaims = readyClaims;
-		if (tokensMatch?.[1] && tokensMatch[2]) {
-			state.tokens = Number(tokensMatch[1].replaceAll(",", ""));
-			state.tokensMax = Number(tokensMatch[2].replaceAll(",", ""));
-		}
-		applyBattlePassCountdown(state, body);
-		return state;
-	}
-	var BATTLE_PASS_ENDS_RE = /battle\s*pass\s*ends?\s*in\s*(\d{1,3}(?:\s*:\s*\d{1,2}){2,3})/i;
-	function applyBattlePassCountdown(state, body) {
-		const endsMatch = BATTLE_PASS_ENDS_RE.exec(body);
-		if (!endsMatch?.[1]) return;
-		const raw = endsMatch[1].replaceAll(/\s+/g, " ").trim();
-		state.endsInText = raw;
-		const remaining = parseBattlePassCountdownMs(raw);
-		if (remaining !== void 0) state.endsAt = new Date(Date.now() + remaining).toISOString();
-	}
-	function parseBattlePassCountdownMs(text) {
-		const parts = text.trim().split(":").map((part) => Number(part.trim())).filter((part) => Number.isFinite(part));
-		if (parts.length < 3 || parts.length > 4) return;
-		const seconds = parts.at(-1) ?? 0;
-		const minutes = parts.at(-2) ?? 0;
-		const hours = parts.at(-3) ?? 0;
-		return ((((parts.length === 4 ? parts[0] ?? 0 : 0) * 24 + hours) * 60 + minutes) * 60 + seconds) * 1e3;
-	}
-	function battlePassRemainingMs(battlePass, now = Date.now()) {
-		if (!battlePass) return;
-		if (battlePass.endsAt) {
-			const endsAt = Date.parse(battlePass.endsAt);
-			if (!Number.isNaN(endsAt)) return Math.max(0, endsAt - now);
-		}
-		if (!battlePass.endsInText || !battlePass.scrapedAt) return;
-		const parsed = parseBattlePassCountdownMs(battlePass.endsInText);
-		const scrapedAt = Date.parse(battlePass.scrapedAt);
-		if (parsed === void 0 || Number.isNaN(scrapedAt)) return;
-		return Math.max(0, parsed - (now - scrapedAt));
-	}
-	function mergeBattlePassScrape(scraped, previous) {
-		if (scraped.endsAt || !previous?.endsAt) return scraped;
-		const merged = {
-			...scraped,
-			endsAt: previous.endsAt
-		};
-		if (!merged.endsInText && previous.endsInText) merged.endsInText = previous.endsInText;
-		return merged;
-	}
-	function applyBattlePassEndFromDocument(next, document_) {
-		if (!next.battlePass) return;
-		const battlePass = { ...next.battlePass };
-		applyBattlePassCountdown(battlePass, pageText(document_));
-		next.battlePass = battlePass;
-	}
-	function listReadyClaimsFromDocument(document_) {
-		const claims = [];
-		const popups = document_.querySelectorAll(".bp-popup[data-milestone-id]");
-		for (const popup of popups) {
-			if (!(popup instanceof HTMLElement)) continue;
-			if (!(popup.dataset.milestoneId ?? "")) continue;
-			claims.push(...readyClaimsFromPopup(popup));
-		}
-		return uniqueReadyClaims(claims);
-	}
-	function readyClaimFromButton(button, popup) {
-		const form = button.closest("form");
-		const claimPath = form?.getAttribute("action")?.trim() || void 0;
-		const csrfToken = form?.querySelector("input[name=\"_csrf_token\"]")?.value;
-		const claim = {
-			milestoneId: (form instanceof HTMLElement ? form.dataset.milestoneId : void 0) ?? popup.dataset.milestoneId ?? "",
-			isArp: isArpClaimPopup(popup)
-		};
-		if (claimPath) claim.claimPath = claimPath;
-		if (csrfToken) claim.csrfToken = csrfToken;
-		if (!claimPath) claim.body = {
-			...datasetRecord(popup),
-			...datasetRecord(button)
-		};
-		return claim;
-	}
-	function readyClaimsFromPopup(popup) {
-		return [...popup.querySelectorAll(".bp-popup__claim-btn")].flatMap((button) => {
-			if (!(button instanceof HTMLElement)) return [];
-			return [readyClaimFromButton(button, popup)];
-		});
-	}
-	function countBattlePassClaims(document_) {
-		const readyClaims = listReadyClaimsFromDocument(document_);
-		if (readyClaims.length > 0) return {
-			readyToClaim: readyClaims.length,
-			readyToClaimArp: readyClaims.filter((claim) => claim.isArp).length
-		};
-		const legacy = (pageText(document_).match(/Ready to claim/gi) ?? []).length;
-		return {
-			readyToClaim: legacy,
-			readyToClaimArp: legacy
-		};
-	}
-	function isBattlePassArpRewardTitle(title) {
-		if (/ARP\s*Boost/i.test(title)) return true;
-		return /^\d[\d,]*\s*ARP$/i.test(title.trim());
-	}
-	function battlePassPopupTitle(popup) {
-		return popup.querySelector(".bp-popup__title")?.textContent?.trim() ?? "";
-	}
-	function isArpClaimPopup(popup) {
-		return isBattlePassArpRewardTitle(battlePassPopupTitle(popup));
-	}
-	function claimIdentity(claim) {
-		return claim.claimPath ?? claim.milestoneId;
-	}
-	function uniqueReadyClaims(claims) {
-		const seen = new Set();
-		const unique = [];
-		for (const claim of claims) {
-			const key = claimIdentity(claim);
-			if (!key || seen.has(key)) continue;
-			seen.add(key);
-			unique.push(claim);
-		}
-		return unique;
-	}
-	function claimButtonIdentity(button, popup) {
-		return button.closest("form")?.getAttribute("action")?.trim() || popup.dataset.milestoneId || "";
-	}
-	function pushUniqueClaimButton(items, seen, button, popup) {
-		if (!(button instanceof HTMLElement)) return;
-		const key = claimButtonIdentity(button, popup);
-		if (!key || seen.has(key)) return;
-		seen.add(key);
-		items.push({
-			button,
-			popup
-		});
-	}
-	function listBattlePassClaimButtons(document_ = document, options = {}) {
-		const shouldSkipArpBoosts = options.shouldSkipArpBoosts === true;
-		const popups = document_.querySelectorAll(".bp-popup[data-milestone-id]");
-		const items = [];
-		const seen = new Set();
-		for (const popup of popups) {
-			if (!(popup instanceof HTMLElement)) continue;
-			if (shouldSkipArpBoosts && isArpClaimPopup(popup)) continue;
-			for (const button of popup.querySelectorAll(".bp-popup__claim-btn")) pushUniqueClaimButton(items, seen, button, popup);
-		}
-		return items;
-	}
-	function delay$2(ms) {
-		return new Promise((resolve) => {
-			setTimeout(resolve, ms);
-		});
-	}
-	var CLAIM_QUEUE_GAP_MS = 1500;
-	async function waitWhile(isWaiting, timeoutMs, intervalMs = 100) {
-		const startedAt = Date.now();
-		while (isWaiting() && Date.now() - startedAt < timeoutMs) await delay$2(intervalMs);
-	}
-	var claimEndpointCache = {};
-	function jsonishId(value) {
-		return /^\d+$/.test(value) ? Number(value) : value;
-	}
-	function datasetRecord(element) {
-		const record = {};
-		for (const [key, value] of Object.entries(element.dataset)) {
-			if (value === void 0 || value === "") continue;
-			record[key] = jsonishId(value);
-		}
-		return record;
-	}
-	function isBattlePassClaimPath(path) {
-		const normalized = path.toLowerCase();
-		if (/giveaway|marketplace|ucf\/show|community-giveaway|vote\//.test(normalized)) return false;
-		const hasClaim = /claim/.test(normalized);
-		const hasBattlePass = /battle-?pass/.test(normalized);
-		const hasMilestone = /milestone/.test(normalized);
-		return hasClaim && (hasBattlePass || hasMilestone);
-	}
-	function endpointFromHref(raw) {
-		let path = raw.trim();
-		try {
-			const url = new URL(path, location.origin);
-			if (url.origin !== location.origin) return;
-			path = `${url.pathname}${url.search}`;
-		} catch {
-			return;
-		}
-		if (!isBattlePassClaimPath(path)) return;
-		const hasIdInPath = /\/\d+\/?$/.test(urlPathname(path));
-		return {
-			path: hasIdInPath ? path.replace(/\/\d+\/?$/, "") : path,
-			hasIdInPath,
-			idParameter: "milestoneId"
-		};
-	}
-	function urlPathname(path) {
-		const q = path.indexOf("?");
-		return q === -1 ? path : path.slice(0, q);
-	}
-	function firstClaimEndpoint(candidates) {
-		for (const candidate of candidates) {
-			if (!candidate) continue;
-			const endpoint = endpointFromHref(candidate);
-			if (endpoint) return endpoint;
-		}
-	}
-	function endpointFromClaimMarkup(document_) {
-		for (const item of listBattlePassClaimButtons(document_)) {
-			const endpoint = firstClaimEndpoint([
-				item.button.closest("form")?.getAttribute("action") ?? void 0,
-				item.button.getAttribute("href") ?? void 0,
-				item.button.getAttribute("formaction") ?? void 0,
-				item.button.dataset.url,
-				item.button.dataset.href,
-				item.button.dataset.action,
-				item.popup.dataset.url,
-				item.popup.dataset.href,
-				item.popup.dataset.claimUrl
-			]);
-			if (endpoint) return endpoint;
-		}
-	}
-	function idParameterFromSource(source) {
-		const match = /(?:milestoneId|milestone_id|rewardId)\s*:/i.exec(source);
-		return /rewardId/i.test(match?.[0] ?? "") ? "rewardId" : "milestoneId";
-	}
-	function endpointFromQuotedPath(path, source, hasIdInPathHint = false) {
-		if (!isBattlePassClaimPath(path)) return;
-		const hasIdInPath = hasIdInPathHint || /\/\d+\/?$/.test(urlPathname(path)) || /\$\{|\{id\}|\{milestone/i.test(path);
-		return {
-			path: hasIdInPath ? path.replace(/\/\d+\/?$/, "").replace(/\/$/, "") : path,
-			hasIdInPath,
-			idParameter: idParameterFromSource(source)
-		};
-	}
-	function endpointFromScripts(source) {
-		const concat = /['"](\/[^'"]*(?:claim[^'"]*(?:battle|milestone)|(?:battle-pass|milestone)[^'"]*claim)[^'"]*)['"]\s*\+/i.exec(source);
-		if (concat?.[1]) {
-			const fromConcat = endpointFromQuotedPath(concat[1], source, true);
-			if (fromConcat) return fromConcat;
-		}
-		const quotedPath = /['"](\/[^'"]*(?:claim[^'"]*(?:battle|milestone)|(?:battle-pass|milestone)[^'"]*claim)[^'"]*)['"]/gi;
-		let match;
-		while (match = quotedPath.exec(source)) {
-			const endpoint = endpointFromQuotedPath(match[1] ?? "", source);
-			if (endpoint) return endpoint;
-		}
-		const ajaxPath = /(?:\.post|\.ajax|fetch)\(\s*['"](\/[^'"]+)['"]/gi;
-		while (match = ajaxPath.exec(source)) {
-			const endpoint = endpointFromQuotedPath(match[1] ?? "", source);
-			if (endpoint) return endpoint;
-		}
-	}
-	function collectInlineScriptText(document_) {
-		return [...document_.querySelectorAll("script:not([src])")].map((script) => script.textContent ?? "").join("\n");
-	}
-	function pageScriptUrls(document_) {
-		const urls = [];
-		const add = (raw) => {
-			if (!raw) return;
-			try {
-				const url = new URL(raw, location.origin);
-				if (url.origin !== location.origin) return;
-				urls.push(url.href);
-			} catch {}
-		};
-		for (const script of document_.querySelectorAll("script[src]")) add(script.getAttribute("src"));
-		for (const link of document_.querySelectorAll("link[rel=\"preload\"][as=\"script\"], link[as=\"script\"]")) add(link.getAttribute("href"));
-		return [...new Set(urls)].filter((href) => !/jquery|bootstrap|gtag|gtm|recaptcha|cloudflare|analytics|hotjar|sentry/i.test(href)).slice(0, 24);
-	}
-	function endpointFromJquery(document_) {
-		const readEvents = document_.defaultView?.jQuery?._data;
-		if (typeof readEvents !== "function") return;
-		const roots = [...document_.querySelectorAll(".bp-popup__claim-btn"), document_];
-		if (document_.body) roots.push(document_.body);
-		for (const root of roots) {
-			const found = endpointFromScripts((readEvents(root, "events")?.click ?? []).map((entry) => String(entry.handler ?? "")).join("\n"));
-			if (found) return found;
-		}
-	}
-	async function endpointFromPageScripts(document_) {
-		for (const href of pageScriptUrls(document_)) try {
-			const text = await (await fetch(href)).text();
-			const handlerAt = text.search(/bp-popup__claim-btn|claim-btn/i);
-			const fromFile = handlerAt >= 0 ? endpointFromScripts(text.slice(Math.max(0, handlerAt - 2e3), handlerAt + 4e3)) ?? endpointFromScripts(text) : endpointFromScripts(text);
-			if (fromFile) return fromFile;
-		} catch {}
-	}
-	async function fetchBattlePassDocument() {
-		try {
-			const response = await fetch("/control-center/battle-pass/1", { headers: { Accept: "text/html" } });
-			if (!response.ok) return;
-			return new DOMParser().parseFromString(await response.text(), "text/html");
-		} catch {
-			return;
-		}
-	}
-	function cacheClaimEndpoint(endpoint) {
-		claimEndpointCache.value = endpoint;
-		console.info("[AWA Toolkit] Battle Pass claim POST", endpoint.path, endpoint.hasIdInPath ? "(id in path)" : "");
-		return endpoint;
-	}
-	async function searchDocumentForClaimEndpoint(document_) {
-		return endpointFromClaimMarkup(document_) ?? endpointFromScripts(collectInlineScriptText(document_)) ?? endpointFromJquery(document_) ?? await endpointFromPageScripts(document_);
-	}
-	async function discoverBattlePassClaimEndpoint(document_) {
-		if (claimEndpointCache.value) return claimEndpointCache.value;
-		if (document_) {
-			const found = await searchDocumentForClaimEndpoint(document_);
-			if (found) return cacheClaimEndpoint(found);
-		}
-		if (!location.pathname.includes("/battle-pass") && !Boolean(document_ && document_ !== document)) {
-			const fetched = await fetchBattlePassDocument();
-			if (fetched) {
-				const found = await searchDocumentForClaimEndpoint(fetched);
-				if (found) return cacheClaimEndpoint(found);
-			}
-		}
-	}
-	function resolveClaimPath(endpoint, milestoneId) {
-		if (!endpoint.hasIdInPath) return endpoint.path;
-		const trimmed = endpoint.path.replace(/\/$/, "");
-		if (trimmed.endsWith(`/${milestoneId}`)) return trimmed;
-		return `${trimmed}/${milestoneId}`;
-	}
-	function resolveClaimBody(endpoint, claim) {
-		if (claim.csrfToken) return { _csrf_token: claim.csrfToken };
-		const body = { ...claim.body };
-		if (endpoint && body[endpoint.idParameter] === void 0) body[endpoint.idParameter] = jsonishId(claim.milestoneId);
-		return body;
-	}
-	function claimKey(claim) {
-		return claimIdentity(claim);
-	}
-	function claimPostPath(claim, endpoint) {
-		if (claim.claimPath) return claim.claimPath;
-		if (endpoint && claim.milestoneId) return resolveClaimPath(endpoint, claim.milestoneId);
-	}
-	async function claimReadyViaApi(claims, endpoint) {
-		const seen = new Set();
-		const postedPaths = new Set();
-		let claimed = 0;
-		let hasPosted = false;
-		for (const claim of uniqueReadyClaims(claims)) {
-			const path = claimPostPath(claim, endpoint);
-			const key = claimKey(claim);
-			if (!path || seen.has(key)) continue;
-			seen.add(key);
-			if (hasPosted) await delay$2(CLAIM_QUEUE_GAP_MS);
-			hasPosted = true;
-			const result = await claimBattlePassReward(path, resolveClaimBody(endpoint, claim));
-			postedPaths.add(path);
-			if (!result.ok) continue;
-			claimed += 1;
-		}
-		return {
-			claimed,
-			postedPaths
-		};
-	}
-	function claimsFromLiveButtons(items) {
-		return uniqueReadyClaims(items.map((item) => readyClaimFromButton(item.button, item.popup)));
-	}
-	async function clickRemainingClaimButtons(document_, options = {}) {
-		const attempted = new WeakSet();
-		const skipPaths = options.skipPaths ?? new Set();
-		let claimed = 0;
-		let hasClicked = false;
-		while (claimed < 40) {
-			const next = listBattlePassClaimButtons(document_, options).find((item) => {
-				if (!item.button.isConnected || attempted.has(item.button)) return false;
-				const path = claimButtonIdentity(item.button, item.popup);
-				return !path || !skipPaths.has(path);
-			});
-			if (!next) break;
-			attempted.add(next.button);
-			const { button, popup } = next;
-			const path = claimButtonIdentity(button, popup);
-			if (path) skipPaths.add(path);
-			if (hasClicked) await delay$2(CLAIM_QUEUE_GAP_MS);
-			hasClicked = true;
-			if (button.offsetParent === null) {
-				popup.click();
-				await delay$2(250);
-			}
-			button.click();
-			await waitWhile(() => button.isConnected && popup.contains(button), 4e3);
-			if (!button.isConnected || !popup.contains(button)) claimed += 1;
-		}
-		return claimed;
-	}
-	async function waitForBattlePassClaimButtons(document_, options = {}, timeoutMs = 8e3) {
-		const startedAt = Date.now();
-		while (Date.now() - startedAt < timeoutMs) {
-			const count = listBattlePassClaimButtons(document_, options).length;
-			if (count > 0) return count;
-			await delay$2(250);
-		}
-		return listBattlePassClaimButtons(document_, options).length;
-	}
-	async function claimAllBattlePassRewards(options = {}) {
-		const shouldSkipArpBoosts = options.shouldSkipArpBoosts === true;
-		const isOnBattlePassPage = location.pathname.includes("/battle-pass");
-		if (isOnBattlePassPage) await waitForBattlePassClaimButtons(document, { shouldSkipArpBoosts });
-		const liveDocument = isOnBattlePassPage ? document : void 0;
-		let fetchedDocument;
-		let targets;
-		if (isOnBattlePassPage) targets = claimsFromLiveButtons(listBattlePassClaimButtons(document, { shouldSkipArpBoosts }));
-		else {
-			fetchedDocument = await fetchBattlePassDocument();
-			targets = fetchedDocument ? listReadyClaimsFromDocument(fetchedDocument).filter((claim) => !shouldSkipArpBoosts || !claim.isArp) : [];
-			if (targets.every((claim) => !claim.claimPath)) targets = (options.readyClaims ?? []).filter((claim) => Boolean(claim.claimPath) && (!shouldSkipArpBoosts || !claim.isArp));
-		}
-		const endpoint = await discoverBattlePassClaimEndpoint(liveDocument ?? fetchedDocument);
-		const posted = targets.length > 0 ? await claimReadyViaApi(targets, endpoint) : {
-			claimed: 0,
-			postedPaths: new Set()
-		};
-		let claimed = posted.claimed;
-		if (isOnBattlePassPage) {
-			await waitWhile(() => listBattlePassClaimButtons(document, { shouldSkipArpBoosts }).length > 0, 1500);
-			let remaining = listBattlePassClaimButtons(document, { shouldSkipArpBoosts }).length;
-			if (remaining > 0) {
-				claimed += await clickRemainingClaimButtons(document, {
-					shouldSkipArpBoosts,
-					skipPaths: posted.postedPaths
-				});
-				await waitWhile(() => listBattlePassClaimButtons(document, { shouldSkipArpBoosts }).length > 0, 1500);
-				remaining = listBattlePassClaimButtons(document, { shouldSkipArpBoosts }).length;
-			}
-			return {
-				claimed,
-				remaining
-			};
-		}
-		const uniqueTargets = new Set(targets.map((claim) => claimIdentity(claim))).size;
-		return {
-			claimed,
-			remaining: Math.max(0, uniqueTargets - claimed)
-		};
-	}
-	function battlePassClaimableArp(battlePass) {
-		return battlePass?.readyToClaimArp ?? 0;
-	}
-	function battlePassReadyNonArp(battlePass) {
-		const ready = battlePass?.readyToClaim ?? 0;
-		return Math.max(0, ready - battlePassClaimableArp(battlePass));
-	}
-	function shouldSkipArpInBattlePassClaimAll(battlePass, shouldWaitForAllArpSwap) {
-		return shouldWaitForAllArpSwap && battlePassClaimableArp(battlePass) > 0;
-	}
-	function shouldShowBattlePassClaimAll(battlePass, shouldWaitForAllArpSwap) {
-		if (battlePassReadyNonArp(battlePass) > 0) return true;
-		return (battlePass?.readyToClaim ?? 0) > 0 && !shouldWaitForAllArpSwap;
-	}
-	function battlePassClaimButtonLabel(shouldSkipArpBoosts, options) {
-		if (shouldSkipArpBoosts) return "Claim rewards";
-		return options?.compact === true ? "Claim all BP" : "Claim all";
-	}
-	function scrapeBattlePass() {
-		if (!location.pathname.includes("/battle-pass")) return;
-		return scrapeBattlePassFromDocument(document);
-	}
-	function isBattlePassDocumentReady(document_) {
-		return Boolean(document_.querySelector(".bp-popup[data-milestone-id], .bp-popup__claim-btn, .bp-popup__claimed") || /Ready to claim/i.test(document_.body?.textContent ?? ""));
-	}
-	async function waitForBattlePassDocument(timeoutMs = 12e3) {
-		if (isBattlePassDocumentReady(document)) return;
-		await new Promise((resolve) => {
-			let isSettled = false;
-			const observer = new MutationObserver(() => {
-				if (isBattlePassDocumentReady(document)) finish();
-			});
-			const timer = setTimeout(finish, timeoutMs);
-			function finish() {
-				if (isSettled) return;
-				isSettled = true;
-				observer.disconnect();
-				clearTimeout(timer);
-				resolve();
-			}
-			observer.observe(document.documentElement, {
-				childList: true,
-				subtree: true
-			});
-		});
-	}
-	function battlePassClaimSignature(document_) {
-		const { readyToClaim, readyToClaimArp } = countBattlePassClaims(document_);
-		return `${readyToClaim}:${readyToClaimArp}`;
 	}
 	var CREDIT_SOURCES = [
 		{
@@ -2462,11 +1346,61 @@
 		if (hasAsceHistory) merged.communityHoursSource = "asce";
 		return carryForwardCommunityEventFields(merged, previous, Boolean(sameEvent));
 	}
+	function milestoneMergeKey(milestone) {
+		return milestone.communityHoursRequired === void 0 ? `i:${milestone.index}` : `h:${milestone.communityHoursRequired}`;
+	}
+	function mergeCommunityEventMilestones(scraped, previous) {
+		if (!previous || previous.length === 0) return scraped;
+		const merged = new Map();
+		for (const milestone of previous) merged.set(milestoneMergeKey(milestone), milestone);
+		for (const milestone of scraped) merged.set(milestoneMergeKey(milestone), milestone);
+		return merged.values().toArray().toSorted((left, right) => (left.communityHoursRequired ?? left.index) - (right.communityHoursRequired ?? right.index));
+	}
+	function inferPersonalHoursRequired(existing) {
+		const known = existing.filter((milestone) => milestone.arpReward > 0).map((milestone) => milestone.personalHoursRequired);
+		if (known.length === 0) return 1;
+		return Math.max(...known);
+	}
+	function upsertCommunityEventMilestoneGates(existing, gates) {
+		if (gates.length === 0) return existing;
+		const byHours = new Map();
+		const withoutHours = [];
+		for (const milestone of existing) {
+			const hours = milestone.communityHoursRequired;
+			if (hours === void 0) withoutHours.push(milestone);
+			else byHours.set(hours, milestone);
+		}
+		const inferredPersonal = inferPersonalHoursRequired(existing);
+		let nextIndex = 1;
+		for (const milestone of existing) if (milestone.index >= nextIndex) nextIndex = milestone.index + 1;
+		for (const gate of gates) {
+			const current = byHours.get(gate.hours);
+			if (current) {
+				if (gate.unlocked && !current.isCommunityUnlocked) byHours.set(gate.hours, {
+					...current,
+					isCommunityUnlocked: true
+				});
+				continue;
+			}
+			byHours.set(gate.hours, {
+				index: nextIndex,
+				personalHoursRequired: inferredPersonal,
+				communityHoursRequired: gate.hours,
+				arpReward: gate.arpReward,
+				rewardLabel: gate.label,
+				isCommunityUnlocked: gate.unlocked,
+				isAwarded: false
+			});
+			nextIndex += 1;
+		}
+		return [...withoutHours, ...byHours.values()].toSorted((left, right) => (left.communityHoursRequired ?? left.index) - (right.communityHoursRequired ?? right.index));
+	}
 	function carryForwardCommunityEventFields(merged, previous, isSameEvent) {
 		const next = { ...merged };
-		if (previous && isSameEvent && merged.personalHours <= 0 && previous.personalHours > 0) {
-			next.personalHours = previous.personalHours;
-			next.pendingArp = computePendingCommunityEventArp(previous.personalHours, merged.milestones);
+		if (previous && isSameEvent && merged.personalHours <= 0 && previous.personalHours > 0) next.personalHours = previous.personalHours;
+		if (isSameEvent && previous) {
+			next.milestones = mergeCommunityEventMilestones(next.milestones, previous.milestones);
+			next.pendingArp = computePendingCommunityEventArp(next.personalHours, next.milestones);
 		}
 		if (next.personalHours > 0 || isSameEvent && previous?.playEligibility === "eligible" && merged.playEligibility !== "ineligible") next.playEligibility = "eligible";
 		if (isSameEvent && previous?.communityHoursSource === "asce" && previous.communityHours !== void 0 && (next.communityHours === void 0 || next.communityHours < previous.communityHours)) {
@@ -2842,6 +1776,1634 @@
 		if (progress.communityHours !== void 0) state.communityHours = progress.communityHours;
 		if (progress.communityHoursCap !== void 0) state.communityHoursCap = progress.communityHoursCap;
 		return state;
+	}
+	var ASCE_CACHE_KEY = "asceCommunityHours";
+	var ASCE_HOURS_URL = "https://raw.githubusercontent.com/MarvashMagalli/ASCE/main/stored_hours.json";
+	var ASCE_CONFIG_URL = "https://raw.githubusercontent.com/MarvashMagalli/ASCE/main/configAWA.json";
+	var ASCE_CACHE_TTL_MS = 15e5;
+	var ASCE_ERROR_TTL_MS = 18e5;
+	var ASCE_SAMPLE_MAX = 96;
+	var FETCH_TIMEOUT_MS = 8e3;
+	var inflightLookup = {};
+	function hasPendingAsceRefresh() {
+		return inflightLookup.promise !== void 0;
+	}
+	function isRecord$1(value) {
+		return typeof value === "object" && value !== null;
+	}
+	function isAsceCache(value) {
+		return isRecord$1(value) && typeof value.at === "string";
+	}
+	function gmGetJson(url) {
+		return new Promise((resolve) => {
+			_GM_xmlhttpRequest({
+				method: "GET",
+				url,
+				anonymous: true,
+				timeout: FETCH_TIMEOUT_MS,
+				onload: (response) => {
+					if (response.status < 200 || response.status >= 300) {
+						resolve(void 0);
+						return;
+					}
+					try {
+						resolve(JSON.parse(response.responseText));
+					} catch {
+						resolve(void 0);
+					}
+				},
+				onerror: () => {
+					resolve(void 0);
+				},
+				ontimeout: () => {
+					resolve(void 0);
+				}
+			});
+		});
+	}
+	async function loadAsceCache() {
+		const raw = await _GM.getValue(ASCE_CACHE_KEY, "");
+		if (typeof raw !== "string" || raw.length === 0) return { at: "" };
+		try {
+			const parsed = JSON.parse(raw);
+			if (!isAsceCache(parsed)) return { at: "" };
+			return parsed;
+		} catch {
+			return { at: "" };
+		}
+	}
+	async function saveAsceCache(cache) {
+		await _GM.setValue(ASCE_CACHE_KEY, JSON.stringify(cache));
+	}
+	function cacheAgeMs(cache) {
+		const at = Date.parse(cache.at);
+		if (Number.isNaN(at)) return Number.POSITIVE_INFINITY;
+		return Date.now() - at;
+	}
+	function isCacheFresh(cache) {
+		if (!cache.at) return false;
+		const ttl = cache.error ? ASCE_ERROR_TTL_MS : ASCE_CACHE_TTL_MS;
+		return cacheAgeMs(cache) < ttl;
+	}
+	function communityEventSlug(url) {
+		try {
+			const parts = new URL(url, "https://na.alienwarearena.com").pathname.split("/").filter(Boolean);
+			const index = parts.indexOf("community-event");
+			if (index === -1) return;
+			return parts[index + 1];
+		} catch {
+			return;
+		}
+	}
+	function isAsceFeedForEvent(feed, eventUrl) {
+		const slug = communityEventSlug(eventUrl);
+		return slug !== void 0 && slug === feed.game;
+	}
+	function asceSlotMs(timestamp, hour) {
+		const match = /^(\d{4})-(\d{2})-(\d{2})[ T](\d{2}):(\d{2}):(\d{2})/.exec(timestamp);
+		if (!match || hour < 0 || hour > 23) return;
+		const year = Number(match[1]);
+		const month = Number(match[2]);
+		const day = Number(match[3]);
+		return Date.UTC(year, month - 1, day, hour, 0, 0);
+	}
+	function parseAsceHourPoint(value) {
+		if (!isRecord$1(value)) return;
+		const hours = value.value;
+		const hour = value.hour;
+		const timestamp = value.timestamp;
+		if (typeof hours !== "number" || typeof hour !== "number" || typeof timestamp !== "string" || !Number.isFinite(hours) || hours < 0) return;
+		const slotMs = asceSlotMs(timestamp, hour);
+		if (slotMs === void 0) return;
+		return {
+			slotMs,
+			hours
+		};
+	}
+	function parseAsceHours(raw) {
+		if (!Array.isArray(raw)) return [];
+		const bySlot = new Map();
+		for (const row of raw) {
+			const parsed = parseAsceHourPoint(row);
+			if (!parsed) continue;
+			bySlot.set(parsed.slotMs, parsed.hours);
+		}
+		const samples = bySlot.keys().toArray().toSorted((left, right) => left - right).map((slotMs) => ({
+			at: new Date(slotMs).toISOString(),
+			hours: bySlot.get(slotMs) ?? 0
+		}));
+		if (samples.length > ASCE_SAMPLE_MAX) return samples.slice(-96);
+		return samples;
+	}
+	function parseAsceArpReward(message) {
+		const arpAt = message.toUpperCase().indexOf(" ARP");
+		if (arpAt === -1) return 0;
+		const token = message.slice(0, arpAt).trim().split(" ").at(-1);
+		const reward = Number(token);
+		return Number.isFinite(reward) && reward > 0 ? reward : 0;
+	}
+	function parseAsceGates(rows) {
+		if (!Array.isArray(rows)) return [];
+		const byHours = new Map();
+		for (const row of rows) {
+			if (!isRecord$1(row)) continue;
+			const hours = row.current_hours;
+			if (typeof hours !== "number" || !Number.isFinite(hours) || hours <= 0) continue;
+			const label = typeof row.milestone_message === "string" && row.milestone_message.trim().length > 0 ? row.milestone_message.trim() : `${hours.toLocaleString()}h`;
+			byHours.set(hours, {
+				hours,
+				arpReward: parseAsceArpReward(label),
+				label,
+				unlocked: row.unlocked === true
+			});
+		}
+		return byHours.values().toArray().toSorted((left, right) => left.hours - right.hours);
+	}
+	function parseAsceConfig(raw) {
+		if (!isRecord$1(raw)) return {
+			gates: [],
+			unlockedHours: []
+		};
+		const game = typeof raw.game === "string" ? raw.game : void 0;
+		const goalHours = typeof raw.goal_hours === "number" && Number.isFinite(raw.goal_hours) ? raw.goal_hours : void 0;
+		const gates = [...parseAsceGates(raw.milestones), ...parseAsceGates(raw.stretch_goals)];
+		const uniqueGates = new Map(gates.map((gate) => [gate.hours, gate])).values().toArray().toSorted((left, right) => left.hours - right.hours);
+		return {
+			...game && { game },
+			...goalHours !== void 0 && { goalHours },
+			gates: uniqueGates,
+			unlockedHours: uniqueGates.filter((gate) => gate.unlocked).map((gate) => gate.hours)
+		};
+	}
+	function requiresAsceGateRefresh(feed) {
+		return feed !== void 0 && feed.gates === void 0;
+	}
+	async function fetchAsceFeed() {
+		const [hoursRaw, configRaw] = await Promise.all([gmGetJson(ASCE_HOURS_URL), gmGetJson(ASCE_CONFIG_URL)]);
+		const config = parseAsceConfig(configRaw);
+		const samples = parseAsceHours(hoursRaw);
+		if (!config.game || samples.length === 0) return;
+		return {
+			game: config.game,
+			samples,
+			unlockedHours: config.unlockedHours,
+			gates: config.gates,
+			...config.goalHours !== void 0 && { goalHours: config.goalHours }
+		};
+	}
+	async function loadAsceCommunityFeed(options = {}) {
+		const cache = await loadAsceCache();
+		if (!options.force && isCacheFresh(cache) && (cache.error || !requiresAsceGateRefresh(cache.feed))) {
+			if (cache.error) return;
+			return cache.feed;
+		}
+		if (inflightLookup.promise !== void 0) return inflightLookup.promise;
+		const promise = (async () => {
+			const feed = await fetchAsceFeed();
+			const at = new Date().toISOString();
+			if (!feed) {
+				await saveAsceCache({
+					at,
+					error: true
+				});
+				return;
+			}
+			await saveAsceCache({
+				at,
+				feed
+			});
+			return feed;
+		})();
+		inflightLookup.promise = promise;
+		try {
+			return await promise;
+		} finally {
+			delete inflightLookup.promise;
+		}
+	}
+	function applyAsceUnlocks(milestones, unlockedHours) {
+		if (unlockedHours.length === 0) return milestones;
+		const unlocked = new Set(unlockedHours);
+		return milestones.map((milestone) => {
+			if (milestone.isCommunityUnlocked) return milestone;
+			const requiredHours = milestone.communityHoursRequired;
+			if (requiredHours === void 0 || !unlocked.has(requiredHours)) return milestone;
+			return {
+				...milestone,
+				isCommunityUnlocked: true
+			};
+		});
+	}
+	function resolveCommunityHours(scraped, asceHours) {
+		if (scraped === void 0) return asceHours;
+		if (asceHours === void 0) return scraped;
+		return Math.max(scraped, asceHours);
+	}
+	function withLiveHoursSample(samples, event) {
+		if (event.communityHours === void 0) return samples;
+		const last = samples.at(-1);
+		if (!last || event.communityHours <= last.hours) return samples;
+		return [...samples, {
+			at: event.scrapedAt,
+			hours: event.communityHours
+		}];
+	}
+	function applyAsceFeedToEvent(event, feed) {
+		if (!event.isLive || !isAsceFeedForEvent(feed, event.url)) return;
+		const samples = withLiveHoursSample(feed.samples, event);
+		if (samples.length === 0) return;
+		const lastAsceHours = feed.samples.at(-1)?.hours;
+		const communityHours = resolveCommunityHours(event.communityHours, lastAsceHours);
+		const milestones = upsertCommunityEventMilestoneGates(applyAsceUnlocks(event.milestones, feed.unlockedHours), feed.gates ?? []);
+		const next = {
+			...event,
+			milestones,
+			pendingArp: computePendingCommunityEventArp(event.personalHours, milestones),
+			communityHoursSamples: samples,
+			communityHoursSource: "asce"
+		};
+		if (communityHours !== void 0) next.communityHours = communityHours;
+		if (next.communityHoursCap === void 0 && feed.goalHours !== void 0) next.communityHoursCap = feed.goalHours;
+		return next;
+	}
+	function asceEventSignature(event) {
+		const last = event.communityHoursSamples?.at(-1);
+		const waitingHours = event.milestones.filter((milestone) => !milestone.isAwarded && milestone.arpReward > 0).map((milestone) => milestone.communityHoursRequired ?? 0).join(",");
+		return [
+			event.communityHours ?? "",
+			event.pendingArp,
+			event.milestones.length,
+			waitingHours,
+			event.communityHoursSamples?.length ?? 0,
+			last?.hours ?? "",
+			last?.at ?? ""
+		].join("|");
+	}
+	function applyFeedIfLive(state, feed) {
+		const event = state.communityEvent;
+		if (!event?.isLive) return;
+		const next = applyAsceFeedToEvent(event, feed);
+		if (!next) return;
+		state.communityEvent = state.arpLog ? reconcileCommunityEventWithArpLog(next, state.arpLog) : next;
+	}
+	async function applyAsceCommunityHours(state) {
+		if (!state.communityEvent?.isLive) return;
+		const cache = await loadAsceCache();
+		if (cache.feed && !cache.error) applyFeedIfLive(state, cache.feed);
+		if (!isCacheFresh(cache)) {
+			loadAsceCommunityFeed();
+			return;
+		}
+		if (cache.error || !requiresAsceGateRefresh(cache.feed)) return;
+		const feed = await loadAsceCommunityFeed({ force: true });
+		if (feed) applyFeedIfLive(state, feed);
+	}
+	async function didRefreshAsceCommunityHours(state, options = {}) {
+		const event = state.communityEvent;
+		if (!event?.isLive) return false;
+		const before = asceEventSignature(event);
+		const feed = await loadAsceCommunityFeed({ force: options.force === true });
+		if (!feed) return false;
+		applyFeedIfLive(state, feed);
+		const next = state.communityEvent;
+		if (!next) return false;
+		return asceEventSignature(next) !== before;
+	}
+	function pageWindow() {
+		try {
+			return _unsafeWindow;
+		} catch {}
+		return globalThis;
+	}
+	function asFiniteNumber(value) {
+		if (typeof value === "number" && Number.isFinite(value)) return value;
+		if (typeof value === "string" && value.trim() !== "") {
+			const parsed = Number(value.replaceAll(",", ""));
+			if (Number.isFinite(parsed)) return parsed;
+		}
+	}
+	function readPageNumber(name) {
+		try {
+			return asFiniteNumber(pageWindow()[name]);
+		} catch {
+			return;
+		}
+	}
+	function parseInlineNumber(document_, names) {
+		const pattern = new RegExp(String.raw`(?:var\s+|window\.)?(?:${names.join("|")})\s*=\s*(\d+)`);
+		for (const script of document_.querySelectorAll("script")) {
+			const match = pattern.exec(script.textContent ?? "");
+			if (match?.[1]) return Number(match[1]);
+		}
+	}
+	function readPageArpTier(document_ = document) {
+		if (document_ === document) {
+			const tier = readPageNumber("arp_tier");
+			if (tier !== void 0 && tier >= 0) return tier;
+		}
+		const fromScript = parseInlineNumber(document_, ["arp_tier"]);
+		if (fromScript !== void 0) return fromScript;
+		const tierImg = document_.querySelector("img[src*=\"/images/content/tier-tags/\"]");
+		const tierMatch = /tier-tags\/(\d+)\.png/.exec(tierImg?.src ?? "");
+		if (!tierMatch?.[1]) return;
+		const tier = Number(tierMatch[1]);
+		return Number.isFinite(tier) ? tier : void 0;
+	}
+	function readPageFragmentBalance(document_ = document) {
+		if (document_ === document) {
+			const fragments = readPageNumber("fragment_balance");
+			if (fragments !== void 0 && fragments >= 0) return fragments;
+		}
+		const fromScript = parseInlineNumber(document_, ["fragment_balance"]);
+		return fromScript !== void 0 && fromScript >= 0 ? fromScript : void 0;
+	}
+	function readPageRedeemableArp(document_ = document) {
+		const names = [
+			"arp_balance",
+			"user_arp",
+			"arp_points",
+			"redeemable_arp"
+		];
+		if (document_ === document) for (const name of names) {
+			const value = readPageNumber(name);
+			if (value !== void 0 && value >= 0) return value;
+		}
+		const fromScript = parseInlineNumber(document_, names);
+		return fromScript !== void 0 && fromScript >= 0 ? fromScript : void 0;
+	}
+	function giveawayKeyFromUnknown(value) {
+		if (typeof value !== "object" || !value) return;
+		const row = value;
+		const id = row.giveaway_id ?? row.giveawayId ?? row.id;
+		if (id === void 0 || id === null) return;
+		const status = typeof row.status === "string" ? row.status : "";
+		const entry = {
+			giveawayId: String(id),
+			status
+		};
+		const remaining = asFiniteNumber(row.remaining);
+		if (remaining !== void 0) entry.remaining = remaining;
+		return entry;
+	}
+	function readPageGiveawayKeys() {
+		let raw;
+		try {
+			raw = pageWindow().giveawayKeys;
+		} catch {
+			return [];
+		}
+		if (!Array.isArray(raw)) return [];
+		const keys = [];
+		for (const item of raw) {
+			const entry = giveawayKeyFromUnknown(item);
+			if (entry) keys.push(entry);
+		}
+		return keys;
+	}
+	function giveawayKeyStatus(giveawayId) {
+		return readPageGiveawayKeys().find((entry) => entry.giveawayId === giveawayId);
+	}
+	var SETTINGS_KEY = "artifactOptimizerSettings";
+	var COOLDOWN_MS = 864e5;
+	var NOTIFICATION_TYPE_KEYS = [
+		"swap",
+		"community",
+		"vault",
+		"giveaways"
+	];
+	var NOTIFICATION_TYPE_COPY = {
+		swap: {
+			title: "Recommended swap",
+			hint: "When a better loadout is waiting on a 24h lock — not every unlock."
+		},
+		community: {
+			title: "Community Event",
+			hint: "When community hours unlock pending ARP."
+		},
+		vault: {
+			title: "Game Vault",
+			hint: "When the vault opens or new games appear."
+		},
+		giveaways: {
+			title: "New giveaways",
+			hint: "Official Alienware key giveaways — not community giveaways."
+		}
+	};
+	var DEFAULT_NOTIFICATION_TYPES = {
+		swap: true,
+		community: true,
+		vault: true,
+		giveaways: true
+	};
+	var DEFAULT_ACTIVITIES = {
+		timeOnSite: {
+			enabled: true,
+			frequency: 1
+		},
+		steamQuests: {
+			enabled: true,
+			frequency: 1
+		},
+		watchTwitch: {
+			enabled: true,
+			frequency: 1
+		},
+		dailyCalendar: {
+			enabled: true,
+			frequency: 1
+		},
+		discordPoll: {
+			enabled: true,
+			frequency: 1
+		},
+		dailyQuests: {
+			enabled: true,
+			frequency: 1
+		},
+		steamCommunityEvent: {
+			enabled: true,
+			frequency: 1
+		}
+	};
+	var defaultArtifactSettings = {
+		activities: { ...DEFAULT_ACTIVITIES },
+		pendingVaultPurchaseArp: 0,
+		manualArtifacts: [],
+		preferScraped: true,
+		slotCooldowns: [],
+		preferredTwitchStreamers: [],
+		browserNotifications: false,
+		notificationTypes: { ...DEFAULT_NOTIFICATION_TYPES }
+	};
+	function isPartialSettings(value) {
+		return typeof value === "object" && !!value;
+	}
+	function mergeActivities(base, incoming) {
+		if (!incoming) return base;
+		const legacy = incoming;
+		const next = { ...base };
+		if (legacy.communityEvent && !legacy.dailyQuests) next.dailyQuests = {
+			enabled: legacy.communityEvent.enabled,
+			frequency: typeof legacy.communityEvent.frequency === "number" ? legacy.communityEvent.frequency : 1
+		};
+		for (const key of Object.keys(DEFAULT_ACTIVITIES)) {
+			const value = incoming[key];
+			if (!value) continue;
+			next[key] = {
+				enabled: value.enabled,
+				frequency: typeof value.frequency === "number" ? value.frequency : 1
+			};
+		}
+		return next;
+	}
+	function applyParsedSettings(settings, parsed) {
+		settings.activities = mergeActivities(settings.activities, parsed.activities);
+		if (typeof parsed.pendingVaultPurchaseArp === "number") settings.pendingVaultPurchaseArp = parsed.pendingVaultPurchaseArp;
+		if (typeof parsed.manualFragments === "number") settings.manualFragments = parsed.manualFragments;
+		if (Array.isArray(parsed.manualArtifacts)) settings.manualArtifacts = parsed.manualArtifacts;
+		if (typeof parsed.preferScraped === "boolean") settings.preferScraped = parsed.preferScraped;
+		if (Array.isArray(parsed.slotCooldowns)) settings.slotCooldowns = parsed.slotCooldowns;
+		if (typeof parsed.vaultDiscountDismissedCycle === "string") {
+			if (parsed.vaultDiscountDismissedCycle) settings.vaultDiscountDismissedCycle = parsed.vaultDiscountDismissedCycle;
+			else delete settings.vaultDiscountDismissedCycle;
+		}
+		if (Array.isArray(parsed.preferredTwitchStreamers)) settings.preferredTwitchStreamers = parsePreferredTwitchStreamers(parsed.preferredTwitchStreamers.filter((item) => typeof item === "string").join("\n"));
+		if (typeof parsed.browserNotifications === "boolean") settings.browserNotifications = parsed.browserNotifications;
+		settings.notificationTypes = mergeNotificationTypes(settings.notificationTypes, parsed.notificationTypes);
+	}
+	function mergeNotificationTypes(base, incoming) {
+		if (!incoming) return base;
+		const next = { ...base };
+		for (const key of NOTIFICATION_TYPE_KEYS) if (typeof incoming[key] === "boolean") next[key] = incoming[key];
+		return next;
+	}
+	function twitchLoginFromInput(value) {
+		let text = value.trim();
+		if (!text) return "";
+		text = text.replace(/^https?:\/\//i, "");
+		text = text.replace(/^(www\.)?twitch\.tv\//i, "");
+		text = text.replace(/^@/, "");
+		return (text.split(/[/?#]/, 1)[0] ?? "").trim().toLowerCase();
+	}
+	function parsePreferredTwitchStreamers(raw) {
+		const logins = [];
+		const seen = new Set();
+		for (const token of raw.split(/[\n,]+/)) {
+			const login = twitchLoginFromInput(token);
+			if (!login || seen.has(login)) continue;
+			seen.add(login);
+			logins.push(login);
+		}
+		return logins;
+	}
+	async function getArtifactSettings() {
+		const raw = await _GM.getValue(SETTINGS_KEY);
+		const settings = {
+			...defaultArtifactSettings,
+			activities: { ...DEFAULT_ACTIVITIES },
+			manualArtifacts: [],
+			slotCooldowns: [],
+			preferredTwitchStreamers: [],
+			notificationTypes: { ...DEFAULT_NOTIFICATION_TYPES }
+		};
+		if (!raw) return settings;
+		try {
+			const parsedUnknown = typeof raw === "string" ? JSON.parse(raw) : raw;
+			if (!isPartialSettings(parsedUnknown)) return settings;
+			applyParsedSettings(settings, parsedUnknown);
+		} catch (error) {
+			console.error("[Artifact Optimizer] Error parsing settings:", error);
+		}
+		return settings;
+	}
+	async function saveArtifactSettings(patch) {
+		const previous = await getArtifactSettings();
+		const next = {
+			...previous,
+			...patch,
+			activities: patch.activities ? {
+				...previous.activities,
+				...patch.activities
+			} : previous.activities,
+			notificationTypes: patch.notificationTypes ? {
+				...previous.notificationTypes,
+				...patch.notificationTypes
+			} : previous.notificationTypes
+		};
+		await _GM.setValue(SETTINGS_KEY, JSON.stringify(next));
+		return next;
+	}
+	function findCooldownEntry(settings, position) {
+		return settings.slotCooldowns.find((entry) => entry.position === position);
+	}
+	function isShowroomSlotLocked(position, options = {}) {
+		if (options.equippedSlotLocked === true) return true;
+		if (options.equippedSlotLocked === false) return false;
+		return options.slotLocks?.[position] === true;
+	}
+	function showroomCooldownRemainingMs(settings, position, options = {}) {
+		if (!isShowroomSlotLocked(position, options)) return 0;
+		return cooldownRemainingMs(settings, position, options.now);
+	}
+	function cooldownRemainingMs(settings, position, now = Date.now()) {
+		const entry = findCooldownEntry(settings, position);
+		if (!entry) return 0;
+		const changedAt = Date.parse(entry.changedAt);
+		if (Number.isNaN(changedAt)) return 0;
+		return Math.max(0, COOLDOWN_MS - (now - changedAt));
+	}
+	async function recordSlotChange(position, artifactInstanceId) {
+		const rest = (await getArtifactSettings()).slotCooldowns.filter((entry) => entry.position !== position);
+		const entry = {
+			position,
+			changedAt: new Date().toISOString()
+		};
+		if (artifactInstanceId !== void 0) entry.artifactInstanceId = artifactInstanceId;
+		rest.push(entry);
+		await saveArtifactSettings({ slotCooldowns: rest });
+	}
+	var SLOT_POSITIONS = [
+		1,
+		2,
+		3
+	];
+	function isCompleteSlotLockMap(slotLocks) {
+		return SLOT_POSITIONS.every((position) => typeof slotLocks[position] === "boolean");
+	}
+	async function syncSlotLocksFromScrape(slotLocks, now = Date.now()) {
+		const previous = (await getArtifactSettings()).slotCooldowns;
+		const next = [];
+		for (const position of SLOT_POSITIONS) {
+			if (slotLocks[position] !== true) continue;
+			const existing = previous.find((entry) => entry.position === position);
+			if (existing) {
+				next.push(existing);
+				continue;
+			}
+			next.push({
+				position,
+				changedAt: new Date(now).toISOString(),
+				estimated: true
+			});
+		}
+		if (!isCompleteSlotLockMap(slotLocks)) {
+			for (const entry of previous) if (slotLocks[entry.position] !== false && next.every((row) => row.position === entry.position)) next.push(entry);
+		}
+		if (JSON.stringify(previous) !== JSON.stringify(next)) await saveArtifactSettings({ slotCooldowns: next });
+	}
+	function isNotificationTypeEnabled(settings, key) {
+		return settings.notificationTypes[key] ?? true;
+	}
+	var SNAPSHOT_KEY = "artifactSnapshot";
+	function isArtifactSnapshot(value) {
+		if (typeof value !== "object" || !value) return false;
+		const v = value;
+		return Array.isArray(v.artifacts) && typeof v.fragments === "number";
+	}
+	async function loadSnapshot() {
+		const raw = await _GM.getValue(SNAPSHOT_KEY);
+		if (!raw) return;
+		try {
+			const parsed = typeof raw === "string" ? JSON.parse(raw) : raw;
+			return isArtifactSnapshot(parsed) ? parsed : void 0;
+		} catch {
+			return;
+		}
+	}
+	async function saveSnapshot(snapshot) {
+		await _GM.setValue(SNAPSHOT_KEY, JSON.stringify(snapshot));
+	}
+	async function applySnapshotUpgrade(instanceId) {
+		const snapshot = await loadSnapshot();
+		if (!snapshot) return;
+		const current = snapshot.artifacts.find((artifact) => artifact.instanceId === instanceId);
+		if (!current || current.tier >= ArtifactTier.Interstellar) return snapshot;
+		const toTier = current.tier + 1;
+		const family = getArtifactById(current.familyId);
+		const cost = current.upgradeCost ?? fragmentCostToUpgradeFrom(current.tier) ?? 0;
+		const upgraded = {
+			...current,
+			tier: toTier,
+			displayName: family ? displayNameFor(family, toTier) : current.displayName,
+			maxLevel: toTier === ArtifactTier.Interstellar
+		};
+		const nextCost = fragmentCostToUpgradeFrom(toTier);
+		if (nextCost === void 0) delete upgraded.upgradeCost;
+		else upgraded.upgradeCost = nextCost;
+		const next = {
+			...snapshot,
+			scrapedAt: new Date().toISOString(),
+			fragments: Math.max(0, snapshot.fragments - cost),
+			artifacts: snapshot.artifacts.map((artifact) => artifact.instanceId === instanceId ? upgraded : artifact)
+		};
+		await saveSnapshot(next);
+		return next;
+	}
+	function readFragmentBalance(document_) {
+		const fromPage = readPageFragmentBalance(document_);
+		if (fromPage !== void 0) return fromPage;
+		const text = document_.body?.textContent ?? "";
+		const match = /Fragments:\s*([\d,]+)/i.exec(text);
+		if (match?.[1]) return Number(match[1].replaceAll(",", ""));
+		return 0;
+	}
+	function readUsernameFrom(document_, pathHint) {
+		const pathMatch = /\/member\/([^/]+)\/artifacts/.exec(pathHint ?? location.pathname);
+		if (pathMatch?.[1]) return pathMatch[1];
+		const link = document_.querySelector("a[href*=\"/member/\"][href$=\"/artifacts\"]");
+		return (link ? /\/member\/([^/]+)\/artifacts/.exec(link.getAttribute("href") ?? "") : void 0)?.[1];
+	}
+	function readUsername() {
+		return readUsernameFrom(document);
+	}
+	var USER_ARTIFACTS_ROOM_PATH = "/user-artifacts-room";
+	function resolveShowroomUrl(username) {
+		const name = username ?? readUsername();
+		if (name) return `/member/${encodeURIComponent(name)}/artifacts`;
+		const link = document.querySelector("a[href*=\"/member/\"][href$=\"/artifacts\"]");
+		if (link?.pathname) return link.pathname;
+		return USER_ARTIFACTS_ROOM_PATH;
+	}
+	function parseEquippedPosition(card) {
+		const unequip = card.parentElement?.querySelector("button[onclick*=\"unequipArtifact\"]");
+		if (!unequip) return;
+		const match = /unequipArtifact\s*\(\s*\d+\s*,\s*([123])\s*\)/.exec(unequip.getAttribute("onclick") ?? "");
+		if (!match?.[1]) return;
+		return Number(match[1]);
+	}
+	function normalizeName(value) {
+		return value.replaceAll(/\s+/g, " ").trim().toLowerCase();
+	}
+	function isShowcaseSlotLocked(slot) {
+		if (slot.querySelector(":scope i.fa-lock-open, :scope i.fa-unlock")) return false;
+		return Boolean(slot.querySelector(":scope i.fa-lock"));
+	}
+	function scrapeShowcaseSlots(document_) {
+		const root = document_.querySelector(".slots");
+		const slots = root ? [...root.querySelectorAll(":scope > .slot")] : [...document_.querySelectorAll(".slot")];
+		const result = [];
+		let position = 1;
+		for (const slot of slots) {
+			if (position > 3) break;
+			const displayName = ((slot.querySelector(":scope .slot-front img") ?? slot.querySelector(":scope img"))?.alt ?? "").trim();
+			if (!displayName || /^artifact$/i.test(displayName)) {
+				position = position + 1;
+				continue;
+			}
+			result.push({
+				position,
+				displayName,
+				isLocked: isShowcaseSlotLocked(slot)
+			});
+			position = position + 1;
+		}
+		return result;
+	}
+	function applyShowcaseEquips(artifacts, showcase) {
+		const slotLocks = {
+			1: false,
+			2: false,
+			3: false
+		};
+		for (const slot of showcase) {
+			slotLocks[slot.position] = slot.isLocked;
+			const match = artifacts.find((artifact) => normalizeName(artifact.displayName) === normalizeName(slot.displayName));
+			if (!match) continue;
+			match.equippedPosition = slot.position;
+			match.slotLocked = slot.isLocked;
+		}
+		return slotLocks;
+	}
+	function parseFooterTier(card) {
+		const tip = card.querySelector("img[data-original-title]")?.dataset.originalTitle ?? "";
+		const tierLabel = /(Weapon|Clothing|Power|Language|Precious Gems|Tech|Knowledge|Social|Architecture)\s*-\s*(Rust|Bronze|Silver|Gold|Platinum|Interstellar)/i.exec(tip)?.[2]?.toLowerCase();
+		if (!tierLabel) return;
+		return {
+			rust: ArtifactTier.Rust,
+			bronze: ArtifactTier.Bronze,
+			silver: ArtifactTier.Silver,
+			gold: ArtifactTier.Gold,
+			platinum: ArtifactTier.Platinum,
+			interstellar: ArtifactTier.Interstellar
+		}[tierLabel];
+	}
+	function scrapeShowroomFromDocument(document_, pathHint) {
+		const cards = document_.querySelectorAll("a.artifact-list-item.change-artifact-modal");
+		const artifacts = [];
+		for (const card of cards) {
+			const instanceId = Number(card.dataset.id);
+			if (Number.isNaN(instanceId)) continue;
+			const displayName = (card.dataset.title ?? "").trim();
+			if (!displayName) continue;
+			const resolved = resolveArtifactByDisplayName(displayName);
+			const footerTier = parseFooterTier(card);
+			const tier = resolved?.tier ?? footerTier;
+			if (tier === void 0 || !resolved) {
+				console.warn("[Artifact Optimizer] Unrecognized artifact:", displayName);
+				continue;
+			}
+			const upgradeCostRaw = card.dataset.upgradeCost;
+			const parsedUpgradeCost = upgradeCostRaw === void 0 || upgradeCostRaw === "" ? void 0 : Number(upgradeCostRaw);
+			const upgradeCost = Number.isNaN(parsedUpgradeCost) ? void 0 : parsedUpgradeCost;
+			const isMaxLevel = card.dataset.maxLevel === "true" || card.dataset.maxLevel === "1" || upgradeCost === 0;
+			const owned = {
+				instanceId,
+				familyId: resolved.definition.id,
+				displayName,
+				tier,
+				category: resolved.definition.category,
+				maxLevel: isMaxLevel,
+				perkDescription: card.dataset.descriptionPerk ?? ""
+			};
+			if (upgradeCost !== void 0) owned.upgradeCost = upgradeCost;
+			const equippedPosition = parseEquippedPosition(card);
+			if (equippedPosition !== void 0) owned.equippedPosition = equippedPosition;
+			artifacts.push(owned);
+		}
+		const slotLocks = applyShowcaseEquips(artifacts, scrapeShowcaseSlots(document_));
+		return {
+			scrapedAt: new Date().toISOString(),
+			username: readUsernameFrom(document_, pathHint),
+			fragments: readFragmentBalance(document_),
+			artifacts,
+			slotLocks
+		};
+	}
+	function scrapeShowroom() {
+		return scrapeShowroomFromDocument(document, location.pathname);
+	}
+	function isShowroomDocumentReady(document_) {
+		return Boolean(document_.querySelector("a.artifact-list-item.change-artifact-modal, #weapon-section"));
+	}
+	async function waitForShowroomDocument(timeoutMs = 12e3) {
+		if (isShowroomDocumentReady(document)) return;
+		await new Promise((resolve) => {
+			let isSettled = false;
+			const observer = new MutationObserver(() => {
+				if (isShowroomDocumentReady(document)) finish();
+			});
+			const timer = setTimeout(finish, timeoutMs);
+			function finish() {
+				if (isSettled) return;
+				isSettled = true;
+				observer.disconnect();
+				clearTimeout(timer);
+				resolve();
+			}
+			observer.observe(document.documentElement, {
+				childList: true,
+				subtree: true
+			});
+		});
+	}
+	async function scrapeAndPersist() {
+		if (!isShowroomDocumentReady(document)) await waitForShowroomDocument();
+		if (!isShowroomDocumentReady(document)) {
+			const existing = await loadSnapshot();
+			if (existing) return existing;
+		}
+		const snapshot = scrapeShowroom();
+		if (snapshot.artifacts.length === 0) {
+			const existing = await loadSnapshot();
+			if (existing && existing.artifacts.length > 0) return existing;
+		}
+		await saveSnapshot(snapshot);
+		await syncSlotLocksFromScrape(snapshot.slotLocks ?? {});
+		return snapshot;
+	}
+	function isArtifactsShowroomPage() {
+		return /\/member\/[^/]+\/artifacts\/?$/.test(location.pathname) || /\/user-artifacts-room\/?$/.test(location.pathname);
+	}
+	var ARP_LOG_ROW_SELECTOR = ".card-table-row";
+	var ARP_LOG_AFTER_ROWS_SELECTOR = "#arp-logs-per-page, #arp-log-chart";
+	var ARP_LOG_DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
+	var ARP_LOG_AMOUNT_RE = /^[+]?\d[\d,]*$/;
+	var ARP_LOG_TOGGLE_RE = /^[▼▲^▾▴]$/;
+	function parseRedeemableArpText(text) {
+		const match = /Redeemable ARP:\s*([\d,]+)/i.exec(text);
+		if (!match?.[1]) return;
+		const value = Number(match[1].replaceAll(",", ""));
+		return Number.isFinite(value) ? value : void 0;
+	}
+	function scrapeRedeemableArpFromDocument(document_) {
+		const fromPage = readPageRedeemableArp(document_);
+		if (fromPage !== void 0) return fromPage;
+		return parseRedeemableArpText(pageText(document_));
+	}
+	function applyRedeemableArpFromDocument(next, document_) {
+		const arp = scrapeRedeemableArpFromDocument(document_);
+		if (arp === void 0) return;
+		next.arpLog = {
+			scrapedAt: next.arpLog?.scrapedAt ?? new Date().toISOString(),
+			recent: next.arpLog?.recent ?? [],
+			...next.arpLog,
+			redeemableArp: arp
+		};
+	}
+	function parseArpAmount(text) {
+		const value = Number(text.replaceAll(",", "").replace(/^\+/, ""));
+		return Number.isFinite(value) ? value : void 0;
+	}
+	function scrapeArpLogRowsFromTable(document_) {
+		const entries = [];
+		for (const row of document_.querySelectorAll(ARP_LOG_ROW_SELECTOR)) {
+			const cols = [...row.children].map((element) => (element.textContent ?? "").replaceAll(/\s+/g, " ").trim());
+			const date = cols.find((col) => ARP_LOG_DATE_RE.test(col));
+			const arpText = cols.findLast((col) => col !== date && ARP_LOG_AMOUNT_RE.test(col));
+			const action = cols.find((col) => col.length > 0 && col !== date && col !== arpText && !ARP_LOG_TOGGLE_RE.test(col));
+			if (!action || arpText === void 0) continue;
+			const arp = parseArpAmount(arpText);
+			if (arp === void 0) continue;
+			const entry = {
+				action,
+				arp
+			};
+			if (date) entry.date = date;
+			entries.push(entry);
+		}
+		return entries;
+	}
+	function scrapeArpLogRowsFromText(body) {
+		const actionNames = [
+			"Time On Site",
+			"Game Prize",
+			"Daily Login Calendar",
+			"Daily Login Streak",
+			"Discord Poll",
+			"Steam Community Event Reward",
+			"Steam Quest",
+			"Steam Quests",
+			"Twitch Passive",
+			"Watch Twitch",
+			"Community Event",
+			"Forum Post",
+			"Giveaway",
+			"Battle Pass Reward",
+			"Battle Pass",
+			"Quest"
+		].join("|");
+		const rowPattern = new RegExp(String.raw`(${actionNames})\s+(\d+)\s+(\d{4}-\d{2}-\d{2})`, "gi");
+		const entries = [];
+		for (const match of body.matchAll(rowPattern)) {
+			const entry = {
+				action: match[1] ?? "Unknown",
+				arp: Number(match[2])
+			};
+			if (match[3]) entry.date = match[3];
+			entries.push(entry);
+		}
+		return entries;
+	}
+	function isArpLogDocumentReady(document_) {
+		if (!document_.body) return false;
+		return Boolean(document_.querySelector(`${ARP_LOG_ROW_SELECTOR}, ${ARP_LOG_AFTER_ROWS_SELECTOR}`));
+	}
+	function arpLogSignature(document_) {
+		if (!isArpLogDocumentReady(document_)) return "";
+		return scrapeArpLogFromDocument(document_).recent.map((entry) => `${entry.date ?? ""}|${entry.action}|${entry.arp}`).join(";");
+	}
+	async function waitForArpLogDocument(timeoutMs = 12e3) {
+		if (isArpLogDocumentReady(document)) return;
+		await new Promise((resolve) => {
+			let isSettled = false;
+			const observer = new MutationObserver(() => {
+				if (isArpLogDocumentReady(document)) finish();
+			});
+			const timer = setTimeout(finish, timeoutMs);
+			function finish() {
+				if (isSettled) return;
+				isSettled = true;
+				observer.disconnect();
+				clearTimeout(timer);
+				resolve();
+			}
+			observer.observe(document.documentElement, {
+				childList: true,
+				subtree: true
+			});
+		});
+	}
+	function scrapeArpLogFromDocument(document_) {
+		const body = pageText(document_);
+		const state = {
+			scrapedAt: new Date().toISOString(),
+			recent: []
+		};
+		const redeemableArp = parseRedeemableArpText(body);
+		if (redeemableArp !== void 0) state.redeemableArp = redeemableArp;
+		const lifetime = /Lifetime ARP:\s*([\d,]+)/i.exec(body);
+		if (lifetime?.[1]) state.lifetimeArp = Number(lifetime[1].replaceAll(",", ""));
+		const todayTotal = /Total ARP earned today:\s*([\d,]+)/i.exec(body);
+		if (todayTotal?.[1]) state.todayDelta = Number(todayTotal[1].replaceAll(",", ""));
+		else {
+			const plusMatch = /Redeemable ARP:[\s\S]{0,80}?\+\s*([\d,]+)/i.exec(body);
+			if (plusMatch?.[1]) state.todayDelta = Number(plusMatch[1].replaceAll(",", ""));
+		}
+		const fromTable = scrapeArpLogRowsFromTable(document_);
+		state.recent = fromTable.length > 0 ? fromTable : scrapeArpLogRowsFromText(body);
+		return state;
+	}
+	var ARP_LOG_UNSEEN_SCRAPED_AT = new Date(0).toISOString();
+	function mergeArpLogScrapedAt(scraped, previous) {
+		if (scraped.recent.length > 0) return scraped.scrapedAt;
+		if (previous.recent.length > 0) return previous.scrapedAt;
+		return ARP_LOG_UNSEEN_SCRAPED_AT;
+	}
+	function mergeArpLogScrape(scraped, previous) {
+		if (!previous) {
+			if (scraped.recent.length === 0) return {
+				...scraped,
+				scrapedAt: ARP_LOG_UNSEEN_SCRAPED_AT
+			};
+			return scraped;
+		}
+		const seen = new Set();
+		const recent = [];
+		for (const entry of [...scraped.recent, ...previous.recent]) {
+			const key = `${entry.date ?? ""}|${entry.action}|${entry.arp}`;
+			if (seen.has(key)) continue;
+			seen.add(key);
+			recent.push(entry);
+		}
+		recent.sort((left, right) => (right.date ?? "").localeCompare(left.date ?? ""));
+		const redeemableArp = scraped.redeemableArp ?? previous.redeemableArp;
+		const lifetimeArp = scraped.lifetimeArp ?? previous.lifetimeArp;
+		const todayDelta = scraped.todayDelta ?? previous.todayDelta;
+		return {
+			scrapedAt: mergeArpLogScrapedAt(scraped, previous),
+			...redeemableArp !== void 0 && { redeemableArp },
+			...lifetimeArp !== void 0 && { lifetimeArp },
+			...todayDelta !== void 0 && { todayDelta },
+			recent
+		};
+	}
+	function serializePostBody(body, encoding) {
+		if (encoding === "json") return JSON.stringify(body);
+		const parameters = new URLSearchParams();
+		for (const [key, value] of Object.entries(body)) {
+			if (typeof value !== "string" && typeof value !== "number" && typeof value !== "boolean") continue;
+			parameters.set(key, String(value));
+		}
+		return parameters.toString();
+	}
+	function resultFromResponse(status, parsed) {
+		if (status < 200 || status >= 300) {
+			const result = {
+				ok: false,
+				status,
+				error: parsed?.message ?? `Request failed (${status})`
+			};
+			if (parsed?.message) result.message = parsed.message;
+			return result;
+		}
+		if (parsed?.success === false) {
+			const result = {
+				ok: false,
+				status,
+				error: parsed.message ?? "Request rejected (slot may be on 24h cooldown or already set)."
+			};
+			if (parsed.message) result.message = parsed.message;
+			return result;
+		}
+		const result = {
+			ok: true,
+			status
+		};
+		if (parsed?.message) result.message = parsed.message;
+		return result;
+	}
+	async function postRequest(path, body, encoding) {
+		try {
+			const response = await fetch(path, {
+				method: "POST",
+				headers: {
+					"Content-Type": "application/x-www-form-urlencoded; charset=UTF-8",
+					Accept: "application/json, text/javascript, */*; q=0.01",
+					"X-Requested-With": "XMLHttpRequest"
+				},
+				body: serializePostBody(body, encoding)
+			});
+			const text = await response.text();
+			let parsed;
+			try {
+				parsed = JSON.parse(text);
+			} catch {
+				parsed = void 0;
+			}
+			return resultFromResponse(response.status, parsed);
+		} catch (error) {
+			return {
+				ok: false,
+				status: 0,
+				error: error instanceof Error ? error.message : "Network error"
+			};
+		}
+	}
+	async function postJson(path, body) {
+		return postRequest(path, body, "json");
+	}
+	async function postForm(path, body) {
+		return postRequest(path, body, "form");
+	}
+	async function equipArtifact(artifactId, position) {
+		const result = await postJson("/change-user-artifacts", {
+			artifactId,
+			position
+		});
+		if (result.ok) await recordSlotChange(position, artifactId);
+		return result;
+	}
+	async function upgradeArtifact(artifactId) {
+		return postJson("/upgrade-user-artifact", { artifactId });
+	}
+	async function claimBattlePassReward(path, body = {}) {
+		return postForm(path, body);
+	}
+	function pickStuckLockNudgeTarget(artifacts) {
+		const maxed = artifacts.filter((artifact) => artifact.maxLevel || artifact.upgradeCost === 0);
+		if (maxed.length === 0) return;
+		const target = maxed.find((artifact) => /warrior script/i.test(artifact.displayName)) ?? maxed[0];
+		if (!target) return;
+		return {
+			instanceId: target.instanceId,
+			displayName: target.displayName
+		};
+	}
+	async function nudgeStuckSlotLocks(artifacts) {
+		const target = pickStuckLockNudgeTarget(artifacts);
+		if (!target) {
+			console.info("[Artifact Optimizer] Stuck-lock nudge skipped — no maxed 0-frag artifact");
+			return;
+		}
+		const result = await upgradeArtifact(target.instanceId);
+		console.info("[Artifact Optimizer] Stuck-lock nudge", {
+			name: target.displayName,
+			id: target.instanceId,
+			ok: result.ok,
+			message: result.message ?? result.error
+		});
+		return result;
+	}
+	async function applyLoadout(targets, currentlyEquipped) {
+		const results = [];
+		const applied = [];
+		for (const target of targets) {
+			if (currentlyEquipped.some((c) => c.artifactId === target.artifactId && c.position === target.position)) continue;
+			const equipResult = await equipArtifact(target.artifactId, target.position);
+			results.push(equipResult);
+			if (!equipResult.ok) return {
+				results,
+				allOk: false,
+				applied
+			};
+			applied.push(target);
+		}
+		return {
+			results,
+			allOk: results.every((result) => result.ok),
+			applied
+		};
+	}
+	function scrapeBattlePassFromDocument(document_) {
+		const body = pageText(document_);
+		const popups = document_.querySelectorAll(".bp-popup[data-milestone-id]");
+		const tokensMatch = /BATTLE TOKENS\s*([\d,]+)\s*\/\s*([\d,]+)/i.exec(body);
+		if ((body.match(/Ready to claim/gi) ?? []).length === 0 && popups.length === 0) return;
+		const readyClaims = listReadyClaimsFromDocument(document_);
+		const { readyToClaim, readyToClaimArp } = countBattlePassClaims(document_);
+		const state = {
+			readyToClaim,
+			readyToClaimArp,
+			url: "/control-center/battle-pass/1",
+			scrapedAt: new Date().toISOString()
+		};
+		if (readyClaims.length > 0) state.readyClaims = readyClaims;
+		if (tokensMatch?.[1] && tokensMatch[2]) {
+			state.tokens = Number(tokensMatch[1].replaceAll(",", ""));
+			state.tokensMax = Number(tokensMatch[2].replaceAll(",", ""));
+		}
+		applyBattlePassCountdown(state, body);
+		return state;
+	}
+	var BATTLE_PASS_ENDS_RE = /battle\s*pass\s*ends?\s*in\s*(\d{1,3}(?:\s*:\s*\d{1,2}){2,3})/i;
+	function applyBattlePassCountdown(state, body) {
+		const endsMatch = BATTLE_PASS_ENDS_RE.exec(body);
+		if (!endsMatch?.[1]) return;
+		const raw = endsMatch[1].replaceAll(/\s+/g, " ").trim();
+		state.endsInText = raw;
+		const remaining = parseBattlePassCountdownMs(raw);
+		if (remaining !== void 0) state.endsAt = new Date(Date.now() + remaining).toISOString();
+	}
+	function parseBattlePassCountdownMs(text) {
+		const parts = text.trim().split(":").map((part) => Number(part.trim())).filter((part) => Number.isFinite(part));
+		if (parts.length < 3 || parts.length > 4) return;
+		const seconds = parts.at(-1) ?? 0;
+		const minutes = parts.at(-2) ?? 0;
+		const hours = parts.at(-3) ?? 0;
+		return ((((parts.length === 4 ? parts[0] ?? 0 : 0) * 24 + hours) * 60 + minutes) * 60 + seconds) * 1e3;
+	}
+	function battlePassRemainingMs(battlePass, now = Date.now()) {
+		if (!battlePass) return;
+		if (battlePass.endsAt) {
+			const endsAt = Date.parse(battlePass.endsAt);
+			if (!Number.isNaN(endsAt)) return Math.max(0, endsAt - now);
+		}
+		if (!battlePass.endsInText || !battlePass.scrapedAt) return;
+		const parsed = parseBattlePassCountdownMs(battlePass.endsInText);
+		const scrapedAt = Date.parse(battlePass.scrapedAt);
+		if (parsed === void 0 || Number.isNaN(scrapedAt)) return;
+		return Math.max(0, parsed - (now - scrapedAt));
+	}
+	function mergeBattlePassScrape(scraped, previous) {
+		if (scraped.endsAt || !previous?.endsAt) return scraped;
+		const merged = {
+			...scraped,
+			endsAt: previous.endsAt
+		};
+		if (!merged.endsInText && previous.endsInText) merged.endsInText = previous.endsInText;
+		return merged;
+	}
+	function applyBattlePassEndFromDocument(next, document_) {
+		if (!next.battlePass) return;
+		const battlePass = { ...next.battlePass };
+		applyBattlePassCountdown(battlePass, pageText(document_));
+		next.battlePass = battlePass;
+	}
+	function listReadyClaimsFromDocument(document_) {
+		const claims = [];
+		const popups = document_.querySelectorAll(".bp-popup[data-milestone-id]");
+		for (const popup of popups) {
+			if (!(popup instanceof HTMLElement)) continue;
+			if (!(popup.dataset.milestoneId ?? "")) continue;
+			claims.push(...readyClaimsFromPopup(popup));
+		}
+		return uniqueReadyClaims(claims);
+	}
+	function readyClaimFromButton(button, popup) {
+		const form = button.closest("form");
+		const claimPath = form?.getAttribute("action")?.trim() || void 0;
+		const csrfToken = form?.querySelector("input[name=\"_csrf_token\"]")?.value;
+		const claim = {
+			milestoneId: (form instanceof HTMLElement ? form.dataset.milestoneId : void 0) ?? popup.dataset.milestoneId ?? "",
+			isArp: isArpClaimPopup(popup)
+		};
+		if (claimPath) claim.claimPath = claimPath;
+		if (csrfToken) claim.csrfToken = csrfToken;
+		if (!claimPath) claim.body = {
+			...datasetRecord(popup),
+			...datasetRecord(button)
+		};
+		return claim;
+	}
+	function readyClaimsFromPopup(popup) {
+		return [...popup.querySelectorAll(".bp-popup__claim-btn")].flatMap((button) => {
+			if (!(button instanceof HTMLElement)) return [];
+			return [readyClaimFromButton(button, popup)];
+		});
+	}
+	function countBattlePassClaims(document_) {
+		const readyClaims = listReadyClaimsFromDocument(document_);
+		if (readyClaims.length > 0) return {
+			readyToClaim: readyClaims.length,
+			readyToClaimArp: readyClaims.filter((claim) => claim.isArp).length
+		};
+		const legacy = (pageText(document_).match(/Ready to claim/gi) ?? []).length;
+		return {
+			readyToClaim: legacy,
+			readyToClaimArp: legacy
+		};
+	}
+	function isBattlePassArpRewardTitle(title) {
+		if (/ARP\s*Boost/i.test(title)) return true;
+		return /^\d[\d,]*\s*ARP$/i.test(title.trim());
+	}
+	function battlePassPopupTitle(popup) {
+		return popup.querySelector(".bp-popup__title")?.textContent?.trim() ?? "";
+	}
+	function isArpClaimPopup(popup) {
+		return isBattlePassArpRewardTitle(battlePassPopupTitle(popup));
+	}
+	function claimIdentity(claim) {
+		return claim.claimPath ?? claim.milestoneId;
+	}
+	function uniqueReadyClaims(claims) {
+		const seen = new Set();
+		const unique = [];
+		for (const claim of claims) {
+			const key = claimIdentity(claim);
+			if (!key || seen.has(key)) continue;
+			seen.add(key);
+			unique.push(claim);
+		}
+		return unique;
+	}
+	function claimButtonIdentity(button, popup) {
+		return button.closest("form")?.getAttribute("action")?.trim() || popup.dataset.milestoneId || "";
+	}
+	function pushUniqueClaimButton(items, seen, button, popup) {
+		if (!(button instanceof HTMLElement)) return;
+		const key = claimButtonIdentity(button, popup);
+		if (!key || seen.has(key)) return;
+		seen.add(key);
+		items.push({
+			button,
+			popup
+		});
+	}
+	function listBattlePassClaimButtons(document_ = document, options = {}) {
+		const shouldSkipArpBoosts = options.shouldSkipArpBoosts === true;
+		const popups = document_.querySelectorAll(".bp-popup[data-milestone-id]");
+		const items = [];
+		const seen = new Set();
+		for (const popup of popups) {
+			if (!(popup instanceof HTMLElement)) continue;
+			if (shouldSkipArpBoosts && isArpClaimPopup(popup)) continue;
+			for (const button of popup.querySelectorAll(".bp-popup__claim-btn")) pushUniqueClaimButton(items, seen, button, popup);
+		}
+		return items;
+	}
+	function delay$2(ms) {
+		return new Promise((resolve) => {
+			setTimeout(resolve, ms);
+		});
+	}
+	var CLAIM_QUEUE_GAP_MS = 1500;
+	async function waitWhile(isWaiting, timeoutMs, intervalMs = 100) {
+		const startedAt = Date.now();
+		while (isWaiting() && Date.now() - startedAt < timeoutMs) await delay$2(intervalMs);
+	}
+	var claimEndpointCache = {};
+	function jsonishId(value) {
+		return /^\d+$/.test(value) ? Number(value) : value;
+	}
+	function datasetRecord(element) {
+		const record = {};
+		for (const [key, value] of Object.entries(element.dataset)) {
+			if (value === void 0 || value === "") continue;
+			record[key] = jsonishId(value);
+		}
+		return record;
+	}
+	function isBattlePassClaimPath(path) {
+		const normalized = path.toLowerCase();
+		if (/giveaway|marketplace|ucf\/show|community-giveaway|vote\//.test(normalized)) return false;
+		const hasClaim = /claim/.test(normalized);
+		const hasBattlePass = /battle-?pass/.test(normalized);
+		const hasMilestone = /milestone/.test(normalized);
+		return hasClaim && (hasBattlePass || hasMilestone);
+	}
+	function endpointFromHref(raw) {
+		let path = raw.trim();
+		try {
+			const url = new URL(path, location.origin);
+			if (url.origin !== location.origin) return;
+			path = `${url.pathname}${url.search}`;
+		} catch {
+			return;
+		}
+		if (!isBattlePassClaimPath(path)) return;
+		const hasIdInPath = /\/\d+\/?$/.test(urlPathname(path));
+		return {
+			path: hasIdInPath ? path.replace(/\/\d+\/?$/, "") : path,
+			hasIdInPath,
+			idParameter: "milestoneId"
+		};
+	}
+	function urlPathname(path) {
+		const q = path.indexOf("?");
+		return q === -1 ? path : path.slice(0, q);
+	}
+	function firstClaimEndpoint(candidates) {
+		for (const candidate of candidates) {
+			if (!candidate) continue;
+			const endpoint = endpointFromHref(candidate);
+			if (endpoint) return endpoint;
+		}
+	}
+	function endpointFromClaimMarkup(document_) {
+		for (const item of listBattlePassClaimButtons(document_)) {
+			const endpoint = firstClaimEndpoint([
+				item.button.closest("form")?.getAttribute("action") ?? void 0,
+				item.button.getAttribute("href") ?? void 0,
+				item.button.getAttribute("formaction") ?? void 0,
+				item.button.dataset.url,
+				item.button.dataset.href,
+				item.button.dataset.action,
+				item.popup.dataset.url,
+				item.popup.dataset.href,
+				item.popup.dataset.claimUrl
+			]);
+			if (endpoint) return endpoint;
+		}
+	}
+	function idParameterFromSource(source) {
+		const match = /(?:milestoneId|milestone_id|rewardId)\s*:/i.exec(source);
+		return /rewardId/i.test(match?.[0] ?? "") ? "rewardId" : "milestoneId";
+	}
+	function endpointFromQuotedPath(path, source, hasIdInPathHint = false) {
+		if (!isBattlePassClaimPath(path)) return;
+		const hasIdInPath = hasIdInPathHint || /\/\d+\/?$/.test(urlPathname(path)) || /\$\{|\{id\}|\{milestone/i.test(path);
+		return {
+			path: hasIdInPath ? path.replace(/\/\d+\/?$/, "").replace(/\/$/, "") : path,
+			hasIdInPath,
+			idParameter: idParameterFromSource(source)
+		};
+	}
+	function endpointFromScripts(source) {
+		const concat = /['"](\/[^'"]*(?:claim[^'"]*(?:battle|milestone)|(?:battle-pass|milestone)[^'"]*claim)[^'"]*)['"]\s*\+/i.exec(source);
+		if (concat?.[1]) {
+			const fromConcat = endpointFromQuotedPath(concat[1], source, true);
+			if (fromConcat) return fromConcat;
+		}
+		const quotedPath = /['"](\/[^'"]*(?:claim[^'"]*(?:battle|milestone)|(?:battle-pass|milestone)[^'"]*claim)[^'"]*)['"]/gi;
+		let match;
+		while (match = quotedPath.exec(source)) {
+			const endpoint = endpointFromQuotedPath(match[1] ?? "", source);
+			if (endpoint) return endpoint;
+		}
+		const ajaxPath = /(?:\.post|\.ajax|fetch)\(\s*['"](\/[^'"]+)['"]/gi;
+		while (match = ajaxPath.exec(source)) {
+			const endpoint = endpointFromQuotedPath(match[1] ?? "", source);
+			if (endpoint) return endpoint;
+		}
+	}
+	function collectInlineScriptText(document_) {
+		return [...document_.querySelectorAll("script:not([src])")].map((script) => script.textContent ?? "").join("\n");
+	}
+	function pageScriptUrls(document_) {
+		const urls = [];
+		const add = (raw) => {
+			if (!raw) return;
+			try {
+				const url = new URL(raw, location.origin);
+				if (url.origin !== location.origin) return;
+				urls.push(url.href);
+			} catch {}
+		};
+		for (const script of document_.querySelectorAll("script[src]")) add(script.getAttribute("src"));
+		for (const link of document_.querySelectorAll("link[rel=\"preload\"][as=\"script\"], link[as=\"script\"]")) add(link.getAttribute("href"));
+		return [...new Set(urls)].filter((href) => !/jquery|bootstrap|gtag|gtm|recaptcha|cloudflare|analytics|hotjar|sentry/i.test(href)).slice(0, 24);
+	}
+	function endpointFromJquery(document_) {
+		const readEvents = document_.defaultView?.jQuery?._data;
+		if (typeof readEvents !== "function") return;
+		const roots = [...document_.querySelectorAll(".bp-popup__claim-btn"), document_];
+		if (document_.body) roots.push(document_.body);
+		for (const root of roots) {
+			const found = endpointFromScripts((readEvents(root, "events")?.click ?? []).map((entry) => String(entry.handler ?? "")).join("\n"));
+			if (found) return found;
+		}
+	}
+	async function endpointFromPageScripts(document_) {
+		for (const href of pageScriptUrls(document_)) try {
+			const text = await (await fetch(href)).text();
+			const handlerAt = text.search(/bp-popup__claim-btn|claim-btn/i);
+			const fromFile = handlerAt >= 0 ? endpointFromScripts(text.slice(Math.max(0, handlerAt - 2e3), handlerAt + 4e3)) ?? endpointFromScripts(text) : endpointFromScripts(text);
+			if (fromFile) return fromFile;
+		} catch {}
+	}
+	async function fetchBattlePassDocument() {
+		try {
+			const response = await fetch("/control-center/battle-pass/1", { headers: { Accept: "text/html" } });
+			if (!response.ok) return;
+			return new DOMParser().parseFromString(await response.text(), "text/html");
+		} catch {
+			return;
+		}
+	}
+	function cacheClaimEndpoint(endpoint) {
+		claimEndpointCache.value = endpoint;
+		console.info("[AWA Toolkit] Battle Pass claim POST", endpoint.path, endpoint.hasIdInPath ? "(id in path)" : "");
+		return endpoint;
+	}
+	async function searchDocumentForClaimEndpoint(document_) {
+		return endpointFromClaimMarkup(document_) ?? endpointFromScripts(collectInlineScriptText(document_)) ?? endpointFromJquery(document_) ?? await endpointFromPageScripts(document_);
+	}
+	async function discoverBattlePassClaimEndpoint(document_) {
+		if (claimEndpointCache.value) return claimEndpointCache.value;
+		if (document_) {
+			const found = await searchDocumentForClaimEndpoint(document_);
+			if (found) return cacheClaimEndpoint(found);
+		}
+		if (!location.pathname.includes("/battle-pass") && !Boolean(document_ && document_ !== document)) {
+			const fetched = await fetchBattlePassDocument();
+			if (fetched) {
+				const found = await searchDocumentForClaimEndpoint(fetched);
+				if (found) return cacheClaimEndpoint(found);
+			}
+		}
+	}
+	function resolveClaimPath(endpoint, milestoneId) {
+		if (!endpoint.hasIdInPath) return endpoint.path;
+		const trimmed = endpoint.path.replace(/\/$/, "");
+		if (trimmed.endsWith(`/${milestoneId}`)) return trimmed;
+		return `${trimmed}/${milestoneId}`;
+	}
+	function resolveClaimBody(endpoint, claim) {
+		if (claim.csrfToken) return { _csrf_token: claim.csrfToken };
+		const body = { ...claim.body };
+		if (endpoint && body[endpoint.idParameter] === void 0) body[endpoint.idParameter] = jsonishId(claim.milestoneId);
+		return body;
+	}
+	function claimKey(claim) {
+		return claimIdentity(claim);
+	}
+	function claimPostPath(claim, endpoint) {
+		if (claim.claimPath) return claim.claimPath;
+		if (endpoint && claim.milestoneId) return resolveClaimPath(endpoint, claim.milestoneId);
+	}
+	async function claimReadyViaApi(claims, endpoint) {
+		const seen = new Set();
+		const postedPaths = new Set();
+		let claimed = 0;
+		let hasPosted = false;
+		for (const claim of uniqueReadyClaims(claims)) {
+			const path = claimPostPath(claim, endpoint);
+			const key = claimKey(claim);
+			if (!path || seen.has(key)) continue;
+			seen.add(key);
+			if (hasPosted) await delay$2(CLAIM_QUEUE_GAP_MS);
+			hasPosted = true;
+			const result = await claimBattlePassReward(path, resolveClaimBody(endpoint, claim));
+			postedPaths.add(path);
+			if (!result.ok) continue;
+			claimed += 1;
+		}
+		return {
+			claimed,
+			postedPaths
+		};
+	}
+	function claimsFromLiveButtons(items) {
+		return uniqueReadyClaims(items.map((item) => readyClaimFromButton(item.button, item.popup)));
+	}
+	async function clickRemainingClaimButtons(document_, options = {}) {
+		const attempted = new WeakSet();
+		const skipPaths = options.skipPaths ?? new Set();
+		let claimed = 0;
+		let hasClicked = false;
+		while (claimed < 40) {
+			const next = listBattlePassClaimButtons(document_, options).find((item) => {
+				if (!item.button.isConnected || attempted.has(item.button)) return false;
+				const path = claimButtonIdentity(item.button, item.popup);
+				return !path || !skipPaths.has(path);
+			});
+			if (!next) break;
+			attempted.add(next.button);
+			const { button, popup } = next;
+			const path = claimButtonIdentity(button, popup);
+			if (path) skipPaths.add(path);
+			if (hasClicked) await delay$2(CLAIM_QUEUE_GAP_MS);
+			hasClicked = true;
+			if (button.offsetParent === null) {
+				popup.click();
+				await delay$2(250);
+			}
+			button.click();
+			await waitWhile(() => button.isConnected && popup.contains(button), 4e3);
+			if (!button.isConnected || !popup.contains(button)) claimed += 1;
+		}
+		return claimed;
+	}
+	async function waitForBattlePassClaimButtons(document_, options = {}, timeoutMs = 8e3) {
+		const startedAt = Date.now();
+		while (Date.now() - startedAt < timeoutMs) {
+			const count = listBattlePassClaimButtons(document_, options).length;
+			if (count > 0) return count;
+			await delay$2(250);
+		}
+		return listBattlePassClaimButtons(document_, options).length;
+	}
+	async function claimAllBattlePassRewards(options = {}) {
+		const shouldSkipArpBoosts = options.shouldSkipArpBoosts === true;
+		const isOnBattlePassPage = location.pathname.includes("/battle-pass");
+		if (isOnBattlePassPage) await waitForBattlePassClaimButtons(document, { shouldSkipArpBoosts });
+		const liveDocument = isOnBattlePassPage ? document : void 0;
+		let fetchedDocument;
+		let targets;
+		if (isOnBattlePassPage) targets = claimsFromLiveButtons(listBattlePassClaimButtons(document, { shouldSkipArpBoosts }));
+		else {
+			fetchedDocument = await fetchBattlePassDocument();
+			targets = fetchedDocument ? listReadyClaimsFromDocument(fetchedDocument).filter((claim) => !shouldSkipArpBoosts || !claim.isArp) : [];
+			if (targets.every((claim) => !claim.claimPath)) targets = (options.readyClaims ?? []).filter((claim) => Boolean(claim.claimPath) && (!shouldSkipArpBoosts || !claim.isArp));
+		}
+		const endpoint = await discoverBattlePassClaimEndpoint(liveDocument ?? fetchedDocument);
+		const posted = targets.length > 0 ? await claimReadyViaApi(targets, endpoint) : {
+			claimed: 0,
+			postedPaths: new Set()
+		};
+		let claimed = posted.claimed;
+		if (isOnBattlePassPage) {
+			await waitWhile(() => listBattlePassClaimButtons(document, { shouldSkipArpBoosts }).length > 0, 1500);
+			let remaining = listBattlePassClaimButtons(document, { shouldSkipArpBoosts }).length;
+			if (remaining > 0) {
+				claimed += await clickRemainingClaimButtons(document, {
+					shouldSkipArpBoosts,
+					skipPaths: posted.postedPaths
+				});
+				await waitWhile(() => listBattlePassClaimButtons(document, { shouldSkipArpBoosts }).length > 0, 1500);
+				remaining = listBattlePassClaimButtons(document, { shouldSkipArpBoosts }).length;
+			}
+			return {
+				claimed,
+				remaining
+			};
+		}
+		const uniqueTargets = new Set(targets.map((claim) => claimIdentity(claim))).size;
+		return {
+			claimed,
+			remaining: Math.max(0, uniqueTargets - claimed)
+		};
+	}
+	function battlePassClaimableArp(battlePass) {
+		return battlePass?.readyToClaimArp ?? 0;
+	}
+	function battlePassReadyNonArp(battlePass) {
+		const ready = battlePass?.readyToClaim ?? 0;
+		return Math.max(0, ready - battlePassClaimableArp(battlePass));
+	}
+	function shouldSkipArpInBattlePassClaimAll(battlePass, shouldWaitForAllArpSwap) {
+		return shouldWaitForAllArpSwap && battlePassClaimableArp(battlePass) > 0;
+	}
+	function shouldShowBattlePassClaimAll(battlePass, shouldWaitForAllArpSwap) {
+		if (battlePassReadyNonArp(battlePass) > 0) return true;
+		return (battlePass?.readyToClaim ?? 0) > 0 && !shouldWaitForAllArpSwap;
+	}
+	function battlePassClaimButtonLabel(shouldSkipArpBoosts, options) {
+		if (shouldSkipArpBoosts) return "Claim rewards";
+		return options?.compact === true ? "Claim all BP" : "Claim all";
+	}
+	function scrapeBattlePass() {
+		if (!location.pathname.includes("/battle-pass")) return;
+		return scrapeBattlePassFromDocument(document);
+	}
+	function isBattlePassDocumentReady(document_) {
+		return Boolean(document_.querySelector(".bp-popup[data-milestone-id], .bp-popup__claim-btn, .bp-popup__claimed") || /Ready to claim/i.test(document_.body?.textContent ?? ""));
+	}
+	async function waitForBattlePassDocument(timeoutMs = 12e3) {
+		if (isBattlePassDocumentReady(document)) return;
+		await new Promise((resolve) => {
+			let isSettled = false;
+			const observer = new MutationObserver(() => {
+				if (isBattlePassDocumentReady(document)) finish();
+			});
+			const timer = setTimeout(finish, timeoutMs);
+			function finish() {
+				if (isSettled) return;
+				isSettled = true;
+				observer.disconnect();
+				clearTimeout(timer);
+				resolve();
+			}
+			observer.observe(document.documentElement, {
+				childList: true,
+				subtree: true
+			});
+		});
+	}
+	function battlePassClaimSignature(document_) {
+		const { readyToClaim, readyToClaimArp } = countBattlePassClaims(document_);
+		return `${readyToClaim}:${readyToClaimArp}`;
 	}
 	var DAILY_QUEST_STATUS_SELECTORS = [
 		"[id^=\"control-center__daily-quest-status-\"]",
@@ -3506,485 +4068,6 @@
 			"dailyQuests",
 			"steamCommunityEvent"
 		].includes(key);
-	}
-	var ASCE_CACHE_KEY = "asceCommunityHours";
-	var ASCE_HOURS_URL = "https://raw.githubusercontent.com/MarvashMagalli/ASCE/main/stored_hours.json";
-	var ASCE_CONFIG_URL = "https://raw.githubusercontent.com/MarvashMagalli/ASCE/main/configAWA.json";
-	var ASCE_CACHE_TTL_MS = 15e5;
-	var ASCE_ERROR_TTL_MS = 18e5;
-	var ASCE_SAMPLE_MAX = 96;
-	var FETCH_TIMEOUT_MS = 8e3;
-	var inflightLookup = {};
-	function hasPendingAsceRefresh() {
-		return inflightLookup.promise !== void 0;
-	}
-	function isRecord$1(value) {
-		return typeof value === "object" && value !== null;
-	}
-	function isAsceCache(value) {
-		return isRecord$1(value) && typeof value.at === "string";
-	}
-	function gmGetJson(url) {
-		return new Promise((resolve) => {
-			_GM_xmlhttpRequest({
-				method: "GET",
-				url,
-				anonymous: true,
-				timeout: FETCH_TIMEOUT_MS,
-				onload: (response) => {
-					if (response.status < 200 || response.status >= 300) {
-						resolve(void 0);
-						return;
-					}
-					try {
-						resolve(JSON.parse(response.responseText));
-					} catch {
-						resolve(void 0);
-					}
-				},
-				onerror: () => {
-					resolve(void 0);
-				},
-				ontimeout: () => {
-					resolve(void 0);
-				}
-			});
-		});
-	}
-	async function loadAsceCache() {
-		const raw = await _GM.getValue(ASCE_CACHE_KEY, "");
-		if (typeof raw !== "string" || raw.length === 0) return { at: "" };
-		try {
-			const parsed = JSON.parse(raw);
-			if (!isAsceCache(parsed)) return { at: "" };
-			return parsed;
-		} catch {
-			return { at: "" };
-		}
-	}
-	async function saveAsceCache(cache) {
-		await _GM.setValue(ASCE_CACHE_KEY, JSON.stringify(cache));
-	}
-	function cacheAgeMs(cache) {
-		const at = Date.parse(cache.at);
-		if (Number.isNaN(at)) return Number.POSITIVE_INFINITY;
-		return Date.now() - at;
-	}
-	function isCacheFresh(cache) {
-		if (!cache.at) return false;
-		const ttl = cache.error ? ASCE_ERROR_TTL_MS : ASCE_CACHE_TTL_MS;
-		return cacheAgeMs(cache) < ttl;
-	}
-	function communityEventSlug(url) {
-		try {
-			const parts = new URL(url, "https://na.alienwarearena.com").pathname.split("/").filter(Boolean);
-			const index = parts.indexOf("community-event");
-			if (index === -1) return;
-			return parts[index + 1];
-		} catch {
-			return;
-		}
-	}
-	function isAsceFeedForEvent(feed, eventUrl) {
-		const slug = communityEventSlug(eventUrl);
-		return slug !== void 0 && slug === feed.game;
-	}
-	function asceSlotMs(timestamp, hour) {
-		const match = /^(\d{4})-(\d{2})-(\d{2})[ T](\d{2}):(\d{2}):(\d{2})/.exec(timestamp);
-		if (!match || hour < 0 || hour > 23) return;
-		const year = Number(match[1]);
-		const month = Number(match[2]);
-		const day = Number(match[3]);
-		return Date.UTC(year, month - 1, day, hour, 0, 0);
-	}
-	function parseAsceHourPoint(value) {
-		if (!isRecord$1(value)) return;
-		const hours = value.value;
-		const hour = value.hour;
-		const timestamp = value.timestamp;
-		if (typeof hours !== "number" || typeof hour !== "number" || typeof timestamp !== "string" || !Number.isFinite(hours) || hours < 0) return;
-		const slotMs = asceSlotMs(timestamp, hour);
-		if (slotMs === void 0) return;
-		return {
-			slotMs,
-			hours
-		};
-	}
-	function parseAsceHours(raw) {
-		if (!Array.isArray(raw)) return [];
-		const bySlot = new Map();
-		for (const row of raw) {
-			const parsed = parseAsceHourPoint(row);
-			if (!parsed) continue;
-			bySlot.set(parsed.slotMs, parsed.hours);
-		}
-		const samples = bySlot.keys().toArray().toSorted((left, right) => left - right).map((slotMs) => ({
-			at: new Date(slotMs).toISOString(),
-			hours: bySlot.get(slotMs) ?? 0
-		}));
-		if (samples.length > ASCE_SAMPLE_MAX) return samples.slice(-96);
-		return samples;
-	}
-	function parseUnlockedHours(milestones) {
-		if (!Array.isArray(milestones)) return [];
-		const unlockedHours = [];
-		for (const row of milestones) {
-			if (!isRecord$1(row) || row.unlocked !== true) continue;
-			const hours = row.current_hours;
-			if (typeof hours === "number" && Number.isFinite(hours) && hours > 0) unlockedHours.push(hours);
-		}
-		return unlockedHours;
-	}
-	function parseAsceConfig(raw) {
-		if (!isRecord$1(raw)) return { unlockedHours: [] };
-		const game = typeof raw.game === "string" ? raw.game : void 0;
-		const goalHours = typeof raw.goal_hours === "number" && Number.isFinite(raw.goal_hours) ? raw.goal_hours : void 0;
-		return {
-			...game && { game },
-			...goalHours !== void 0 && { goalHours },
-			unlockedHours: parseUnlockedHours(raw.milestones)
-		};
-	}
-	async function fetchAsceFeed() {
-		const [hoursRaw, configRaw] = await Promise.all([gmGetJson(ASCE_HOURS_URL), gmGetJson(ASCE_CONFIG_URL)]);
-		const config = parseAsceConfig(configRaw);
-		const samples = parseAsceHours(hoursRaw);
-		if (!config.game || samples.length === 0) return;
-		return {
-			game: config.game,
-			samples,
-			unlockedHours: config.unlockedHours,
-			...config.goalHours !== void 0 && { goalHours: config.goalHours }
-		};
-	}
-	async function loadAsceCommunityFeed(options = {}) {
-		const cache = await loadAsceCache();
-		if (!options.force && isCacheFresh(cache)) {
-			if (cache.error) return;
-			return cache.feed;
-		}
-		if (inflightLookup.promise !== void 0) return inflightLookup.promise;
-		const promise = (async () => {
-			const feed = await fetchAsceFeed();
-			const at = new Date().toISOString();
-			if (!feed) {
-				await saveAsceCache({
-					at,
-					error: true
-				});
-				return;
-			}
-			await saveAsceCache({
-				at,
-				feed
-			});
-			return feed;
-		})();
-		inflightLookup.promise = promise;
-		try {
-			return await promise;
-		} finally {
-			delete inflightLookup.promise;
-		}
-	}
-	function applyAsceUnlocks(milestones, unlockedHours) {
-		if (unlockedHours.length === 0) return milestones;
-		const unlocked = new Set(unlockedHours);
-		return milestones.map((milestone) => {
-			if (milestone.isCommunityUnlocked) return milestone;
-			const requiredHours = milestone.communityHoursRequired;
-			if (requiredHours === void 0 || !unlocked.has(requiredHours)) return milestone;
-			return {
-				...milestone,
-				isCommunityUnlocked: true
-			};
-		});
-	}
-	function resolveCommunityHours(scraped, asceHours) {
-		if (scraped === void 0) return asceHours;
-		if (asceHours === void 0) return scraped;
-		return Math.max(scraped, asceHours);
-	}
-	function withLiveHoursSample(samples, event) {
-		if (event.communityHours === void 0) return samples;
-		const last = samples.at(-1);
-		if (!last || event.communityHours <= last.hours) return samples;
-		return [...samples, {
-			at: event.scrapedAt,
-			hours: event.communityHours
-		}];
-	}
-	function applyAsceFeedToEvent(event, feed) {
-		if (!event.isLive || !isAsceFeedForEvent(feed, event.url)) return;
-		const samples = withLiveHoursSample(feed.samples, event);
-		if (samples.length === 0) return;
-		const lastAsceHours = feed.samples.at(-1)?.hours;
-		const communityHours = resolveCommunityHours(event.communityHours, lastAsceHours);
-		const milestones = applyAsceUnlocks(event.milestones, feed.unlockedHours);
-		const next = {
-			...event,
-			milestones,
-			pendingArp: computePendingCommunityEventArp(event.personalHours, milestones),
-			communityHoursSamples: samples,
-			communityHoursSource: "asce"
-		};
-		if (communityHours !== void 0) next.communityHours = communityHours;
-		if (next.communityHoursCap === void 0 && feed.goalHours !== void 0) next.communityHoursCap = feed.goalHours;
-		return next;
-	}
-	function asceEventSignature(event) {
-		const last = event.communityHoursSamples?.at(-1);
-		return [
-			event.communityHours ?? "",
-			event.pendingArp,
-			event.communityHoursSamples?.length ?? 0,
-			last?.hours ?? "",
-			last?.at ?? ""
-		].join("|");
-	}
-	function applyFeedIfLive(state, feed) {
-		const event = state.communityEvent;
-		if (!event?.isLive) return;
-		const next = applyAsceFeedToEvent(event, feed);
-		if (!next) return;
-		state.communityEvent = next;
-	}
-	async function applyAsceCommunityHours(state) {
-		if (!state.communityEvent?.isLive) return;
-		const cache = await loadAsceCache();
-		if (cache.feed && !cache.error) applyFeedIfLive(state, cache.feed);
-		if (!isCacheFresh(cache)) loadAsceCommunityFeed();
-	}
-	async function didRefreshAsceCommunityHours(state, options = {}) {
-		const event = state.communityEvent;
-		if (!event?.isLive) return false;
-		const before = asceEventSignature(event);
-		const feed = await loadAsceCommunityFeed({ force: options.force === true });
-		if (!feed) return false;
-		applyFeedIfLive(state, feed);
-		const next = state.communityEvent;
-		if (!next) return false;
-		return asceEventSignature(next) !== before;
-	}
-	var SNAPSHOT_KEY = "artifactSnapshot";
-	function isArtifactSnapshot(value) {
-		if (typeof value !== "object" || !value) return false;
-		const v = value;
-		return Array.isArray(v.artifacts) && typeof v.fragments === "number";
-	}
-	async function loadSnapshot() {
-		const raw = await _GM.getValue(SNAPSHOT_KEY);
-		if (!raw) return;
-		try {
-			const parsed = typeof raw === "string" ? JSON.parse(raw) : raw;
-			return isArtifactSnapshot(parsed) ? parsed : void 0;
-		} catch {
-			return;
-		}
-	}
-	async function saveSnapshot(snapshot) {
-		await _GM.setValue(SNAPSHOT_KEY, JSON.stringify(snapshot));
-	}
-	async function applySnapshotUpgrade(instanceId) {
-		const snapshot = await loadSnapshot();
-		if (!snapshot) return;
-		const current = snapshot.artifacts.find((artifact) => artifact.instanceId === instanceId);
-		if (!current || current.tier >= ArtifactTier.Interstellar) return snapshot;
-		const toTier = current.tier + 1;
-		const family = getArtifactById(current.familyId);
-		const cost = current.upgradeCost ?? fragmentCostToUpgradeFrom(current.tier) ?? 0;
-		const upgraded = {
-			...current,
-			tier: toTier,
-			displayName: family ? displayNameFor(family, toTier) : current.displayName,
-			maxLevel: toTier === ArtifactTier.Interstellar
-		};
-		const nextCost = fragmentCostToUpgradeFrom(toTier);
-		if (nextCost === void 0) delete upgraded.upgradeCost;
-		else upgraded.upgradeCost = nextCost;
-		const next = {
-			...snapshot,
-			scrapedAt: new Date().toISOString(),
-			fragments: Math.max(0, snapshot.fragments - cost),
-			artifacts: snapshot.artifacts.map((artifact) => artifact.instanceId === instanceId ? upgraded : artifact)
-		};
-		await saveSnapshot(next);
-		return next;
-	}
-	function readFragmentBalance(document_) {
-		const fromPage = readPageFragmentBalance(document_);
-		if (fromPage !== void 0) return fromPage;
-		const text = document_.body?.textContent ?? "";
-		const match = /Fragments:\s*([\d,]+)/i.exec(text);
-		if (match?.[1]) return Number(match[1].replaceAll(",", ""));
-		return 0;
-	}
-	function readUsernameFrom(document_, pathHint) {
-		const pathMatch = /\/member\/([^/]+)\/artifacts/.exec(pathHint ?? location.pathname);
-		if (pathMatch?.[1]) return pathMatch[1];
-		const link = document_.querySelector("a[href*=\"/member/\"][href$=\"/artifacts\"]");
-		return (link ? /\/member\/([^/]+)\/artifacts/.exec(link.getAttribute("href") ?? "") : void 0)?.[1];
-	}
-	function readUsername() {
-		return readUsernameFrom(document);
-	}
-	var USER_ARTIFACTS_ROOM_PATH = "/user-artifacts-room";
-	function resolveShowroomUrl(username) {
-		const name = username ?? readUsername();
-		if (name) return `/member/${encodeURIComponent(name)}/artifacts`;
-		const link = document.querySelector("a[href*=\"/member/\"][href$=\"/artifacts\"]");
-		if (link?.pathname) return link.pathname;
-		return USER_ARTIFACTS_ROOM_PATH;
-	}
-	function parseEquippedPosition(card) {
-		const unequip = card.parentElement?.querySelector("button[onclick*=\"unequipArtifact\"]");
-		if (!unequip) return;
-		const match = /unequipArtifact\s*\(\s*\d+\s*,\s*([123])\s*\)/.exec(unequip.getAttribute("onclick") ?? "");
-		if (!match?.[1]) return;
-		return Number(match[1]);
-	}
-	function normalizeName(value) {
-		return value.replaceAll(/\s+/g, " ").trim().toLowerCase();
-	}
-	function isShowcaseSlotLocked(slot) {
-		if (slot.querySelector(":scope i.fa-lock-open, :scope i.fa-unlock")) return false;
-		return Boolean(slot.querySelector(":scope i.fa-lock"));
-	}
-	function scrapeShowcaseSlots(document_) {
-		const root = document_.querySelector(".slots");
-		const slots = root ? [...root.querySelectorAll(":scope > .slot")] : [...document_.querySelectorAll(".slot")];
-		const result = [];
-		let position = 1;
-		for (const slot of slots) {
-			if (position > 3) break;
-			const displayName = ((slot.querySelector(":scope .slot-front img") ?? slot.querySelector(":scope img"))?.alt ?? "").trim();
-			if (!displayName || /^artifact$/i.test(displayName)) {
-				position = position + 1;
-				continue;
-			}
-			result.push({
-				position,
-				displayName,
-				isLocked: isShowcaseSlotLocked(slot)
-			});
-			position = position + 1;
-		}
-		return result;
-	}
-	function applyShowcaseEquips(artifacts, showcase) {
-		const slotLocks = {
-			1: false,
-			2: false,
-			3: false
-		};
-		for (const slot of showcase) {
-			slotLocks[slot.position] = slot.isLocked;
-			const match = artifacts.find((artifact) => normalizeName(artifact.displayName) === normalizeName(slot.displayName));
-			if (!match) continue;
-			match.equippedPosition = slot.position;
-			match.slotLocked = slot.isLocked;
-		}
-		return slotLocks;
-	}
-	function parseFooterTier(card) {
-		const tip = card.querySelector("img[data-original-title]")?.dataset.originalTitle ?? "";
-		const tierLabel = /(Weapon|Clothing|Power|Language|Precious Gems|Tech|Knowledge|Social|Architecture)\s*-\s*(Rust|Bronze|Silver|Gold|Platinum|Interstellar)/i.exec(tip)?.[2]?.toLowerCase();
-		if (!tierLabel) return;
-		return {
-			rust: ArtifactTier.Rust,
-			bronze: ArtifactTier.Bronze,
-			silver: ArtifactTier.Silver,
-			gold: ArtifactTier.Gold,
-			platinum: ArtifactTier.Platinum,
-			interstellar: ArtifactTier.Interstellar
-		}[tierLabel];
-	}
-	function scrapeShowroomFromDocument(document_, pathHint) {
-		const cards = document_.querySelectorAll("a.artifact-list-item.change-artifact-modal");
-		const artifacts = [];
-		for (const card of cards) {
-			const instanceId = Number(card.dataset.id);
-			if (Number.isNaN(instanceId)) continue;
-			const displayName = (card.dataset.title ?? "").trim();
-			if (!displayName) continue;
-			const resolved = resolveArtifactByDisplayName(displayName);
-			const footerTier = parseFooterTier(card);
-			const tier = resolved?.tier ?? footerTier;
-			if (tier === void 0 || !resolved) {
-				console.warn("[Artifact Optimizer] Unrecognized artifact:", displayName);
-				continue;
-			}
-			const upgradeCostRaw = card.dataset.upgradeCost;
-			const parsedUpgradeCost = upgradeCostRaw === void 0 || upgradeCostRaw === "" ? void 0 : Number(upgradeCostRaw);
-			const upgradeCost = Number.isNaN(parsedUpgradeCost) ? void 0 : parsedUpgradeCost;
-			const isMaxLevel = card.dataset.maxLevel === "true" || card.dataset.maxLevel === "1" || upgradeCost === 0;
-			const owned = {
-				instanceId,
-				familyId: resolved.definition.id,
-				displayName,
-				tier,
-				category: resolved.definition.category,
-				maxLevel: isMaxLevel,
-				perkDescription: card.dataset.descriptionPerk ?? ""
-			};
-			if (upgradeCost !== void 0) owned.upgradeCost = upgradeCost;
-			const equippedPosition = parseEquippedPosition(card);
-			if (equippedPosition !== void 0) owned.equippedPosition = equippedPosition;
-			artifacts.push(owned);
-		}
-		const slotLocks = applyShowcaseEquips(artifacts, scrapeShowcaseSlots(document_));
-		return {
-			scrapedAt: new Date().toISOString(),
-			username: readUsernameFrom(document_, pathHint),
-			fragments: readFragmentBalance(document_),
-			artifacts,
-			slotLocks
-		};
-	}
-	function scrapeShowroom() {
-		return scrapeShowroomFromDocument(document, location.pathname);
-	}
-	function isShowroomDocumentReady(document_) {
-		return Boolean(document_.querySelector("a.artifact-list-item.change-artifact-modal, #weapon-section"));
-	}
-	async function waitForShowroomDocument(timeoutMs = 12e3) {
-		if (isShowroomDocumentReady(document)) return;
-		await new Promise((resolve) => {
-			let isSettled = false;
-			const observer = new MutationObserver(() => {
-				if (isShowroomDocumentReady(document)) finish();
-			});
-			const timer = setTimeout(finish, timeoutMs);
-			function finish() {
-				if (isSettled) return;
-				isSettled = true;
-				observer.disconnect();
-				clearTimeout(timer);
-				resolve();
-			}
-			observer.observe(document.documentElement, {
-				childList: true,
-				subtree: true
-			});
-		});
-	}
-	async function scrapeAndPersist() {
-		if (!isShowroomDocumentReady(document)) await waitForShowroomDocument();
-		if (!isShowroomDocumentReady(document)) {
-			const existing = await loadSnapshot();
-			if (existing) return existing;
-		}
-		const snapshot = scrapeShowroom();
-		if (snapshot.artifacts.length === 0) {
-			const existing = await loadSnapshot();
-			if (existing && existing.artifacts.length > 0) return existing;
-		}
-		await saveSnapshot(snapshot);
-		await syncSlotLocksFromScrape(snapshot.slotLocks ?? {});
-		return snapshot;
-	}
-	function isArtifactsShowroomPage() {
-		return /\/member\/[^/]+\/artifacts\/?$/.test(location.pathname) || /\/user-artifacts-room\/?$/.test(location.pathname);
 	}
 	function combinations(items, k) {
 		if (k === 0) return [[]];
@@ -5039,31 +5122,40 @@
 	function isActivityEnabled(settings, key) {
 		return settings.activities[key]?.enabled;
 	}
-	function pushCommunityEventTodo(todos, siteState, settings, allArpPct = 0) {
-		const event = siteState.communityEvent;
-		if (!isActivityEnabled(settings, "steamCommunityEvent") || !event?.isLive || event.pendingArp <= 0 || !canEarnCommunityEventArp(event)) return;
-		const pending = breakDownCommunityEventPending(event);
-		const etaMs = estimateNextCommunityUnlock(event)?.etaMs;
-		const urgency = actionUrgency(pending.waitingPersonalArp > 0 ? {
+	function communityEventTodoUrgency(pending, etaMs) {
+		if (pending.waitingPersonalArp > 0) return actionUrgency({
 			kind: "action",
 			readyAtMs: 0,
 			durationMs: 0,
 			arp: pending.waitingPersonalArp,
 			chain: "before"
-		} : {
-			kind: "info",
-			readyAtMs: etaMs ?? 0,
-			durationMs: 0,
-			...typeof etaMs === "number" && { deadlineMs: etaMs },
-			arp: pending.waitingCommunityArp + pending.imminentArp + pending.waitingPersonalArp
 		});
+		const waitingArp = pending.waitingCommunityArp + pending.imminentArp + pending.waitingPersonalArp;
+		if (etaMs === void 0) return actionUrgency({
+			kind: "info",
+			readyAtMs: 0,
+			durationMs: 0,
+			arp: waitingArp
+		});
+		return actionUrgency({
+			kind: "schedule",
+			readyAtMs: etaMs,
+			durationMs: 0,
+			deadlineMs: etaMs,
+			arp: waitingArp
+		});
+	}
+	function pushCommunityEventTodo(todos, siteState, settings, allArpPct = 0) {
+		const event = siteState.communityEvent;
+		if (!isActivityEnabled(settings, "steamCommunityEvent") || !event?.isLive || event.pendingArp <= 0 || !canEarnCommunityEventArp(event)) return;
+		const pending = breakDownCommunityEventPending(event);
 		const { text, later } = describeCommunityEventPendingParts(event, allArpPct);
 		const reasons = [];
 		if (later) reasons.push({ text: later });
 		if (event.libraryPending) reasons.push({ text: STEAM_LIBRARY_PENDING_HINT });
 		const todo = {
 			text: `Community Event: ${text}`,
-			urgency
+			urgency: communityEventTodoUrgency(pending, estimateNextCommunityUnlock(event)?.etaMs)
 		};
 		if (reasons.length > 0) todo.reasons = reasons;
 		todos.push(todo);
@@ -6954,6 +7046,7 @@
 	function isCommunityEventFresh(state, now = new Date()) {
 		const event = state?.communityEvent;
 		if (!event?.isLive) return isCapsFresh(state, now);
+		if (event.milestones.length === 0) return false;
 		const ttl = event.pendingArp > 0 ? COMMUNITY_EVENT_PENDING_STALE_MS : STALE_MS;
 		if (!isScrapedWithin(event.scrapedAt, ttl)) return false;
 		return isScrapedSinceUtcMidnight(event.scrapedAt, now);
@@ -8116,12 +8209,11 @@
 		const settings = await getArtifactSettings();
 		let siteState = loadedState ?? emptySiteState();
 		if (isSiteStatePage()) {
-			if (isRemote) {
-				siteState = await refreshSiteStateFromPage();
-				await applyAsceCommunityHours(siteState);
-			} else applyLiveDocumentToSiteState(siteState);
-			await saveSiteState(siteState);
+			if (isRemote) siteState = await refreshSiteStateFromPage();
+			else applyLiveDocumentToSiteState(siteState);
 		}
+		await applyAsceCommunityHours(siteState);
+		if (isSiteStatePage()) await saveSiteState(siteState);
 		const emptySnapshot = {
 			scrapedAt: new Date(0).toISOString(),
 			username: void 0,

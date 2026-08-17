@@ -126,10 +126,12 @@ export async function gatherData(options?: {
   if (isSiteStatePage()) {
     if (isRemote) {
       siteState = await refreshSiteStateFromPage();
-      await applyAsceCommunityHours(siteState);
     } else {
       applyLiveDocumentToSiteState(siteState);
     }
+  }
+  await applyAsceCommunityHours(siteState);
+  if (isSiteStatePage()) {
     await saveSiteState(siteState);
   }
 

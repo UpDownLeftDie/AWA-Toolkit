@@ -479,6 +479,10 @@ function isCommunityEventFresh(
     // No live event cached — refresh with Control Center cadence.
     return isCapsFresh(state, now);
   }
+  // Banner-only cache (no carousel yet) — still need the event page.
+  if (event.milestones.length === 0) {
+    return false;
+  }
   const ttl =
     event.pendingArp > 0 ? COMMUNITY_EVENT_PENDING_STALE_MS : STALE_MS;
   if (!isScrapedWithin(event.scrapedAt, ttl)) {

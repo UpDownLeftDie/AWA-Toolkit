@@ -454,6 +454,115 @@ function mergeLiveCommunityEventScrape(
   return carryForwardCommunityEventFields(merged, previous, Boolean(sameEvent));
 }
 
+function milestoneMergeKey(milestone: CommunityEventMilestone): string {
+  return milestone.communityHoursRequired === undefined
+    ? `i:${milestone.index}`
+    : `h:${milestone.communityHoursRequired}`;
+}
+
+/**
+ * Union milestone lists so a partial carousel scrape cannot drop later
+ * stretch gates we already know about (ASCE or an earlier full scrape).
+ */
+function mergeCommunityEventMilestones(
+  scraped: CommunityEventMilestone[],
+  previous: CommunityEventMilestone[] | undefined,
+): CommunityEventMilestone[] {
+  if (!previous || previous.length === 0) {
+    return scraped;
+  }
+  const merged = new Map<string, CommunityEventMilestone>();
+  for (const milestone of previous) {
+    merged.set(milestoneMergeKey(milestone), milestone);
+  }
+  for (const milestone of scraped) {
+    merged.set(milestoneMergeKey(milestone), milestone);
+  }
+  return merged
+    .values()
+    .toArray()
+    .toSorted(
+      (left, right) =>
+        (left.communityHoursRequired ?? left.index) -
+        (right.communityHoursRequired ?? right.index),
+    );
+}
+
+export interface CommunityEventMilestoneGate {
+  hours: number;
+  arpReward: number;
+  label: string;
+  unlocked: boolean;
+}
+
+function inferPersonalHoursRequired(
+  existing: CommunityEventMilestone[],
+): number {
+  const known = existing
+    .filter((milestone) => milestone.arpReward > 0)
+    .map((milestone) => milestone.personalHoursRequired);
+  if (known.length === 0) {
+    return 1;
+  }
+  return Math.max(...known);
+}
+
+/**
+ * Fill in community-hour gates the live page scrape missed (ASCE stretch
+ * goals). Scraped rows win on overlap; ASCE can still flip Community Unlocked.
+ */
+export function upsertCommunityEventMilestoneGates(
+  existing: CommunityEventMilestone[],
+  gates: readonly CommunityEventMilestoneGate[],
+): CommunityEventMilestone[] {
+  if (gates.length === 0) {
+    return existing;
+  }
+  const byHours = new Map<number, CommunityEventMilestone>();
+  const withoutHours: CommunityEventMilestone[] = [];
+  for (const milestone of existing) {
+    const hours = milestone.communityHoursRequired;
+    if (hours === undefined) {
+      withoutHours.push(milestone);
+    } else {
+      byHours.set(hours, milestone);
+    }
+  }
+  const inferredPersonal = inferPersonalHoursRequired(existing);
+  let nextIndex = 1;
+  for (const milestone of existing) {
+    if (milestone.index >= nextIndex) {
+      nextIndex = milestone.index + 1;
+    }
+  }
+
+  for (const gate of gates) {
+    const current = byHours.get(gate.hours);
+    if (current) {
+      if (gate.unlocked && !current.isCommunityUnlocked) {
+        byHours.set(gate.hours, { ...current, isCommunityUnlocked: true });
+      }
+      continue;
+    }
+    byHours.set(gate.hours, {
+      index: nextIndex,
+      personalHoursRequired: inferredPersonal,
+      communityHoursRequired: gate.hours,
+      arpReward: gate.arpReward,
+      rewardLabel: gate.label,
+      isCommunityUnlocked: gate.unlocked,
+      isAwarded: false,
+    });
+    nextIndex += 1;
+  }
+
+  return [...withoutHours, ...byHours.values()].toSorted(
+    (left, right) =>
+      (left.communityHoursRequired ?? left.index) -
+      (right.communityHoursRequired ?? right.index),
+  );
+}
+
 function carryForwardCommunityEventFields(
   merged: CommunityEventState,
   previous: CommunityEventState | undefined,
@@ -467,9 +576,15 @@ function carryForwardCommunityEventFields(
     previous.personalHours > 0
   ) {
     next.personalHours = previous.personalHours;
+  }
+  if (isSameEvent && previous) {
+    next.milestones = mergeCommunityEventMilestones(
+      next.milestones,
+      previous.milestones,
+    );
     next.pendingArp = computePendingCommunityEventArp(
-      previous.personalHours,
-      merged.milestones,
+      next.personalHours,
+      next.milestones,
     );
   }
   const shouldKeepPlayEligible =

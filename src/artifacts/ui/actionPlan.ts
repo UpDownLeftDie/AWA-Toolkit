@@ -64,8 +64,9 @@ export type ActionTone = "default" | "muted" | "warn";
  * How a step competes in the final "What to do" order.
  *
  * Sort: kind → readyAt → chain → duration → deadline slack → ARP.
- * Instant ready actions (Discord) beat long ready actions (Twitch); scheduled
- * equips beat informational waiting (community unlock ETA).
+ * Instant ready actions (Discord) beat long ready actions (Twitch). Among
+ * scheduled steps, sooner readyAt wins (community unlock before a later
+ * All-ARP% equip).
  */
 export type ActionTodoUrgencyKind = "action" | "schedule" | "info";
 
@@ -270,6 +271,40 @@ function isActivityEnabled(
   return settings.activities[key]?.enabled;
 }
 
+function communityEventTodoUrgency(
+  pending: ReturnType<typeof breakDownCommunityEventPending>,
+  etaMs: number | undefined,
+): ActionTodoUrgency {
+  if (pending.waitingPersonalArp > 0) {
+    return actionUrgency({
+      kind: "action",
+      readyAtMs: 0,
+      durationMs: 0,
+      arp: pending.waitingPersonalArp,
+      chain: "before",
+    });
+  }
+  const waitingArp =
+    pending.waitingCommunityArp +
+    pending.imminentArp +
+    pending.waitingPersonalArp;
+  if (etaMs === undefined) {
+    return actionUrgency({
+      kind: "info",
+      readyAtMs: 0,
+      durationMs: 0,
+      arp: waitingArp,
+    });
+  }
+  return actionUrgency({
+    kind: "schedule",
+    readyAtMs: etaMs,
+    durationMs: 0,
+    deadlineMs: etaMs,
+    arp: waitingArp,
+  });
+}
+
 function pushCommunityEventTodo(
   todos: ActionTodo[],
   siteState: SiteState,
@@ -286,27 +321,6 @@ function pushCommunityEventTodo(
     return;
   }
   const pending = breakDownCommunityEventPending(event);
-  const etaMs = estimateNextCommunityUnlock(event)?.etaMs;
-  const urgency = actionUrgency(
-    pending.waitingPersonalArp > 0
-      ? {
-          kind: "action",
-          readyAtMs: 0,
-          durationMs: 0,
-          arp: pending.waitingPersonalArp,
-          chain: "before",
-        }
-      : {
-          kind: "info",
-          readyAtMs: etaMs ?? 0,
-          durationMs: 0,
-          ...(typeof etaMs === "number" && { deadlineMs: etaMs }),
-          arp:
-            pending.waitingCommunityArp +
-            pending.imminentArp +
-            pending.waitingPersonalArp,
-        },
-  );
   const { text, later } = describeCommunityEventPendingParts(event, allArpPct);
   const reasons: ActionTodoReason[] = [];
   if (later) {
@@ -317,7 +331,10 @@ function pushCommunityEventTodo(
   }
   const todo: ActionTodo = {
     text: `Community Event: ${text}`,
-    urgency,
+    urgency: communityEventTodoUrgency(
+      pending,
+      estimateNextCommunityUnlock(event)?.etaMs,
+    ),
   };
   if (reasons.length > 0) {
     todo.reasons = reasons;
