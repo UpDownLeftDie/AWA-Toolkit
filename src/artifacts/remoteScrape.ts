@@ -8,7 +8,11 @@ import {
   scrapeShowroomFromDocument,
   type ArtifactSnapshot,
 } from './scraper';
-import { syncSlotLocksFromScrape } from './settings';
+import {
+  areAccountActionsEnabled,
+  getArtifactSettings,
+  syncSlotLocksFromScrape,
+} from './settings';
 import {
   applyArpLogActivityCaps,
   applyBattlePassEndFromDocument,
@@ -543,7 +547,10 @@ async function scrapeShowroomAfterLockNudge(
       );
     }
   }
-  if (inventory?.artifacts.length) {
+  if (
+    inventory?.artifacts.length &&
+    areAccountActionsEnabled(await getArtifactSettings())
+  ) {
     await nudgeStuckSlotLocks(inventory.artifacts);
   }
 

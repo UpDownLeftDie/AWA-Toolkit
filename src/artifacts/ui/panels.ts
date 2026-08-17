@@ -1,6 +1,7 @@
 import { applyAsceCommunityHours } from "../asce";
 import type { OptimizerResult } from "../optimizer";
 import { isArtifactsShowroomPage, waitForShowroomDocument } from "../scraper";
+import { areAccountActionsEnabled } from "../settings";
 import {
   listBattlePassClaimButtons,
   refreshSiteStateFromPage,
@@ -28,6 +29,7 @@ import {
   confirmAndApplyCombo,
   confirmAndApplyLoadout,
   persistFormSettings,
+  showLoadoutPreview,
 } from "./actions";
 import {
   bindClaimAllButtons,
@@ -183,6 +185,10 @@ function bindModalEvents(
       cache.siteState,
       { isHydrating: options.isHydrating === true },
     );
+    const equipButton = tree().querySelector("#ao-equip");
+    if (equipButton instanceof HTMLButtonElement) {
+      equipButton.hidden = !areAccountActionsEnabled(cache.settings);
+    }
     bindDynamicBody(body as HTMLElement, () => refreshView());
   };
 
@@ -290,7 +296,7 @@ async function openOptimizerModal(): Promise<void> {
           ${renderModalSkeleton()}
         </div>
         <div class="ao-actions">
-          <button type="button" id="ao-equip">Equip Recommended</button>
+          <button type="button" id="ao-equip" hidden>Equip Recommended</button>
           <button type="button" id="ao-refresh" class="ao-secondary">Refresh</button>
           <button type="button" id="ao-save" class="ao-secondary">Save Settings</button>
           <button type="button" id="ao-close" class="ao-danger">Close</button>
@@ -510,6 +516,7 @@ function renderShowroomPanelBody(
     ${renderVaultDiscountBlock(data.result)}
     ${renderShowroomEquipActions(data.result, {
       hideRecommendedEquip: summary.hideRecommendedEquip,
+      allowAccountActions: areAccountActionsEnabled(data.settings),
     })}
   `;
 }
@@ -538,15 +545,22 @@ function renderControlCenterPanelBody(
     ? renderHydrateBanner("Updating in the background…")
     : "";
   const summary = compactLoadoutSummary(data);
-  const equipButton = summary.hideRecommendedEquip
+  const areActionsEnabled = areAccountActionsEnabled(data.settings);
+  const equipButton =
+    areActionsEnabled && !summary.hideRecommendedEquip
+      ? '<button type="button" id="ao-cc-equip">Equip Recommended</button>'
+      : "";
+  const claimBpButton = areActionsEnabled
+    ? compactClaimAllBpButton(data)
+    : "";
+  const actionsOffNote = areActionsEnabled
     ? ""
-    : '<button type="button" id="ao-cc-equip">Equip Recommended</button>';
-  const claimBpButton = compactClaimAllBpButton(data);
+    : '<div class="ao-muted">Account actions are off — enable in Open Full Panel.</div>';
   return `
     <div class="ao-heading">Artifact Optimizer</div>
     ${renderCredits({ compact: true })}
     ${hydrateBanner}
-    ${renderActionPlan(summary.todos)}
+    ${renderActionPlan(summary.todos, { allowAccountActions: areActionsEnabled })}
     ${renderSectionDivider()}
     <div class="ao-row"><strong>${summary.label}:</strong> ${comboLabel(summary.combo)}</div>
     ${renderBreakdown(summary.combo)}
@@ -555,6 +569,7 @@ function renderControlCenterPanelBody(
     ${supplementalNotes(data.result.notes)
       .map((note) => `<div class="ao-note">${escapeHtml(note)}</div>`)
       .join("")}
+    ${actionsOffNote}
     <div class="ao-actions">
       ${equipButton}
       ${
@@ -687,22 +702,60 @@ async function fillPanelFromCacheThenHydrate(
   }
 }
 
+function renderShowroomLoadoutButton(options: {
+  id: string;
+  role: string;
+  combo: OptimizerResult["best"] | undefined;
+  allowAccountActions: boolean;
+  isPrimary?: boolean;
+}): string {
+  if (!options.combo) {
+    return "";
+  }
+  const names = comboLabel(options.combo);
+  if (options.allowAccountActions) {
+    const className =
+      options.isPrimary === true ? "" : ' class="ao-secondary"';
+    return `<button type="button" id="${options.id}"${className} title="${escapeHtml(names)}">Equip ${escapeHtml(options.role)}</button>`;
+  }
+  return `<button type="button" id="${options.id}" class="ao-secondary ao-loadout-preview">${escapeHtml(options.role)}: ${escapeHtml(names)}</button>`;
+}
+
 function renderShowroomEquipActions(
   result: OptimizerResult,
-  options: { hideRecommendedEquip?: boolean } = {},
+  options: {
+    hideRecommendedEquip?: boolean;
+    allowAccountActions?: boolean;
+  } = {},
 ): string {
+  const areActionsEnabled = options.allowAccountActions === true;
   const recommended = options.hideRecommendedEquip
     ? ""
-    : '<button type="button" id="ao-inline-equip">Equip Recommended</button>';
-  const allArp = result.allArpLoadout
-    ? `<button type="button" id="ao-inline-equip-allarp" class="ao-secondary" title="${escapeHtml(comboLabel(result.allArpLoadout))}">Equip All-ARP%</button>`
-    : "";
-  const monthlyMeta = result.monthlyMetaLoadout
-    ? `<button type="button" id="ao-inline-equip-monthly" class="ao-secondary" title="${escapeHtml(comboLabel(result.monthlyMetaLoadout))}">Equip Monthly META</button>`
-    : "";
-  const market = result.marketDiscountLoadout
-    ? `<button type="button" id="ao-inline-equip-market" class="ao-secondary" title="${escapeHtml(comboLabel(result.marketDiscountLoadout))}">Equip Market Discount</button>`
-    : "";
+    : renderShowroomLoadoutButton({
+        id: "ao-inline-equip",
+        role: "Recommended",
+        combo: result.best,
+        allowAccountActions: areActionsEnabled,
+        isPrimary: true,
+      });
+  const allArp = renderShowroomLoadoutButton({
+    id: "ao-inline-equip-allarp",
+    role: "All-ARP%",
+    combo: result.allArpLoadout,
+    allowAccountActions: areActionsEnabled,
+  });
+  const monthlyMeta = renderShowroomLoadoutButton({
+    id: "ao-inline-equip-monthly",
+    role: "Monthly META",
+    combo: result.monthlyMetaLoadout,
+    allowAccountActions: areActionsEnabled,
+  });
+  const market = renderShowroomLoadoutButton({
+    id: "ao-inline-equip-market",
+    role: "Market Discount",
+    combo: result.marketDiscountLoadout,
+    allowAccountActions: areActionsEnabled,
+  });
   const isLoadoutButtons = [recommended, allArp, monthlyMeta, market].some(
     (html) => html.length > 0,
   );
@@ -847,44 +900,41 @@ function bindShowroomPanelActions(
   data: Awaited<ReturnType<typeof gatherData>>,
 ): void {
   const tree = panelTree(panel);
-  tree.querySelector("#ao-inline-equip")?.addEventListener("click", () => {
-    void confirmAndApplyCombo(
-      data.result.best,
-      data.result.current,
-      data.settings,
-      "recommended",
-    );
-  });
-  tree
-    .querySelector("#ao-inline-equip-allarp")
-    ?.addEventListener("click", () => {
-      void confirmAndApplyCombo(
-        data.result.allArpLoadout,
-        data.result.current,
-        data.settings,
-        "All-ARP%",
-      );
+  const areActionsEnabled = areAccountActionsEnabled(data.settings);
+  const bindLoadoutButton = (
+    id: string,
+    combo: OptimizerResult["best"],
+    label: string,
+  ): void => {
+    tree.querySelector(id)?.addEventListener("click", () => {
+      if (areActionsEnabled) {
+        void confirmAndApplyCombo(
+          combo,
+          data.result.current,
+          data.settings,
+          label,
+        );
+        return;
+      }
+      void showLoadoutPreview(combo, label);
     });
-  tree
-    .querySelector("#ao-inline-equip-monthly")
-    ?.addEventListener("click", () => {
-      void confirmAndApplyCombo(
-        data.result.monthlyMetaLoadout,
-        data.result.current,
-        data.settings,
-        "monthly META",
-      );
-    });
-  tree
-    .querySelector("#ao-inline-equip-market")
-    ?.addEventListener("click", () => {
-      void confirmAndApplyCombo(
-        data.result.marketDiscountLoadout,
-        data.result.current,
-        data.settings,
-        "market discount",
-      );
-    });
+  };
+  bindLoadoutButton("#ao-inline-equip", data.result.best, "recommended");
+  bindLoadoutButton(
+    "#ao-inline-equip-allarp",
+    data.result.allArpLoadout,
+    "All-ARP%",
+  );
+  bindLoadoutButton(
+    "#ao-inline-equip-monthly",
+    data.result.monthlyMetaLoadout,
+    "monthly META",
+  );
+  bindLoadoutButton(
+    "#ao-inline-equip-market",
+    data.result.marketDiscountLoadout,
+    "market discount",
+  );
   tree.querySelector("#ao-inline-open")?.addEventListener("click", () => {
     void openOptimizerModal();
   });
@@ -933,9 +983,15 @@ function renderBattlePassClaimBarBody(): string {
     shouldWait,
   );
   const skipArp = shouldSkipArpBoosts ? ' data-skip-arp="1"' : "";
-  const claimButton = shouldShowClaimAll
-    ? `<div class="ao-actions"><button type="button" class="ao-claim-btn"${skipArp}>${battlePassClaimButtonLabel(shouldSkipArpBoosts)}</button></div>`
-    : '<div class="ao-muted">Wait to claim ARP Boosts until All-ARP% is equipped</div>';
+  const areActionsEnabled =
+    cached !== undefined && areAccountActionsEnabled(cached.settings);
+  let claimButton =
+    '<div class="ao-muted">Wait to claim ARP Boosts until All-ARP% is equipped</div>';
+  if (shouldShowClaimAll && areActionsEnabled) {
+    claimButton = `<div class="ao-actions"><button type="button" class="ao-claim-btn"${skipArp}>${battlePassClaimButtonLabel(shouldSkipArpBoosts)}</button></div>`;
+  } else if (shouldShowClaimAll) {
+    claimButton = "";
+  }
   return `
     <div class="ao-heading">Battle Pass</div>
     <div class="ao-row"><strong>${count} ready to claim</strong></div>

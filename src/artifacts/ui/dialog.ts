@@ -1,3 +1,7 @@
+import {
+  areAccountActionsEnabled,
+  getArtifactSettings,
+} from '../settings';
 import { escapeHtml } from './loadoutPlan';
 import { DIALOG_ID, TOAST_ID, TOAST_MS, ensureOptimizerStyles } from './styles';
 
@@ -130,4 +134,15 @@ export function showAoToast(message: string): void {
   setTimeout(() => {
     toast.remove();
   }, TOAST_MS);
+}
+
+const ACCOUNT_ACTIONS_OFF_MESSAGE =
+  'Account actions are off. Enable them in the full panel.';
+
+export async function didAllowAccountActions(): Promise<boolean> {
+  if (areAccountActionsEnabled(await getArtifactSettings())) {
+    return true;
+  }
+  await showAoAlert(ACCOUNT_ACTIONS_OFF_MESSAGE, 'Account actions off');
+  return false;
 }

@@ -2356,11 +2356,21 @@ function renderActionTodoBody(todo: ActionTodo): string {
   return parts.join("");
 }
 
-function renderTodoActionButton(todo: ActionTodo): string {
+function renderTodoActionButton(
+  todo: ActionTodo,
+  options: { allowAccountActions?: boolean } = {},
+): string {
+  const areActionsEnabled = options.allowAccountActions === true;
   if (todo.upgradeInstanceId !== undefined) {
+    if (!areActionsEnabled) {
+      return "";
+    }
     return `<button type="button" class="ao-upgrade-btn" data-id="${todo.upgradeInstanceId}">Upgrade</button>`;
   }
   if (todo.claimBattlePass === true) {
+    if (!areActionsEnabled) {
+      return "";
+    }
     const skipArp =
       todo.claimBattlePassSkipArp === true ? ' data-skip-arp="1"' : "";
     return `<button type="button" class="ao-claim-btn"${skipArp}>${battlePassClaimButtonLabel(todo.claimBattlePassSkipArp === true)}</button>`;
@@ -2385,7 +2395,10 @@ export function isKeepingCurrentLoadout(todos: ActionTodo[]): boolean {
   return firstStep?.urgency?.chain !== "equip";
 }
 
-export function renderActionPlanContents(todos: ActionTodo[]): string {
+export function renderActionPlanContents(
+  todos: ActionTodo[],
+  options: { allowAccountActions?: boolean } = {},
+): string {
   const cautions = todos.filter((todo) => isCautionTodo(todo));
   const steps = todos.filter((todo) => !isCautionTodo(todo));
   const cautionHtml = cautions
@@ -2397,7 +2410,7 @@ export function renderActionPlanContents(todos: ActionTodo[]): string {
   const items = steps
     .map((todo, index) => {
       const toneClass = actionTodoToneClass(todo.tone);
-      return `<li class="ao-todo-item${toneClass}"><span class="ao-todo-index">${index + 1}.</span><div class="ao-todo-text">${renderActionTodoBody(todo)}</div>${renderTodoActionButton(todo)}</li>`;
+      return `<li class="ao-todo-item${toneClass}"><span class="ao-todo-index">${index + 1}.</span><div class="ao-todo-text">${renderActionTodoBody(todo)}</div>${renderTodoActionButton(todo, options)}</li>`;
     })
     .join("");
   const listHtml =
@@ -2409,6 +2422,9 @@ export function renderActionPlanContents(todos: ActionTodo[]): string {
   `;
 }
 
-export function renderActionPlan(todos: ActionTodo[]): string {
-  return `<div id="ao-action-plan">${renderActionPlanContents(todos)}</div>`;
+export function renderActionPlan(
+  todos: ActionTodo[],
+  options: { allowAccountActions?: boolean } = {},
+): string {
+  return `<div id="ao-action-plan">${renderActionPlanContents(todos, options)}</div>`;
 }

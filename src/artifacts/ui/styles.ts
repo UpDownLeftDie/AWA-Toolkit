@@ -417,8 +417,16 @@ function buildPanelShadowCss(variant: PanelShadowVariant): string {
       cursor: pointer;
       font-size: 14px !important;
     }
+    button[hidden] {
+      display: none !important;
+    }
     button.ao-secondary {
       background: #555;
+    }
+    button.ao-loadout-preview {
+      white-space: normal;
+      text-align: left;
+      max-width: 100%;
     }
     button.ao-danger {
       background: #e74c3c;

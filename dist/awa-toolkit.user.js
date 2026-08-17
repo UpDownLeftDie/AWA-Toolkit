@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         AWA Toolkit
 // @namespace    https://github.com/UpDownLeftDie/AWA-Toolkit
-// @version      2.0.13
+// @version      2.1.0
 // @author       jaredcat
 // @description  Artifact Optimizer, Control Center tasks, giveaway/vault filters, and UCF reading mode
 // @license      AGPL-3.0-or-later
@@ -2233,7 +2233,8 @@
 		slotCooldowns: [],
 		preferredTwitchStreamers: [],
 		browserNotifications: false,
-		notificationTypes: { ...DEFAULT_NOTIFICATION_TYPES }
+		notificationTypes: { ...DEFAULT_NOTIFICATION_TYPES },
+		allowAccountActions: false
 	};
 	function isPartialSettings(value) {
 		return typeof value === "object" && !!value;
@@ -2269,6 +2270,7 @@
 		}
 		if (Array.isArray(parsed.preferredTwitchStreamers)) settings.preferredTwitchStreamers = parsePreferredTwitchStreamers(parsed.preferredTwitchStreamers.filter((item) => typeof item === "string").join("\n"));
 		if (typeof parsed.browserNotifications === "boolean") settings.browserNotifications = parsed.browserNotifications;
+		if (typeof parsed.allowAccountActions === "boolean") settings.allowAccountActions = parsed.allowAccountActions;
 		settings.notificationTypes = mergeNotificationTypes(settings.notificationTypes, parsed.notificationTypes);
 	}
 	function mergeNotificationTypes(base, incoming) {
@@ -2393,6 +2395,9 @@
 	}
 	function isNotificationTypeEnabled(settings, key) {
 		return settings.notificationTypes[key] ?? true;
+	}
+	function areAccountActionsEnabled(settings) {
+		return settings.allowAccountActions;
 	}
 	var SNAPSHOT_KEY = "artifactSnapshot";
 	function isArtifactSnapshot(value) {
@@ -6128,9 +6133,16 @@
 		}
 		return parts.join("");
 	}
-	function renderTodoActionButton(todo) {
-		if (todo.upgradeInstanceId !== void 0) return `<button type="button" class="ao-upgrade-btn" data-id="${todo.upgradeInstanceId}">Upgrade</button>`;
-		if (todo.claimBattlePass === true) return `<button type="button" class="ao-claim-btn"${todo.claimBattlePassSkipArp === true ? " data-skip-arp=\"1\"" : ""}>${battlePassClaimButtonLabel(todo.claimBattlePassSkipArp === true)}</button>`;
+	function renderTodoActionButton(todo, options = {}) {
+		const areActionsEnabled = options.allowAccountActions === true;
+		if (todo.upgradeInstanceId !== void 0) {
+			if (!areActionsEnabled) return "";
+			return `<button type="button" class="ao-upgrade-btn" data-id="${todo.upgradeInstanceId}">Upgrade</button>`;
+		}
+		if (todo.claimBattlePass === true) {
+			if (!areActionsEnabled) return "";
+			return `<button type="button" class="ao-claim-btn"${todo.claimBattlePassSkipArp === true ? " data-skip-arp=\"1\"" : ""}>${battlePassClaimButtonLabel(todo.claimBattlePassSkipArp === true)}</button>`;
+		}
 		if (todo.openTwitchStream === true) return "<button type=\"button\" class=\"ao-twitch-btn\">Open stream</button>";
 		return "";
 	}
@@ -6140,14 +6152,14 @@
 	function isKeepingCurrentLoadout(todos) {
 		return todos.find((todo) => !isCautionTodo(todo))?.urgency?.chain !== "equip";
 	}
-	function renderActionPlanContents(todos) {
+	function renderActionPlanContents(todos, options = {}) {
 		const cautions = todos.filter((todo) => isCautionTodo(todo));
 		const steps = todos.filter((todo) => !isCautionTodo(todo));
 		const cautionHtml = cautions.map((todo) => {
 			return `<div class="ao-caution${actionTodoToneClass(todo.tone)}" role="note">${renderActionTodoBody(todo)}</div>`;
 		}).join("");
 		const items = steps.map((todo, index) => {
-			return `<li class="ao-todo-item${actionTodoToneClass(todo.tone)}"><span class="ao-todo-index">${index + 1}.</span><div class="ao-todo-text">${renderActionTodoBody(todo)}</div>${renderTodoActionButton(todo)}</li>`;
+			return `<li class="ao-todo-item${actionTodoToneClass(todo.tone)}"><span class="ao-todo-index">${index + 1}.</span><div class="ao-todo-text">${renderActionTodoBody(todo)}</div>${renderTodoActionButton(todo, options)}</li>`;
 		}).join("");
 		return `
     <div class="ao-heading">What to do</div>
@@ -6155,8 +6167,8 @@
     ${steps.length > 0 ? `<ul class="ao-todo-list">${items}</ul>` : ""}
   `;
 	}
-	function renderActionPlan(todos) {
-		return `<div id="ao-action-plan">${renderActionPlanContents(todos)}</div>`;
+	function renderActionPlan(todos, options = {}) {
+		return `<div id="ao-action-plan">${renderActionPlanContents(todos, options)}</div>`;
 	}
 	var OFFICIAL_GIVEAWAYS_PATH = "/ucf/Giveaway";
 	var ESI_GIVEAWAY_PATH = "/esi/featured-tile-data/Giveaway";
@@ -7072,7 +7084,7 @@
 			const prelim = await loadRemotePage(showroomPath);
 			if (prelim) inventory = scrapeShowroomFromDocument(prelim.document, pathnameFromUrl(prelim.url, showroomPath));
 		}
-		if (inventory?.artifacts.length) await nudgeStuckSlotLocks(inventory.artifacts);
+		if (inventory?.artifacts.length && areAccountActionsEnabled(await getArtifactSettings())) await nudgeStuckSlotLocks(inventory.artifacts);
 		const loaded = await loadRemotePage(showroomPath);
 		if (!loaded) {
 			if (existing?.slotLocks) await syncSlotLocksFromScrape(existing.slotLocks);
@@ -7742,8 +7754,16 @@
       cursor: pointer;
       font-size: 14px !important;
     }
+    button[hidden] {
+      display: none !important;
+    }
     button.ao-secondary {
       background: #555;
+    }
+    button.ao-loadout-preview {
+      white-space: normal;
+      text-align: left;
+      max-width: 100%;
     }
     button.ao-danger {
       background: #e74c3c;
@@ -8077,6 +8097,12 @@
 			toast.remove();
 		}, TOAST_MS);
 	}
+	var ACCOUNT_ACTIONS_OFF_MESSAGE = "Account actions are off. Enable them in the full panel.";
+	async function didAllowAccountActions() {
+		if (areAccountActionsEnabled(await getArtifactSettings())) return true;
+		await showAoAlert(ACCOUNT_ACTIONS_OFF_MESSAGE, "Account actions off");
+		return false;
+	}
 	var BP_CLAIM_ALL_PENDING_KEY = "ao-bp-claim-all";
 	var BP_CLAIM_SKIP_ARP_VALUE = "skip-arp";
 	async function persistBattlePassAfterClaim(options) {
@@ -8147,6 +8173,7 @@
 		showAoToast(`Claimed ${claimed} Battle Pass reward(s).`);
 	}
 	async function handleClaimAllBattlePass(options = {}) {
+		if (!await didAllowAccountActions()) return;
 		const isOnBattlePassPage = location.pathname.includes("/battle-pass");
 		const liveAll = isOnBattlePassPage ? listBattlePassClaimButtons().length : 0;
 		const liveNonArp = isOnBattlePassPage ? listBattlePassClaimButtons(document, { shouldSkipArpBoosts: true }).length : 0;
@@ -8170,6 +8197,11 @@
 	async function consumePendingBattlePassClaimAll() {
 		const pending = sessionStorage.getItem(BP_CLAIM_ALL_PENDING_KEY);
 		if (pending !== "1" && pending !== BP_CLAIM_SKIP_ARP_VALUE) return;
+		if (!areAccountActionsEnabled(await getArtifactSettings())) {
+			sessionStorage.removeItem(BP_CLAIM_ALL_PENDING_KEY);
+			showAoToast("Account actions are off. Enable them in the full panel.");
+			return;
+		}
 		sessionStorage.removeItem(BP_CLAIM_ALL_PENDING_KEY);
 		await waitForBattlePassDocument();
 		await runBattlePassClaims({ shouldSkipArpBoosts: pending === BP_CLAIM_SKIP_ARP_VALUE });
@@ -8554,18 +8586,19 @@
 		if ((result.current?.artifacts.length ?? 0) < 3) return `<div class="ao-row ao-muted">Equipped slots are incomplete (${result.current?.artifacts.length ?? 0}/3) — use Equip Recommended to fill empty slots.</div>`;
 		return `<div class="ao-row ao-muted">Could not compute a single-piece swap — use Equip Recommended.</div>`;
 	}
-	function renderUpgradePath(upgrades, fragments) {
+	function renderUpgradePath(upgrades, fragments, options = {}) {
 		if (upgrades.length === 0) return `<div class="ao-row ao-muted">No ARP upgrades left on owned artifacts.</div>`;
+		const shouldShowUpgradeButtons = options.shouldShowUpgradeButtons !== false;
 		const seenAffordable = new Set();
 		let hasReachedSave = false;
 		return upgrades.map((upgrade) => {
 			const step = `${TIER_LABELS[upgrade.fromTier]} → ${TIER_LABELS[upgrade.toTier]}`;
 			const gain = `+${upgrade.arpGain} ARP/mo`;
 			if (upgrade.isAffordable) {
-				const shouldShowUpgradeButton = !seenAffordable.has(upgrade.artifact.instanceId);
+				const isFirstAffordable = !seenAffordable.has(upgrade.artifact.instanceId);
 				seenAffordable.add(upgrade.artifact.instanceId);
-				const verb = shouldShowUpgradeButton ? "Upgrade" : "Then";
-				const button = shouldShowUpgradeButton ? `<button type="button" class="ao-upgrade-btn" data-id="${upgrade.artifact.instanceId}">Upgrade</button>` : "";
+				const verb = isFirstAffordable ? "Upgrade" : "Then";
+				const button = shouldShowUpgradeButtons && isFirstAffordable ? `<button type="button" class="ao-upgrade-btn" data-id="${upgrade.artifact.instanceId}">Upgrade</button>` : "";
 				return `
         <div class="ao-row">
           ${verb} <strong>${upgrade.artifact.displayName}</strong>
@@ -8597,10 +8630,11 @@
 		const hydrateBanner = options.isHydrating ? renderHydrateBanner("Updating in the background…") : "";
 		const extras = supplementalNotes(result.notes).map((n) => `<div class="ao-note">${escapeHtml(n)}</div>`).join("");
 		const vaultDiscount = renderVaultDiscountBlock(result);
-		const upgrades = renderUpgradePath(result.upgrades, fragments);
+		const areActionsEnabled = areAccountActionsEnabled(settings);
+		const upgrades = renderUpgradePath(result.upgrades, fragments, { shouldShowUpgradeButtons: areActionsEnabled });
 		const swap = formatSwapMessage(result);
 		const status = renderStatusSection(settings, siteState, snapshot?.slotLocks, {
-			showBattlePassClaimAll: shouldShowBattlePassClaimAll(siteState?.battlePass, result.deferBattlePassClaims === true),
+			showBattlePassClaimAll: areActionsEnabled && shouldShowBattlePassClaimAll(siteState?.battlePass, result.deferBattlePassClaims === true),
 			shouldSkipArpBoosts: shouldSkipArpInBattlePassClaimAll(siteState?.battlePass, result.deferBattlePassClaims === true)
 		});
 		const equippedLabel = formatEquippedLabel(result);
@@ -8616,6 +8650,12 @@
 		}).join("");
 		return `
     <div class="ao-notify">
+      ${renderNotifySwitch({
+			id: "ao-account-actions",
+			title: "Account actions",
+			hint: "Equip artifacts, upgrade, and claim Battle Pass for you. Use at your own risk.",
+			isChecked: areActionsEnabled
+		})}
       ${renderNotifySwitch({
 			id: "ao-browser-notifications",
 			title: "Desktop notifications",
@@ -8862,6 +8902,7 @@
 		await confirmAndApplyCombo(result.best, result.current, settings, "recommended", result);
 	}
 	async function confirmAndApplyCombo(combo, current, settings, label, result) {
+		if (!await didAllowAccountActions()) return;
 		if (!combo || combo.artifacts.length === 0) {
 			await showAoAlert(`No ${label} loadout available.`);
 			return;
@@ -9008,7 +9049,15 @@
 	async function handleRemoveManual(index) {
 		await saveArtifactSettings({ manualArtifacts: (await getArtifactSettings()).manualArtifacts.filter((_, itemIndex) => itemIndex !== index) });
 	}
+	async function showLoadoutPreview(combo, label) {
+		if (!combo || combo.artifacts.length === 0) {
+			await showAoAlert(`No ${label} loadout available.`);
+			return;
+		}
+		await showAoAlert(`Equip these on the Showroom:\n\n${sortArtifactsForDisplay(combo.artifacts).map((artifact) => artifact.displayName).join("\n")}`, label);
+	}
 	async function handleUpgradeClick(instanceId, onChanged) {
+		if (!await didAllowAccountActions()) return;
 		if (!await didConfirmAoDialog("Upgrade this artifact? This spends fragments and cannot be undone.", {
 			title: "Upgrade artifact",
 			confirmLabel: "Upgrade",
@@ -9051,6 +9100,31 @@
 		].join("\n");
 	}
 	function bindDynamicBody(root, onChanged) {
+		root.querySelector("#ao-account-actions")?.addEventListener("change", (event) => {
+			const input = event.currentTarget;
+			if (!(input instanceof HTMLInputElement)) return;
+			(async () => {
+				if (!input.checked) {
+					await saveArtifactSettings({ allowAccountActions: false });
+					await reloadOptimizerFromCache();
+					return;
+				}
+				if (!await didConfirmAoDialog([
+					"This lets AWA Toolkit change your equipped artifacts, spend fragments on upgrades, and claim Battle Pass rewards using the site APIs.",
+					"",
+					"Use at your own risk."
+				].join("\n"), {
+					title: "Enable account actions?",
+					confirmLabel: "Enable",
+					isDanger: true
+				})) {
+					input.checked = false;
+					return;
+				}
+				await saveArtifactSettings({ allowAccountActions: true });
+				await reloadOptimizerFromCache();
+			})();
+		});
 		root.querySelector("#ao-browser-notifications")?.addEventListener("change", (event) => {
 			const input = event.currentTarget;
 			if (!(input instanceof HTMLInputElement)) return;
@@ -9165,6 +9239,8 @@
 			const body = tree().querySelector("#ao-body");
 			if (!body) return;
 			body.innerHTML = renderResultBody(cache.result, cache.snapshot, cache.settings, cache.siteState, { isHydrating: options.isHydrating === true });
+			const equipButton = tree().querySelector("#ao-equip");
+			if (equipButton instanceof HTMLButtonElement) equipButton.hidden = !areAccountActionsEnabled(cache.settings);
 			bindDynamicBody(body, () => refreshView());
 		};
 		const refreshView = async (options) => {
@@ -9233,7 +9309,7 @@
           ${renderModalSkeleton()}
         </div>
         <div class="ao-actions">
-          <button type="button" id="ao-equip">Equip Recommended</button>
+          <button type="button" id="ao-equip" hidden>Equip Recommended</button>
           <button type="button" id="ao-refresh" class="ao-secondary">Refresh</button>
           <button type="button" id="ao-save" class="ao-secondary">Save Settings</button>
           <button type="button" id="ao-close" class="ao-danger">Close</button>
@@ -9379,7 +9455,10 @@
     <div class="ao-row"><strong>${summary.label}:</strong> ${comboLabel(summary.combo)}</div>
     ${renderBreakdown(summary.combo)}
     ${renderVaultDiscountBlock(data.result)}
-    ${renderShowroomEquipActions(data.result, { hideRecommendedEquip: summary.hideRecommendedEquip })}
+    ${renderShowroomEquipActions(data.result, {
+			hideRecommendedEquip: summary.hideRecommendedEquip,
+			allowAccountActions: areAccountActionsEnabled(data.settings)
+		})}
   `;
 	}
 	function compactClaimAllBpButton(data) {
@@ -9391,19 +9470,22 @@
 	function renderControlCenterPanelBody(data, options = {}) {
 		const hydrateBanner = options.isHydrating ? renderHydrateBanner("Updating in the background…") : "";
 		const summary = compactLoadoutSummary(data);
-		const equipButton = summary.hideRecommendedEquip ? "" : "<button type=\"button\" id=\"ao-cc-equip\">Equip Recommended</button>";
-		const claimBpButton = compactClaimAllBpButton(data);
+		const areActionsEnabled = areAccountActionsEnabled(data.settings);
+		const equipButton = areActionsEnabled && !summary.hideRecommendedEquip ? "<button type=\"button\" id=\"ao-cc-equip\">Equip Recommended</button>" : "";
+		const claimBpButton = areActionsEnabled ? compactClaimAllBpButton(data) : "";
+		const actionsOffNote = areActionsEnabled ? "" : "<div class=\"ao-muted\">Account actions are off — enable in Open Full Panel.</div>";
 		return `
     <div class="ao-heading">Artifact Optimizer</div>
     ${renderCredits({ compact: true })}
     ${hydrateBanner}
-    ${renderActionPlan(summary.todos)}
+    ${renderActionPlan(summary.todos, { allowAccountActions: areActionsEnabled })}
     ${renderSectionDivider()}
     <div class="ao-row"><strong>${summary.label}:</strong> ${comboLabel(summary.combo)}</div>
     ${renderBreakdown(summary.combo)}
     ${renderCooldownBlock(data.settings, data.snapshot?.slotLocks)}
     ${renderVaultDiscountBlock(data.result)}
     ${supplementalNotes(data.result.notes).map((note) => `<div class="ao-note">${escapeHtml(note)}</div>`).join("")}
+    ${actionsOffNote}
     <div class="ao-actions">
       ${equipButton}
       ${equipButton ? "<span class=\"ao-actions-sep\" aria-hidden=\"true\"></span>" : ""}
@@ -9483,11 +9565,42 @@
 			replaceInlinePanelBody(panel, renderPanelError(formatPanelLoadError(error)));
 		}
 	}
+	function renderShowroomLoadoutButton(options) {
+		if (!options.combo) return "";
+		const names = comboLabel(options.combo);
+		if (options.allowAccountActions) {
+			const className = options.isPrimary === true ? "" : " class=\"ao-secondary\"";
+			return `<button type="button" id="${options.id}"${className} title="${escapeHtml(names)}">Equip ${escapeHtml(options.role)}</button>`;
+		}
+		return `<button type="button" id="${options.id}" class="ao-secondary ao-loadout-preview">${escapeHtml(options.role)}: ${escapeHtml(names)}</button>`;
+	}
 	function renderShowroomEquipActions(result, options = {}) {
-		const recommended = options.hideRecommendedEquip ? "" : "<button type=\"button\" id=\"ao-inline-equip\">Equip Recommended</button>";
-		const allArp = result.allArpLoadout ? `<button type="button" id="ao-inline-equip-allarp" class="ao-secondary" title="${escapeHtml(comboLabel(result.allArpLoadout))}">Equip All-ARP%</button>` : "";
-		const monthlyMeta = result.monthlyMetaLoadout ? `<button type="button" id="ao-inline-equip-monthly" class="ao-secondary" title="${escapeHtml(comboLabel(result.monthlyMetaLoadout))}">Equip Monthly META</button>` : "";
-		const market = result.marketDiscountLoadout ? `<button type="button" id="ao-inline-equip-market" class="ao-secondary" title="${escapeHtml(comboLabel(result.marketDiscountLoadout))}">Equip Market Discount</button>` : "";
+		const areActionsEnabled = options.allowAccountActions === true;
+		const recommended = options.hideRecommendedEquip ? "" : renderShowroomLoadoutButton({
+			id: "ao-inline-equip",
+			role: "Recommended",
+			combo: result.best,
+			allowAccountActions: areActionsEnabled,
+			isPrimary: true
+		});
+		const allArp = renderShowroomLoadoutButton({
+			id: "ao-inline-equip-allarp",
+			role: "All-ARP%",
+			combo: result.allArpLoadout,
+			allowAccountActions: areActionsEnabled
+		});
+		const monthlyMeta = renderShowroomLoadoutButton({
+			id: "ao-inline-equip-monthly",
+			role: "Monthly META",
+			combo: result.monthlyMetaLoadout,
+			allowAccountActions: areActionsEnabled
+		});
+		const market = renderShowroomLoadoutButton({
+			id: "ao-inline-equip-market",
+			role: "Market Discount",
+			combo: result.marketDiscountLoadout,
+			allowAccountActions: areActionsEnabled
+		});
 		return `
     <div class="ao-actions">
       ${recommended}
@@ -9572,18 +9685,20 @@
 	};
 	function bindShowroomPanelActions(panel, data) {
 		const tree = panelTree(panel);
-		tree.querySelector("#ao-inline-equip")?.addEventListener("click", () => {
-			confirmAndApplyCombo(data.result.best, data.result.current, data.settings, "recommended");
-		});
-		tree.querySelector("#ao-inline-equip-allarp")?.addEventListener("click", () => {
-			confirmAndApplyCombo(data.result.allArpLoadout, data.result.current, data.settings, "All-ARP%");
-		});
-		tree.querySelector("#ao-inline-equip-monthly")?.addEventListener("click", () => {
-			confirmAndApplyCombo(data.result.monthlyMetaLoadout, data.result.current, data.settings, "monthly META");
-		});
-		tree.querySelector("#ao-inline-equip-market")?.addEventListener("click", () => {
-			confirmAndApplyCombo(data.result.marketDiscountLoadout, data.result.current, data.settings, "market discount");
-		});
+		const areActionsEnabled = areAccountActionsEnabled(data.settings);
+		const bindLoadoutButton = (id, combo, label) => {
+			tree.querySelector(id)?.addEventListener("click", () => {
+				if (areActionsEnabled) {
+					confirmAndApplyCombo(combo, data.result.current, data.settings, label);
+					return;
+				}
+				showLoadoutPreview(combo, label);
+			});
+		};
+		bindLoadoutButton("#ao-inline-equip", data.result.best, "recommended");
+		bindLoadoutButton("#ao-inline-equip-allarp", data.result.allArpLoadout, "All-ARP%");
+		bindLoadoutButton("#ao-inline-equip-monthly", data.result.monthlyMetaLoadout, "monthly META");
+		bindLoadoutButton("#ao-inline-equip-market", data.result.marketDiscountLoadout, "market discount");
 		tree.querySelector("#ao-inline-open")?.addEventListener("click", () => {
 			openOptimizerModal();
 		});
@@ -9609,10 +9724,15 @@
 		const shouldWait = cached === void 0 ? (battlePass?.readyToClaimArp ?? 0) > 0 : cached.result.deferBattlePassClaims === true;
 		const shouldShowClaimAll = shouldShowBattlePassClaimAll(battlePass, shouldWait);
 		const shouldSkipArpBoosts = shouldSkipArpInBattlePassClaimAll(battlePass, shouldWait);
+		const skipArp = shouldSkipArpBoosts ? " data-skip-arp=\"1\"" : "";
+		const areActionsEnabled = cached !== void 0 && areAccountActionsEnabled(cached.settings);
+		let claimButton = "<div class=\"ao-muted\">Wait to claim ARP Boosts until All-ARP% is equipped</div>";
+		if (shouldShowClaimAll && areActionsEnabled) claimButton = `<div class="ao-actions"><button type="button" class="ao-claim-btn"${skipArp}>${battlePassClaimButtonLabel(shouldSkipArpBoosts)}</button></div>`;
+		else if (shouldShowClaimAll) claimButton = "";
 		return `
     <div class="ao-heading">Battle Pass</div>
     <div class="ao-row"><strong>${count} ready to claim</strong></div>
-    ${shouldShowClaimAll ? `<div class="ao-actions"><button type="button" class="ao-claim-btn"${shouldSkipArpBoosts ? " data-skip-arp=\"1\"" : ""}>${battlePassClaimButtonLabel(shouldSkipArpBoosts)}</button></div>` : "<div class=\"ao-muted\">Wait to claim ARP Boosts until All-ARP% is equipped</div>"}
+    ${claimButton}
   `;
 	}
 	async function paintBattlePassClaimBar() {

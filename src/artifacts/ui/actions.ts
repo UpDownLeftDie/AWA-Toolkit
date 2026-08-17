@@ -19,7 +19,12 @@ import {
   type ArtifactOptimizerSettings,
 } from '../settings';
 import { bindClaimAllButtons } from './battlePassClaim';
-import { didConfirmAoDialog, showAoAlert, showAoToast } from './dialog';
+import {
+  didAllowAccountActions,
+  didConfirmAoDialog,
+  showAoAlert,
+  showAoToast,
+} from './dialog';
 import { gatheredCache, isControlCenterPage } from './gather';
 import {
   formatLockedSlotParts,
@@ -27,6 +32,7 @@ import {
   loadoutLabel,
   loadoutSetNames,
   planLoadoutChanges,
+  sortArtifactsForDisplay,
   type ArtifactSlot,
   type LoadoutChangePlan,
 } from './loadoutPlan';
@@ -104,6 +110,9 @@ export async function confirmAndApplyCombo(
   label: string,
   result?: OptimizerResult,
 ): Promise<void> {
+  if (!(await didAllowAccountActions())) {
+    return;
+  }
   if (!combo || combo.artifacts.length === 0) {
     await showAoAlert(`No ${label} loadout available.`);
     return;
@@ -409,10 +418,27 @@ export async function handleRemoveManual(index: number): Promise<void> {
   await saveArtifactSettings({ manualArtifacts });
 }
 
+export async function showLoadoutPreview(
+  combo: ScoredCombo | undefined,
+  label: string,
+): Promise<void> {
+  if (!combo || combo.artifacts.length === 0) {
+    await showAoAlert(`No ${label} loadout available.`);
+    return;
+  }
+  const names = sortArtifactsForDisplay(combo.artifacts)
+    .map((artifact) => artifact.displayName)
+    .join('\n');
+  await showAoAlert(`Equip these on the Showroom:\n\n${names}`, label);
+}
+
 export async function handleUpgradeClick(
   instanceId: number,
   onChanged: () => Promise<void>,
 ): Promise<void> {
+  if (!(await didAllowAccountActions())) {
+    return;
+  }
   const isOk = await didConfirmAoDialog(
     'Upgrade this artifact? This spends fragments and cannot be undone.',
     { title: 'Upgrade artifact', confirmLabel: 'Upgrade', isDanger: true },
@@ -481,6 +507,39 @@ export function bindDynamicBody(
   root: HTMLElement,
   onChanged: () => Promise<void>,
 ): void {
+  root
+    .querySelector<HTMLInputElement>('#ao-account-actions')
+    ?.addEventListener('change', (event) => {
+      const input = event.currentTarget;
+      if (!(input instanceof HTMLInputElement)) {
+        return;
+      }
+      void (async () => {
+        if (!input.checked) {
+          await saveArtifactSettings({ allowAccountActions: false });
+          await reloadOptimizerFromCache();
+          return;
+        }
+        const didAgree = await didConfirmAoDialog(
+          [
+            'This lets AWA Toolkit change your equipped artifacts, spend fragments on upgrades, and claim Battle Pass rewards using the site APIs.',
+            '',
+            'Use at your own risk.',
+          ].join('\n'),
+          {
+            title: 'Enable account actions?',
+            confirmLabel: 'Enable',
+            isDanger: true,
+          },
+        );
+        if (!didAgree) {
+          input.checked = false;
+          return;
+        }
+        await saveArtifactSettings({ allowAccountActions: true });
+        await reloadOptimizerFromCache();
+      })();
+    });
   root
     .querySelector<HTMLInputElement>('#ao-browser-notifications')
     ?.addEventListener('change', (event) => {

@@ -6,6 +6,7 @@ import type {
 } from '../optimizer';
 import type { ArtifactSnapshot } from '../scraper';
 import {
+  areAccountActionsEnabled,
   isNotificationTypeEnabled,
   NOTIFICATION_TYPE_COPY,
   NOTIFICATION_TYPE_KEYS,
@@ -519,10 +520,12 @@ export function formatSwapMessage(result: OptimizerResult): string {
 export function renderUpgradePath(
   upgrades: UpgradeSuggestion[],
   fragments: number,
+  options: { shouldShowUpgradeButtons?: boolean } = {},
 ): string {
   if (upgrades.length === 0) {
     return `<div class="ao-row ao-muted">No ARP upgrades left on owned artifacts.</div>`;
   }
+  const shouldShowUpgradeButtons = options.shouldShowUpgradeButtons !== false;
   const seenAffordable = new Set<number>();
   let hasReachedSave = false;
   return upgrades
@@ -530,14 +533,15 @@ export function renderUpgradePath(
       const step = `${TIER_LABELS[upgrade.fromTier]} → ${TIER_LABELS[upgrade.toTier]}`;
       const gain = `+${upgrade.arpGain} ARP/mo`;
       if (upgrade.isAffordable) {
-        const shouldShowUpgradeButton = !seenAffordable.has(
+        const isFirstAffordable = !seenAffordable.has(
           upgrade.artifact.instanceId,
         );
         seenAffordable.add(upgrade.artifact.instanceId);
-        const verb = shouldShowUpgradeButton ? 'Upgrade' : 'Then';
-        const button = shouldShowUpgradeButton
-          ? `<button type="button" class="ao-upgrade-btn" data-id="${upgrade.artifact.instanceId}">Upgrade</button>`
-          : '';
+        const verb = isFirstAffordable ? 'Upgrade' : 'Then';
+        const button =
+          shouldShowUpgradeButtons && isFirstAffordable
+            ? `<button type="button" class="ao-upgrade-btn" data-id="${upgrade.artifact.instanceId}">Upgrade</button>`
+            : '';
         return `
         <div class="ao-row">
           ${verb} <strong>${upgrade.artifact.displayName}</strong>
@@ -585,14 +589,19 @@ export function renderResultBody(
     .join('');
   const vaultDiscount = renderVaultDiscountBlock(result);
 
-  const upgrades = renderUpgradePath(result.upgrades, fragments);
+  const areActionsEnabled = areAccountActionsEnabled(settings);
+  const upgrades = renderUpgradePath(result.upgrades, fragments, {
+    shouldShowUpgradeButtons: areActionsEnabled,
+  });
 
   const swap = formatSwapMessage(result);
   const status = renderStatusSection(settings, siteState, snapshot?.slotLocks, {
-    showBattlePassClaimAll: shouldShowBattlePassClaimAll(
-      siteState?.battlePass,
-      result.deferBattlePassClaims === true,
-    ),
+    showBattlePassClaimAll:
+      areActionsEnabled &&
+      shouldShowBattlePassClaimAll(
+        siteState?.battlePass,
+        result.deferBattlePassClaims === true,
+      ),
     shouldSkipArpBoosts: shouldSkipArpInBattlePassClaimAll(
       siteState?.battlePass,
       result.deferBattlePassClaims === true,
@@ -617,6 +626,12 @@ export function renderResultBody(
 
   return `
     <div class="ao-notify">
+      ${renderNotifySwitch({
+        id: 'ao-account-actions',
+        title: 'Account actions',
+        hint: 'Equip artifacts, upgrade, and claim Battle Pass for you. Use at your own risk.',
+        isChecked: areActionsEnabled,
+      })}
       ${renderNotifySwitch({
         id: 'ao-browser-notifications',
         title: 'Desktop notifications',

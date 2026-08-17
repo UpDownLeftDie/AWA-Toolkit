@@ -1,3 +1,4 @@
+import { areAccountActionsEnabled, getArtifactSettings } from '../settings';
 import {
   battlePassClaimableArp,
   battlePassReadyNonArp,
@@ -8,7 +9,12 @@ import {
   saveSiteState,
   waitForBattlePassDocument,
 } from '../siteState';
-import { didConfirmAoDialog, showAoAlert, showAoToast } from './dialog';
+import {
+  didAllowAccountActions,
+  didConfirmAoDialog,
+  showAoAlert,
+  showAoToast,
+} from './dialog';
 
 const BP_CLAIM_ALL_PENDING_KEY = 'ao-bp-claim-all';
 const BP_CLAIM_SKIP_ARP_VALUE = 'skip-arp';
@@ -118,6 +124,9 @@ async function runBattlePassClaims(options: {
 export async function handleClaimAllBattlePass(
   options: { shouldSkipArpBoosts?: boolean } = {},
 ): Promise<void> {
+  if (!(await didAllowAccountActions())) {
+    return;
+  }
   const isOnBattlePassPage = location.pathname.includes('/battle-pass');
   const liveAll = isOnBattlePassPage
     ? listBattlePassClaimButtons().length
@@ -157,6 +166,11 @@ export async function handleClaimAllBattlePass(
 export async function consumePendingBattlePassClaimAll(): Promise<void> {
   const pending = sessionStorage.getItem(BP_CLAIM_ALL_PENDING_KEY);
   if (pending !== '1' && pending !== BP_CLAIM_SKIP_ARP_VALUE) {
+    return;
+  }
+  if (!areAccountActionsEnabled(await getArtifactSettings())) {
+    sessionStorage.removeItem(BP_CLAIM_ALL_PENDING_KEY);
+    showAoToast('Account actions are off. Enable them in the full panel.');
     return;
   }
   sessionStorage.removeItem(BP_CLAIM_ALL_PENDING_KEY);

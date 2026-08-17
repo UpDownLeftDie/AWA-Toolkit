@@ -75,6 +75,11 @@ export interface ArtifactOptimizerSettings {
   Which events fire while `browserNotifications` is on. Missing keys default on.
   */
   notificationTypes: NotificationTypeToggles;
+  /**
+  Equip / upgrade / claim Battle Pass via AWA APIs. Off by default (use at
+  your own risk). Missing saved values stay off so 2.0 installs opt in.
+  */
+  allowAccountActions: boolean;
 }
 
 export const NOTIFICATION_TYPE_KEYS = [
@@ -136,6 +141,7 @@ export const defaultArtifactSettings: ArtifactOptimizerSettings = {
   preferredTwitchStreamers: [],
   browserNotifications: false,
   notificationTypes: { ...DEFAULT_NOTIFICATION_TYPES },
+  allowAccountActions: false,
 };
 
 function isPartialSettings(
@@ -215,6 +221,9 @@ function applyParsedSettings(
   }
   if (typeof parsed.browserNotifications === 'boolean') {
     settings.browserNotifications = parsed.browserNotifications;
+  }
+  if (typeof parsed.allowAccountActions === 'boolean') {
+    settings.allowAccountActions = parsed.allowAccountActions;
   }
   settings.notificationTypes = mergeNotificationTypes(
     settings.notificationTypes,
@@ -476,6 +485,12 @@ export function isNotificationTypeEnabled(
   key: NotificationTypeKey,
 ): boolean {
   return settings.notificationTypes[key] ?? true;
+}
+
+export function areAccountActionsEnabled(
+  settings: ArtifactOptimizerSettings,
+): boolean {
+  return settings.allowAccountActions;
 }
 
 export { COOLDOWN_MS };
