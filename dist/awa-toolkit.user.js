@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         AWA Toolkit
 // @namespace    https://github.com/UpDownLeftDie/AWA-Toolkit
-// @version      2.0.11
+// @version      2.0.12
 // @author       jaredcat
 // @description  Artifact Optimizer, Control Center tasks, giveaway/vault filters, and UCF reading mode
 // @license      AGPL-3.0-or-later
@@ -5015,8 +5015,7 @@
 		return todos.toSorted((left, right) => compareActionTodoUrgency(left.urgency ?? defaultTodoUrgency(left), right.urgency ?? defaultTodoUrgency(right)));
 	}
 	function phaseChain(phase) {
-		if (phase === "afterNow") return "equip";
-		if (phase === "after") return "after";
+		if (phase === "afterNow" || phase === "after") return "after";
 		return "before";
 	}
 	var ACTIVITY_TODO_RULES = [
@@ -5325,8 +5324,6 @@
 		const pending = remainingSteamQuestRows(siteState);
 		const reasons = [];
 		if (bonus > 0) reasons.push({ text: "Equip bonus before starting" });
-		const pendingNames = pending.map((quest) => quest.name).filter((name) => name.length > 0);
-		if (pendingNames.length > 0) reasons.push({ text: pendingNames.join(", ") });
 		if (pending.some((quest) => quest.libraryPending === true)) reasons.push({ text: STEAM_LIBRARY_PENDING_HINT });
 		if (reasons.length === 0) return { count: pending.length };
 		return {
@@ -5868,9 +5865,7 @@
 		if (slot === "afterFull" || slot === "afterNow") phase = "after";
 		else if (slot === "before") phase = "before";
 		const bonus = slot === "other" ? currentBonus : bonusForActivityPhase(phase, currentBonus, bestBonus);
-		let chain = "before";
-		if (slot === "afterFull") chain = "after";
-		else if (slot === "afterNow") chain = "equip";
+		const chain = slot === "afterFull" || slot === "afterNow" ? "after" : "before";
 		const todo = {
 			text: discordPollTodoText({
 				slot,

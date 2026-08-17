@@ -231,10 +231,9 @@ function sortActionTodosByUrgency(todos: ActionTodo[]): ActionTodo[] {
 }
 
 function phaseChain(phase: ActivityPhase): ActionTodoChain {
-  if (phase === "afterNow") {
-    return "equip";
-  }
-  if (phase === "after") {
+  // afterNow = after the immediate equip, not tied with it (ARP would rank
+  // Steam Quests above "Equip … now").
+  if (phase === "afterNow" || phase === "after") {
     return "after";
   }
   return "before";
@@ -943,12 +942,6 @@ function steamQuestsTodoExtras(
   const reasons: ActionTodoReason[] = [];
   if (bonus > 0) {
     reasons.push({ text: "Equip bonus before starting" });
-  }
-  const pendingNames = pending
-    .map((quest) => quest.name)
-    .filter((name) => name.length > 0);
-  if (pendingNames.length > 0) {
-    reasons.push({ text: pendingNames.join(", ") });
   }
   if (pending.some((quest) => quest.libraryPending === true)) {
     reasons.push({ text: STEAM_LIBRARY_PENDING_HINT });
@@ -2054,12 +2047,8 @@ function buildDiscordPollAction(options: {
     slot === "other"
       ? currentBonus
       : bonusForActivityPhase(phase, currentBonus, bestBonus);
-  let chain: ActionTodoChain = "before";
-  if (slot === "afterFull") {
-    chain = "after";
-  } else if (slot === "afterNow") {
-    chain = "equip";
-  }
+  const chain: ActionTodoChain =
+    slot === "afterFull" || slot === "afterNow" ? "after" : "before";
   const todo: ActionTodo = {
     text: discordPollTodoText({
       slot,
