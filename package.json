@@ -9,8 +9,8 @@
     "node": ">=24"
   },
   "scripts": {
-    "lint": "eslint && tsc --noEmit",
-    "lint:fix": "eslint --fix && tsc --noEmit",
+    "lint": "eslint src --max-warnings 0 && tsc --noEmit",
+    "lint:fix": "eslint src --fix --max-warnings 0 && tsc --noEmit",
     "dev": "vite",
     "build": "tsc && vite build"
   },

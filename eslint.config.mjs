@@ -12,6 +12,8 @@ export default [
   sonarjs.configs.recommended,
   unicorn.configs.recommended,
   prettier,
+  // recommendedTypeChecked[0] is parser-only. tsconfigRootDir keeps
+  // projectService rooted on this package so the IDE matches CLI types.
   {
     files: ['src/**/*.ts'],
     ...ts.configs.recommendedTypeChecked[0],
@@ -24,6 +26,7 @@ export default [
       parserOptions: {
         ...ts.configs.recommendedTypeChecked[0].languageOptions?.parserOptions,
         projectService: true,
+        tsconfigRootDir: import.meta.dirname,
       },
     },
     rules: {

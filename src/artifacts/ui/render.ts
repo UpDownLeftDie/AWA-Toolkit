@@ -324,18 +324,13 @@ function renderCommunityEventBlock(
     return '';
   }
   const title = escapeHtml(event.title ?? 'Steam Community Event');
-  const pendingParts =
-    event.pendingArp > 0
-      ? describeCommunityEventPendingParts(event)
-      : undefined;
-  const pending = pendingParts
-    ? `<strong>${escapeHtml(pendingParts.text)}</strong>`
-    : 'no pending ARP with a gate met';
+  const pendingParts = describeCommunityEventPendingParts(event);
+  const pending = `<strong>${escapeHtml(pendingParts.text)}</strong>`;
   const lines = [
     `<div><strong>${title}</strong></div>`,
     `<div>${event.personalHours}h played · ${pending}</div>`,
   ];
-  if (pendingParts?.later) {
+  if (pendingParts.later) {
     lines.push(`<div class="ao-muted">${escapeHtml(pendingParts.later)}</div>`);
   }
   if (options?.detailed) {

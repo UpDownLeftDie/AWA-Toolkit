@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         AWA Toolkit
 // @namespace    https://github.com/UpDownLeftDie/AWA-Toolkit
-// @version      2.1.0
+// @version      2.1.1
 // @author       jaredcat
 // @description  Artifact Optimizer, Control Center tasks, giveaway/vault filters, and UCF reading mode
 // @license      AGPL-3.0-or-later
@@ -1219,12 +1219,55 @@
 		if (title) result.title = title;
 		return result;
 	}
-	function isCommunityEventMilestonePending(milestone, personalHours) {
-		if (milestone.isAwarded || milestone.arpReward <= 0) return false;
-		return milestone.personalHoursRequired <= personalHours || milestone.isCommunityUnlocked;
+	function isCommunityGateMet(milestone, communityHours) {
+		if (milestone.isCommunityUnlocked) return true;
+		const required = milestone.communityHoursRequired;
+		return required !== void 0 && communityHours !== void 0 && communityHours >= required;
 	}
-	function computePendingCommunityEventArp(personalHours, milestones) {
-		return milestones.filter((milestone) => isCommunityEventMilestonePending(milestone, personalHours)).reduce((sum, milestone) => sum + milestone.arpReward, 0);
+	function applyCommunityHoursUnlocks(milestones, communityHours) {
+		if (communityHours === void 0) return milestones;
+		return milestones.map((milestone) => {
+			if (isCommunityGateMet(milestone, communityHours)) return milestone.isCommunityUnlocked ? milestone : {
+				...milestone,
+				isCommunityUnlocked: true
+			};
+			return milestone;
+		});
+	}
+	function milestoneSortKey(milestone) {
+		return milestone.communityHoursRequired ?? milestone.index;
+	}
+	function applySequentialCommunityAwards(milestones) {
+		let lastAwardedKey = Number.NEGATIVE_INFINITY;
+		for (const milestone of milestones) {
+			if (!milestone.isAwarded) continue;
+			const key = milestoneSortKey(milestone);
+			if (key > lastAwardedKey) lastAwardedKey = key;
+		}
+		if (lastAwardedKey === Number.NEGATIVE_INFINITY) return milestones;
+		return milestones.map((milestone) => {
+			if (milestone.isAwarded || milestoneSortKey(milestone) >= lastAwardedKey) return milestone;
+			return {
+				...milestone,
+				isAwarded: true,
+				isCommunityUnlocked: true
+			};
+		});
+	}
+	function personalHoursFromMilestones(milestones, scrapedHours) {
+		let hours = scrapedHours;
+		for (const milestone of milestones) if (milestone.isAwarded && milestone.personalHoursRequired > hours) hours = milestone.personalHoursRequired;
+		return hours;
+	}
+	function isPersonalHoursMet(milestone, personalHours) {
+		return milestone.personalHoursRequired <= personalHours;
+	}
+	function isCommunityEventMilestonePending(milestone, personalHours, communityHours) {
+		if (milestone.isAwarded || milestone.arpReward <= 0) return false;
+		return isPersonalHoursMet(milestone, personalHours) || isCommunityGateMet(milestone, communityHours);
+	}
+	function computePendingCommunityEventArp(personalHours, milestones, communityHours) {
+		return milestones.filter((milestone) => isCommunityEventMilestonePending(milestone, personalHours, communityHours)).reduce((sum, milestone) => sum + milestone.arpReward, 0);
 	}
 	function breakDownCommunityEventPending(event) {
 		let imminentArp = 0;
@@ -1232,10 +1275,10 @@
 		let waitingPersonalArp = 0;
 		let pendingCount = 0;
 		for (const milestone of event.milestones) {
-			if (!isCommunityEventMilestonePending(milestone, event.personalHours)) continue;
+			if (!isCommunityEventMilestonePending(milestone, event.personalHours, event.communityHours)) continue;
 			pendingCount += 1;
-			const isPersonalMet = milestone.personalHoursRequired <= event.personalHours;
-			if (isPersonalMet && milestone.isCommunityUnlocked) imminentArp += milestone.arpReward;
+			const isPersonalMet = isPersonalHoursMet(milestone, event.personalHours);
+			if (isPersonalMet && isCommunityGateMet(milestone, event.communityHours)) imminentArp += milestone.arpReward;
 			else if (isPersonalMet) waitingCommunityArp += milestone.arpReward;
 			else waitingPersonalArp += milestone.arpReward;
 		}
@@ -1250,18 +1293,30 @@
 		if (allArpPct > 0) return `~${Math.round(baseArp * (1 + allArpPct))} ARP`;
 		return `${baseArp} ARP`;
 	}
+	function describeWaitingPersonalArp(event, waitingPersonalArp, allArpPct) {
+		const unmet = event.milestones.filter((milestone) => !milestone.isAwarded && milestone.arpReward > 0 && isCommunityGateMet(milestone, event.communityHours) && !isPersonalHoursMet(milestone, event.personalHours));
+		let needHours = 0;
+		for (const milestone of unmet) if (milestone.personalHoursRequired > needHours) needHours = milestone.personalHoursRequired;
+		const moreHours = Math.max(0, needHours - event.personalHours);
+		const head = formatCommunityEventArp(waitingPersonalArp, allArpPct);
+		if (moreHours <= 0 || needHours <= 0) return `${head} unlocked — not awarded yet`;
+		return `${head} unlocked — play ${moreHours}h more (${event.personalHours}h / ${needHours}h)`;
+	}
 	function describeCommunityEventPendingParts(event, allArpPct = 0) {
 		const { imminentArp, waitingCommunityArp, waitingPersonalArp } = breakDownCommunityEventPending(event);
-		if (imminentArp <= 0 && waitingCommunityArp <= 0 && waitingPersonalArp <= 0) return { text: "no unawarded ARP with a gate already met" };
+		const nextLocked = nextLockedCommunityArpMilestone(event);
+		if (nextLocked === void 0 && imminentArp <= 0 && waitingCommunityArp <= 0 && waitingPersonalArp <= 0) return { text: "no unawarded ARP remaining" };
 		const parts = [];
 		let later;
-		if (waitingPersonalArp > 0) parts.push(`${formatCommunityEventArp(waitingPersonalArp, allArpPct)} unlocked — play hours to claim`);
-		if (waitingCommunityArp > 0) {
-			const waiting = describeWaitingCommunityArp(event, waitingCommunityArp, allArpPct);
+		if (waitingPersonalArp > 0) parts.push(describeWaitingPersonalArp(event, waitingPersonalArp, allArpPct));
+		const lockedArp = waitingCommunityArp > 0 ? waitingCommunityArp : nextLocked?.arpReward ?? 0;
+		if (lockedArp > 0) {
+			const waiting = describeWaitingCommunityArp(event, lockedArp, allArpPct);
 			parts.push(waiting.text);
 			later = waiting.later;
 		}
-		if (imminentArp > 0) parts.push(`${formatCommunityEventArp(imminentArp, allArpPct)} may already be awarding`);
+		if (imminentArp > 0) parts.push(`${formatCommunityEventArp(imminentArp, allArpPct)} unlocked — not awarded yet`);
+		if (parts.length === 0) return { text: "no unawarded ARP remaining" };
 		return later ? {
 			text: parts.join("; "),
 			later
@@ -1337,7 +1392,7 @@
 			pendingArp: 0
 		} : scraped);
 		const source = options.source ?? "visit";
-		const sameEvent = previous && previous.isLive && (previous.url === scraped.url || previous.title !== void 0 && scraped.title !== void 0 && previous.title === scraped.title);
+		const sameEvent = previous && (previous.url === scraped.url || previous.title !== void 0 && scraped.title !== void 0 && previous.title === scraped.title);
 		const hasAsceHistory = Boolean(sameEvent) && previous?.communityHoursSource === "asce";
 		let samples = sameEvent ? [...previous.communityHoursSamples ?? []] : [];
 		if (!hasAsceHistory && scraped.communityHours !== void 0) samples = appendCommunityHoursSample(samples, scraped.communityHours, scraped.scrapedAt, source);
@@ -1349,11 +1404,36 @@
 	function milestoneMergeKey(milestone) {
 		return milestone.communityHoursRequired === void 0 ? `i:${milestone.index}` : `h:${milestone.communityHoursRequired}`;
 	}
+	function preferCommunityEventMilestone(scraped, previous) {
+		if (!previous) return scraped;
+		const arpReward = scraped.arpReward > 0 ? scraped.arpReward : previous.arpReward;
+		const next = {
+			...previous,
+			...scraped,
+			arpReward,
+			isAwarded: scraped.arpReward > 0 ? scraped.isAwarded : previous.isAwarded,
+			isCommunityUnlocked: scraped.isCommunityUnlocked || previous.isCommunityUnlocked
+		};
+		if (scraped.arpReward <= 0 && previous.arpReward > 0) next.rewardLabel = previous.rewardLabel;
+		if (scraped.communityHoursRequired === void 0 && previous.communityHoursRequired !== void 0) next.communityHoursRequired = previous.communityHoursRequired;
+		if (scraped.personalHoursRequired <= 0 && previous.personalHoursRequired > 0) next.personalHoursRequired = previous.personalHoursRequired;
+		return next;
+	}
 	function mergeCommunityEventMilestones(scraped, previous) {
 		if (!previous || previous.length === 0) return scraped;
 		const merged = new Map();
-		for (const milestone of previous) merged.set(milestoneMergeKey(milestone), milestone);
-		for (const milestone of scraped) merged.set(milestoneMergeKey(milestone), milestone);
+		const previousByIndex = new Map();
+		for (const milestone of previous) {
+			merged.set(milestoneMergeKey(milestone), milestone);
+			previousByIndex.set(milestone.index, milestone);
+		}
+		for (const milestone of scraped) {
+			const key = milestoneMergeKey(milestone);
+			const previousMatch = merged.get(key) ?? (milestone.communityHoursRequired === void 0 ? previousByIndex.get(milestone.index) : void 0);
+			if (previousMatch) merged.delete(milestoneMergeKey(previousMatch));
+			const next = preferCommunityEventMilestone(milestone, previousMatch);
+			merged.set(milestoneMergeKey(next), next);
+		}
 		return merged.values().toArray().toSorted((left, right) => (left.communityHoursRequired ?? left.index) - (right.communityHoursRequired ?? right.index));
 	}
 	function inferPersonalHoursRequired(existing) {
@@ -1361,8 +1441,7 @@
 		if (known.length === 0) return 1;
 		return Math.max(...known);
 	}
-	function upsertCommunityEventMilestoneGates(existing, gates) {
-		if (gates.length === 0) return existing;
+	function splitMilestonesByHours(existing) {
 		const byHours = new Map();
 		const withoutHours = [];
 		for (const milestone of existing) {
@@ -1370,16 +1449,38 @@
 			if (hours === void 0) withoutHours.push(milestone);
 			else byHours.set(hours, milestone);
 		}
-		const inferredPersonal = inferPersonalHoursRequired(existing);
+		return {
+			byHours,
+			withoutHours
+		};
+	}
+	function nextMilestoneIndex(existing) {
 		let nextIndex = 1;
 		for (const milestone of existing) if (milestone.index >= nextIndex) nextIndex = milestone.index + 1;
+		return nextIndex;
+	}
+	function patchMilestoneFromGate(current, gate) {
+		const isUnlocking = gate.unlocked && !current.isCommunityUnlocked;
+		const isFillingArp = current.arpReward <= 0 && gate.arpReward > 0;
+		if (!isUnlocking && !isFillingArp) return current;
+		return {
+			...current,
+			...isUnlocking && { isCommunityUnlocked: true },
+			...isFillingArp && {
+				arpReward: gate.arpReward,
+				rewardLabel: gate.label
+			}
+		};
+	}
+	function upsertCommunityEventMilestoneGates(existing, gates) {
+		if (gates.length === 0) return existing;
+		const { byHours, withoutHours } = splitMilestonesByHours(existing);
+		const inferredPersonal = inferPersonalHoursRequired(existing);
+		let nextIndex = nextMilestoneIndex(existing);
 		for (const gate of gates) {
 			const current = byHours.get(gate.hours);
 			if (current) {
-				if (gate.unlocked && !current.isCommunityUnlocked) byHours.set(gate.hours, {
-					...current,
-					isCommunityUnlocked: true
-				});
+				byHours.set(gate.hours, patchMilestoneFromGate(current, gate));
 				continue;
 			}
 			byHours.set(gate.hours, {
@@ -1399,8 +1500,9 @@
 		const next = { ...merged };
 		if (previous && isSameEvent && merged.personalHours <= 0 && previous.personalHours > 0) next.personalHours = previous.personalHours;
 		if (isSameEvent && previous) {
-			next.milestones = mergeCommunityEventMilestones(next.milestones, previous.milestones);
-			next.pendingArp = computePendingCommunityEventArp(next.personalHours, next.milestones);
+			next.milestones = applySequentialCommunityAwards(applyCommunityHoursUnlocks(mergeCommunityEventMilestones(next.milestones, previous.milestones), next.communityHours));
+			next.personalHours = personalHoursFromMilestones(next.milestones, next.personalHours);
+			next.pendingArp = computePendingCommunityEventArp(next.personalHours, next.milestones, next.communityHours);
 		}
 		if (next.personalHours > 0 || isSameEvent && previous?.playEligibility === "eligible" && merged.playEligibility !== "ineligible") next.playEligibility = "eligible";
 		if (isSameEvent && previous?.communityHoursSource === "asce" && previous.communityHours !== void 0 && (next.communityHours === void 0 || next.communityHours < previous.communityHours)) {
@@ -1411,18 +1513,21 @@
 		if (next.isFree === void 0 && previous?.isFree !== void 0) next.isFree = previous.isFree;
 		return next;
 	}
-	function waitingCommunityMilestones(event) {
+	function lockedCommunityArpMilestones(event) {
 		return event.milestones.filter((milestone) => {
 			if (milestone.isAwarded || milestone.arpReward <= 0) return false;
-			if (milestone.personalHoursRequired > event.personalHours) return false;
-			return !milestone.isCommunityUnlocked;
+			if (milestone.communityHoursRequired === void 0) return false;
+			return !isCommunityGateMet(milestone, event.communityHours);
 		}).toSorted((left, right) => (left.communityHoursRequired ?? Number.POSITIVE_INFINITY) - (right.communityHoursRequired ?? Number.POSITIVE_INFINITY));
 	}
-	function nextWaitingCommunityMilestone(event) {
-		return waitingCommunityMilestones(event)[0];
+	function nextLockedCommunityArpMilestone(event) {
+		return lockedCommunityArpMilestones(event)[0];
+	}
+	function waitingCommunityMilestones(event) {
+		return lockedCommunityArpMilestones(event).filter((milestone) => isPersonalHoursMet(milestone, event.personalHours));
 	}
 	function nextCommunityUnlockTarget(event) {
-		return nextWaitingCommunityMilestone(event)?.communityHoursRequired;
+		return nextLockedCommunityArpMilestone(event)?.communityHoursRequired;
 	}
 	function estimateCommunityUnlockAt(event, targetHours, nowMs = Date.now()) {
 		const currentHours = event.communityHours;
@@ -1548,11 +1653,12 @@
 		return parts.join(" · ");
 	}
 	function describeWaitingCommunityArp(event, waitingCommunityArp, allArpPct = 0) {
-		const next = nextWaitingCommunityMilestone(event);
+		const locked = lockedCommunityArpMilestones(event);
+		const next = locked[0];
 		const progress = describeWaitingCommunityProgress(event);
 		const nextArp = next?.arpReward ?? 0;
-		const laterArp = waitingCommunityArp - nextArp;
-		const head = formatCommunityEventArp(nextArp > 0 && laterArp > 0 ? nextArp : waitingCommunityArp, allArpPct);
+		const laterArp = locked.slice(1).reduce((sum, milestone) => sum + milestone.arpReward, 0);
+		const head = formatCommunityEventArp(nextArp > 0 ? nextArp : waitingCommunityArp, allArpPct);
 		const later = nextArp > 0 && laterArp > 0 ? `+${formatCommunityEventArp(laterArp, allArpPct)} later` : void 0;
 		const text = progress ? `${head} · ${progress}` : `${head} on community unlock`;
 		return later ? {
@@ -1583,16 +1689,19 @@
 		let remainingReceived = receivedArpFromLog;
 		for (const milestone of milestones) if (milestone.isAwarded && milestone.arpReward > 0) remainingReceived = Math.max(0, remainingReceived - milestone.arpReward);
 		for (const milestone of milestones) {
-			if (milestone.isAwarded || milestone.arpReward <= 0 || milestone.personalHoursRequired > event.personalHours || remainingReceived < milestone.arpReward) continue;
+			if (milestone.isAwarded || milestone.arpReward <= 0 || !isPersonalHoursMet(milestone, event.personalHours) || remainingReceived < milestone.arpReward) continue;
 			milestone.isAwarded = true;
 			milestone.isCommunityUnlocked = true;
 			remainingReceived -= milestone.arpReward;
 		}
+		const nextMilestones = applySequentialCommunityAwards(milestones);
+		const hours = personalHoursFromMilestones(nextMilestones, event.personalHours);
 		const next = {
 			...event,
-			milestones,
-			pendingArp: computePendingCommunityEventArp(event.personalHours, milestones),
-			awardedArp: computeAwardedCommunityEventArp(milestones)
+			personalHours: hours,
+			milestones: nextMilestones,
+			pendingArp: computePendingCommunityEventArp(hours, nextMilestones, event.communityHours),
+			awardedArp: computeAwardedCommunityEventArp(nextMilestones)
 		};
 		if (receivedArpFromLog > 0) next.receivedArpFromLog = receivedArpFromLog;
 		return next;
@@ -1612,8 +1721,24 @@
 		const value = token ? Number(token) : NaN;
 		return Number.isFinite(value) ? value : void 0;
 	}
+	function isLabeledRowComplete(cell, label) {
+		const needle = `${label}:`;
+		const other = label === "Personal" ? "Community:" : "Personal:";
+		const scope = [...cell.querySelectorAll("p, div, li, span, tr, td")].find((node) => {
+			const text = node.textContent ?? "";
+			return text.includes(needle) && !text.includes(other);
+		}) ?? [...cell.querySelectorAll("p, div, li, span, tr, td")].find((node) => (node.textContent ?? "").includes(needle)) ?? cell;
+		if (scope.querySelector(".fa-check, .fa-check-circle, .bi-check, .bi-check-lg")) return true;
+		return /[✓✔]/.test(scope.textContent ?? "");
+	}
+	function milestoneCellText(cell) {
+		const parts = [cell.textContent ?? ""];
+		const sibling = cell.nextElementSibling;
+		if (sibling && !sibling.classList.contains("carousel-cell")) parts.push(sibling.textContent ?? "");
+		return parts.join(" ").replaceAll(/\s+/g, " ").trim();
+	}
 	function parseMilestoneCell(cell) {
-		const text = cell.textContent?.replaceAll(/\s+/g, " ").trim() ?? "";
+		const text = milestoneCellText(cell);
 		const milestoneMarker = text.indexOf("Milestone ");
 		if (milestoneMarker === -1) return;
 		const index = Number(text.slice(milestoneMarker + 10).split(" ", 1)[0]);
@@ -1627,8 +1752,8 @@
 			personalHoursRequired,
 			arpReward,
 			rewardLabel: cell.querySelector(":scope h3")?.textContent?.trim() || cell.querySelector(":scope img[alt]")?.getAttribute("alt") || (arpReward > 0 ? `${arpReward} ARP` : "Reward"),
-			isCommunityUnlocked: /Community Unlocked/i.test(text),
-			isAwarded: /\bAwarded\b/i.test(text)
+			isCommunityUnlocked: /Community Unlocked/i.test(text) || isLabeledRowComplete(cell, "Community"),
+			isAwarded: /\bAwarded\b/i.test(text) && !/\bNot\s+Awarded\b/i.test(text)
 		};
 		if (communityHours !== void 0) milestone.communityHoursRequired = communityHours;
 		if (fragmentCount !== void 0 && arpReward <= 0) milestone.rewardLabel = `${fragmentCount} Fragments`;
@@ -1738,26 +1863,33 @@
 		const fromDocumentTitle = parseCommunityEventTitleFromDocumentTitle(document_.title?.replaceAll(/\s+/g, " ").trim() ?? "");
 		if (fromDocumentTitle) return fromDocumentTitle;
 		const fromEventLabel = document_.querySelector(".event-title-date, :scope .community-event-view .event-name")?.textContent?.replaceAll(/\s+/g, " ").trim();
-		if (fromEventLabel) return fromEventLabel;
+		if (fromEventLabel && !isCommunityEventLiveDateBar(fromEventLabel)) return fromEventLabel;
+	}
+	function isCommunityEventLiveDateBar(text) {
+		const normalized = text.replaceAll(/\s+/g, " ").trim();
+		if (!/\bLIVE\b/i.test(normalized)) return false;
+		return /\b(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\b/i.test(normalized) || /\bLIVE\s*\|/i.test(normalized);
 	}
 	function readCommunityEventLiveBadge(document_) {
-		const container = document_.querySelector(".live-container");
-		if (!container) return;
-		if (container.querySelector(".event-closed")) return false;
-		if (container.querySelector(".live-text")) return true;
+		if (document_.querySelector(".event-closed")) return false;
+		if (document_.querySelector(".live-text")) return true;
+		if (isCommunityEventLiveDateBar(document_.querySelector(".event-title-date, .live-container")?.textContent?.replaceAll(/\s+/g, " ").trim() ?? "")) return true;
 	}
 	function scrapeCommunityEventFromDocument(document_, url) {
-		const body = pageText(document_);
 		const personalHours = parseCommunityEventPersonalHours(document_);
-		const isLive = readCommunityEventLiveBadge(document_) ?? (body.includes("This event is LIVE") || /\bLIVE\b/.test(body.slice(0, 500)));
+		const isLive = readCommunityEventLiveBadge(document_) !== false;
 		const milestones = [];
+		let personalHoursFloor = Number.isFinite(personalHours) ? personalHours : 0;
 		for (const cell of document_.querySelectorAll(".carousel-cell")) {
 			const milestone = parseMilestoneCell(cell);
-			if (milestone) milestones.push(milestone);
+			if (!milestone) continue;
+			milestones.push(milestone);
+			if (isLabeledRowComplete(cell, "Personal") && milestone.personalHoursRequired > personalHoursFloor) personalHoursFloor = milestone.personalHoursRequired;
 		}
 		milestones.sort((left, right) => left.index - right.index);
+		const awardedMilestones = applySequentialCommunityAwards(milestones);
+		const safeHours = personalHoursFromMilestones(awardedMilestones, personalHoursFloor);
 		const titleMatch = parseCommunityEventTitle(document_);
-		const safeHours = Number.isFinite(personalHours) ? personalHours : 0;
 		const progress = parseCommunityEventProgress(document_);
 		const playEligibility = scrapeSteamPlayEligibilityFromDocument(document_, { personalHours: safeHours });
 		const steamAppId = scrapeSteamAppIdFromDocument(document_);
@@ -1766,9 +1898,9 @@
 			url,
 			isLive,
 			personalHours: safeHours,
-			milestones,
-			pendingArp: computePendingCommunityEventArp(safeHours, milestones),
-			awardedArp: computeAwardedCommunityEventArp(milestones),
+			milestones: awardedMilestones,
+			pendingArp: computePendingCommunityEventArp(safeHours, awardedMilestones, progress.communityHours),
+			awardedArp: computeAwardedCommunityEventArp(awardedMilestones),
 			playEligibility
 		};
 		if (steamAppId !== void 0) state.steamAppId = steamAppId;
@@ -1902,6 +2034,9 @@
 		const reward = Number(token);
 		return Number.isFinite(reward) && reward > 0 ? reward : 0;
 	}
+	function byHoursAscending(left, right) {
+		return left.hours - right.hours;
+	}
 	function parseAsceGates(rows) {
 		if (!Array.isArray(rows)) return [];
 		const byHours = new Map();
@@ -1917,7 +2052,7 @@
 				unlocked: row.unlocked === true
 			});
 		}
-		return byHours.values().toArray().toSorted((left, right) => left.hours - right.hours);
+		return byHours.values().toArray().toSorted(byHoursAscending);
 	}
 	function parseAsceConfig(raw) {
 		if (!isRecord$1(raw)) return {
@@ -1927,7 +2062,7 @@
 		const game = typeof raw.game === "string" ? raw.game : void 0;
 		const goalHours = typeof raw.goal_hours === "number" && Number.isFinite(raw.goal_hours) ? raw.goal_hours : void 0;
 		const gates = [...parseAsceGates(raw.milestones), ...parseAsceGates(raw.stretch_goals)];
-		const uniqueGates = new Map(gates.map((gate) => [gate.hours, gate])).values().toArray().toSorted((left, right) => left.hours - right.hours);
+		const uniqueGates = new Map(gates.map((gate) => [gate.hours, gate])).values().toArray().toSorted(byHoursAscending);
 		return {
 			...game && { game },
 			...goalHours !== void 0 && { goalHours },
@@ -2014,11 +2149,11 @@
 		if (samples.length === 0) return;
 		const lastAsceHours = feed.samples.at(-1)?.hours;
 		const communityHours = resolveCommunityHours(event.communityHours, lastAsceHours);
-		const milestones = upsertCommunityEventMilestoneGates(applyAsceUnlocks(event.milestones, feed.unlockedHours), feed.gates ?? []);
+		const milestones = applySequentialCommunityAwards(applyCommunityHoursUnlocks(upsertCommunityEventMilestoneGates(applyAsceUnlocks(event.milestones, feed.unlockedHours), feed.gates ?? []), communityHours));
 		const next = {
 			...event,
 			milestones,
-			pendingArp: computePendingCommunityEventArp(event.personalHours, milestones),
+			pendingArp: computePendingCommunityEventArp(event.personalHours, milestones, communityHours),
 			communityHoursSamples: samples,
 			communityHoursSource: "asce"
 		};
@@ -3919,8 +4054,15 @@
 		applyDailyQuestsFromDocument(next, document);
 		applyWatchTwitchFromDocument(next, document);
 		applyBattlePassEndFromDocument(next, document);
-		if (scrapeLiveCommunityEventBanner(document)) {
+		const banner = scrapeLiveCommunityEventBanner(document);
+		if (banner) {
 			next.caps.steamCommunityEvent = "available";
+			if (next.communityEvent && !next.communityEvent.isLive) next.communityEvent = {
+				...next.communityEvent,
+				isLive: true,
+				url: banner.url,
+				...banner.title && next.communityEvent.title === void 0 && { title: banner.title }
+			};
 			return;
 		}
 		if (!next.communityEvent?.isLive) next.caps.steamCommunityEvent = "capped";
@@ -4289,7 +4431,7 @@
 		if (!event?.isLive || !canEarnCommunityEventArp(event)) return 0;
 		let arp = breakDownCommunityEventPending(event).waitingPersonalArp;
 		for (const milestone of event.milestones) {
-			if (milestone.isAwarded || milestone.arpReward <= 0 || milestone.personalHoursRequired > event.personalHours || milestone.isCommunityUnlocked) continue;
+			if (milestone.isAwarded || milestone.arpReward <= 0 || !isPersonalHoursMet(milestone, event.personalHours) || isCommunityGateMet(milestone, event.communityHours)) continue;
 			const target = milestone.communityHoursRequired;
 			if (target === void 0) continue;
 			const eta = estimateCommunityUnlockAt(event, target);
@@ -4652,9 +4794,9 @@
 	}
 	function appendCommunityEventNotes(notes, owned, equipped, context) {
 		const event = context.siteState.communityEvent;
-		if (!event?.isLive || event.pendingArp <= 0) return;
-		if (!canEarnCommunityEventArp(event)) return;
+		if (!event?.isLive || !canEarnCommunityEventArp(event)) return;
 		const breakdown = breakDownCommunityEventPending(event);
+		if (breakdown.pendingCount <= 0 && nextLockedCommunityArpMilestone(event) === void 0) return;
 		const summary = describeCommunityEventPendingNote(event, breakdown);
 		const hasAllArpOwned = hasInventoryAllArp(owned);
 		const hasAllArpOn = hasAllArpEffect(equipped);
@@ -4681,7 +4823,9 @@
 	function describeCommunityEventPendingNote(event, breakdown) {
 		if (breakdown.waitingPersonalArp > 0) return `${formatCommunityEventArp(breakdown.waitingPersonalArp)} unlocked by community`;
 		if (breakdown.waitingCommunityArp > 0) return describeWaitingCommunityArpLine(event, breakdown.waitingCommunityArp);
-		if (breakdown.imminentArp > 0) return `${formatCommunityEventArp(breakdown.imminentArp)} may already be awarding`;
+		const nextLocked = nextLockedCommunityArpMilestone(event);
+		if (nextLocked) return describeWaitingCommunityArpLine(event, nextLocked.arpReward);
+		if (breakdown.imminentArp > 0) return `${formatCommunityEventArp(breakdown.imminentArp)} unlocked — not awarded yet`;
 		return `${formatCommunityEventArp(event.pendingArp)} still open`;
 	}
 	function collectNotes(owned, equipped, best, context) {
@@ -5152,8 +5296,9 @@
 	}
 	function pushCommunityEventTodo(todos, siteState, settings, allArpPct = 0) {
 		const event = siteState.communityEvent;
-		if (!isActivityEnabled(settings, "steamCommunityEvent") || !event?.isLive || event.pendingArp <= 0 || !canEarnCommunityEventArp(event)) return;
+		if (!isActivityEnabled(settings, "steamCommunityEvent") || !event?.isLive || !canEarnCommunityEventArp(event)) return;
 		const pending = breakDownCommunityEventPending(event);
+		if (pending.pendingCount <= 0 && nextLockedCommunityArpMilestone(event) === void 0) return;
 		const { text, later } = describeCommunityEventPendingParts(event, allArpPct);
 		const reasons = [];
 		if (later) reasons.push({ text: later });
@@ -7057,7 +7202,10 @@
 	}
 	function isCommunityEventFresh(state, now = new Date()) {
 		const event = state?.communityEvent;
-		if (!event?.isLive) return isCapsFresh(state, now);
+		if (!event?.isLive) {
+			if (state?.caps.steamCommunityEvent === "available") return false;
+			return isCapsFresh(state, now);
+		}
 		if (event.milestones.length === 0) return false;
 		const ttl = event.pendingArp > 0 ? COMMUNITY_EVENT_PENDING_STALE_MS : STALE_MS;
 		if (!isScrapedWithin(event.scrapedAt, ttl)) return false;
@@ -8489,10 +8637,10 @@
 		const event = siteState?.communityEvent;
 		if (!event?.isLive) return "";
 		const title = escapeHtml(event.title ?? "Steam Community Event");
-		const pendingParts = event.pendingArp > 0 ? describeCommunityEventPendingParts(event) : void 0;
-		const pending = pendingParts ? `<strong>${escapeHtml(pendingParts.text)}</strong>` : "no pending ARP with a gate met";
+		const pendingParts = describeCommunityEventPendingParts(event);
+		const pending = `<strong>${escapeHtml(pendingParts.text)}</strong>`;
 		const lines = [`<div><strong>${title}</strong></div>`, `<div>${event.personalHours}h played · ${pending}</div>`];
-		if (pendingParts?.later) lines.push(`<div class="ao-muted">${escapeHtml(pendingParts.later)}</div>`);
+		if (pendingParts.later) lines.push(`<div class="ao-muted">${escapeHtml(pendingParts.later)}</div>`);
 		if (options?.detailed) {
 			const awardParts = [];
 			if (event.awardedArp > 0) awardParts.push(`${event.awardedArp} on event page`);

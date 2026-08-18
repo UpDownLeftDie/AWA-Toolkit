@@ -7,6 +7,8 @@ import {
   canAffordVaultPrice,
   canEarnCommunityEventArp,
   estimateCommunityUnlockAt,
+  isCommunityGateMet,
+  isPersonalHoursMet,
   gameVaultCatalogPrice,
   isActivityAvailable,
   isActivityPending,
@@ -182,8 +184,8 @@ export function communityEventArpInSwapWindow(siteState: SiteState): number {
     if (
       milestone.isAwarded ||
       milestone.arpReward <= 0 ||
-      milestone.personalHoursRequired > event.personalHours ||
-      milestone.isCommunityUnlocked
+      !isPersonalHoursMet(milestone, event.personalHours) ||
+      isCommunityGateMet(milestone, event.communityHours)
     ) {
       continue;
     }

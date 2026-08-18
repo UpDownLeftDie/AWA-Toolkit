@@ -9,6 +9,7 @@ import {
   formatCommunityEta,
   formatCommunityEventArp,
   isActivityPending,
+  nextLockedCommunityArpMilestone,
 } from '../siteState';
 import { collectBonuses } from './bonuses';
 import {
@@ -58,14 +59,16 @@ export function appendCommunityEventNotes(
   context: OptimizerContext,
 ): void {
   const event = context.siteState.communityEvent;
-  if (!event?.isLive || event.pendingArp <= 0) {
+  if (!event?.isLive || !canEarnCommunityEventArp(event)) {
     return;
   }
-  if (!canEarnCommunityEventArp(event)) {
-    return;
-  }
-
   const breakdown = breakDownCommunityEventPending(event);
+  if (
+    breakdown.pendingCount <= 0 &&
+    nextLockedCommunityArpMilestone(event) === undefined
+  ) {
+    return;
+  }
   const summary = describeCommunityEventPendingNote(event, breakdown);
   const hasAllArpOwned = hasInventoryAllArp(owned);
   const hasAllArpOn = hasAllArpEffect(equipped);
@@ -118,8 +121,12 @@ function describeCommunityEventPendingNote(
       breakdown.waitingCommunityArp,
     );
   }
+  const nextLocked = nextLockedCommunityArpMilestone(event);
+  if (nextLocked) {
+    return describeWaitingCommunityArpLine(event, nextLocked.arpReward);
+  }
   if (breakdown.imminentArp > 0) {
-    return `${formatCommunityEventArp(breakdown.imminentArp)} may already be awarding`;
+    return `${formatCommunityEventArp(breakdown.imminentArp)} unlocked — not awarded yet`;
   }
   return `${formatCommunityEventArp(event.pendingArp)} still open`;
 }

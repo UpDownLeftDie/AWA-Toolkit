@@ -15,6 +15,8 @@ import {
   type CommunityHoursSample,
   reconcileCommunityEventWithArpLog,
   upsertCommunityEventMilestoneGates,
+  applyCommunityHoursUnlocks,
+  applySequentialCommunityAwards,
 } from './siteState/communityEvent';
 
 const ASCE_CACHE_KEY = 'asceCommunityHours';
@@ -226,6 +228,13 @@ function parseAsceArpReward(message: string): number {
   return Number.isFinite(reward) && reward > 0 ? reward : 0;
 }
 
+function byHoursAscending(
+  left: { hours: number },
+  right: { hours: number },
+): number {
+  return left.hours - right.hours;
+}
+
 function parseAsceGates(rows: unknown): CommunityEventMilestoneGate[] {
   if (!Array.isArray(rows)) {
     return [];
@@ -251,10 +260,7 @@ function parseAsceGates(rows: unknown): CommunityEventMilestoneGate[] {
       unlocked: row.unlocked === true,
     });
   }
-  return byHours
-    .values()
-    .toArray()
-    .toSorted((left, right) => left.hours - right.hours);
+  return byHours.values().toArray().toSorted(byHoursAscending);
 }
 
 function parseAsceConfig(raw: unknown): {
@@ -276,10 +282,7 @@ function parseAsceConfig(raw: unknown): {
     ...parseAsceGates(raw.stretch_goals),
   ];
   const byHours = new Map(gates.map((gate) => [gate.hours, gate]));
-  const uniqueGates = byHours
-    .values()
-    .toArray()
-    .toSorted((left, right) => left.hours - right.hours);
+  const uniqueGates = byHours.values().toArray().toSorted(byHoursAscending);
   return {
     ...(game && { game }),
     ...(goalHours !== undefined && { goalHours }),
@@ -422,16 +425,19 @@ export function applyAsceFeedToEvent(
     lastAsceHours,
   );
 
-  const milestones = upsertCommunityEventMilestoneGates(
+  const withGates = upsertCommunityEventMilestoneGates(
     applyAsceUnlocks(event.milestones, feed.unlockedHours),
     feed.gates ?? [],
   );
+  const unlocked = applyCommunityHoursUnlocks(withGates, communityHours);
+  const milestones = applySequentialCommunityAwards(unlocked);
   const next: CommunityEventState = {
     ...event,
     milestones,
     pendingArp: computePendingCommunityEventArp(
       event.personalHours,
       milestones,
+      communityHours,
     ),
     communityHoursSamples: samples,
     communityHoursSource: 'asce',

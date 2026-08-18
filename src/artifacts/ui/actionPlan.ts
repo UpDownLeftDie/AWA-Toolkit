@@ -30,6 +30,7 @@ import {
   estimateNextCommunityUnlock,
   formatCommunityEta,
   formatCommunityEventArp,
+  nextLockedCommunityArpMilestone,
   hasVotedCurrentDiscordPoll,
   isActivityAvailable,
   isActivityPending,
@@ -315,12 +316,17 @@ function pushCommunityEventTodo(
   if (
     !isActivityEnabled(settings, "steamCommunityEvent") ||
     !event?.isLive ||
-    event.pendingArp <= 0 ||
     !canEarnCommunityEventArp(event)
   ) {
     return;
   }
   const pending = breakDownCommunityEventPending(event);
+  if (
+    pending.pendingCount <= 0 &&
+    nextLockedCommunityArpMilestone(event) === undefined
+  ) {
+    return;
+  }
   const { text, later } = describeCommunityEventPendingParts(event, allArpPct);
   const reasons: ActionTodoReason[] = [];
   if (later) {

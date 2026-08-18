@@ -124,6 +124,15 @@ function applyControlCenterPage(next: SiteState): void {
   const banner = scrapeLiveCommunityEventBanner(document);
   if (banner) {
     next.caps.steamCommunityEvent = "available";
+    if (next.communityEvent && !next.communityEvent.isLive) {
+      next.communityEvent = {
+        ...next.communityEvent,
+        isLive: true,
+        url: banner.url,
+        ...(banner.title &&
+          next.communityEvent.title === undefined && { title: banner.title }),
+      };
+    }
     return;
   }
   // Banner miss is not proof the event ended — widgets can paint first.
@@ -485,6 +494,8 @@ export {
   canEarnCommunityEventArp,
   scrapeLiveCommunityEventBanner,
   isCommunityEventMilestonePending,
+  isCommunityGateMet,
+  isPersonalHoursMet,
   computePendingCommunityEventArp,
   breakDownCommunityEventPending,
   describeCommunityEventPending,
@@ -494,9 +505,13 @@ export {
   appendCommunityHoursSample,
   mergeCommunityEventScrape,
   upsertCommunityEventMilestoneGates,
+  applyCommunityHoursUnlocks,
+  applySequentialCommunityAwards,
   nextCommunityUnlockTarget,
   nextWaitingCommunityMilestone,
   waitingCommunityMilestones,
+  nextLockedCommunityArpMilestone,
+  lockedCommunityArpMilestones,
   nextReachableCommunityUnlock,
   formatCommunityEventArp,
   describeWaitingCommunityArp,

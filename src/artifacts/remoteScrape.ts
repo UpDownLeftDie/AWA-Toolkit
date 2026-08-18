@@ -480,7 +480,10 @@ function isCommunityEventFresh(
 ): boolean {
   const event = state?.communityEvent;
   if (!event?.isLive) {
-    // No live event cached — refresh with Control Center cadence.
+    // A LIVE banner with a wrongly-ended cache must refetch, not sit on TTL.
+    if (state?.caps.steamCommunityEvent === 'available') {
+      return false;
+    }
     return isCapsFresh(state, now);
   }
   // Banner-only cache (no carousel yet) — still need the event page.
