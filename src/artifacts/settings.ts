@@ -8,8 +8,17 @@ const HOURS_PER_DAY = 24;
 const MINUTES_PER_HOUR = 60;
 const SECONDS_PER_MINUTE = 60;
 const MS_PER_SECOND = 1000;
-const COOLDOWN_MS =
-  HOURS_PER_DAY * MINUTES_PER_HOUR * SECONDS_PER_MINUTE * MS_PER_SECOND;
+const MS_PER_HOUR = MINUTES_PER_HOUR * SECONDS_PER_MINUTE * MS_PER_SECOND;
+const COOLDOWN_MS = HOURS_PER_DAY * MS_PER_HOUR;
+
+/**
+Hours before 00:00 UTC to keep free for Twitch / Time on Site by default.
+*/
+export const DEFAULT_UTC_DAILY_END_BUFFER_HOURS = 1;
+/**
+Raise this if a 24h lock ending in the evening is too tight to sit Twitch.
+*/
+export const MAX_UTC_DAILY_END_BUFFER_HOURS = 12;
 
 export type ArtifactSlotPosition = 1 | 2 | 3;
 
@@ -66,6 +75,12 @@ export interface ArtifactOptimizerSettings {
   Twitch logins to open first when picking a Watch Twitch stream (list order).
   */
   preferredTwitchStreamers: string[];
+  /**
+   * Hours before 00:00 UTC to keep free for Twitch / Time on Site. A 24h
+   * All-ARP% lock that would leave less leftover than this is treated as
+   * forcing those sits onto All-ARP% (usually a loss vs Twitch flats).
+   */
+  utcDailyEndBufferHours: number;
   /**
   OS desktop notifications via GM.notification for known times (recommended
   swap, vault open). An AWA tab must stay open to schedule them.
@@ -139,6 +154,7 @@ export const defaultArtifactSettings: ArtifactOptimizerSettings = {
   preferScraped: true,
   slotCooldowns: [],
   preferredTwitchStreamers: [],
+  utcDailyEndBufferHours: DEFAULT_UTC_DAILY_END_BUFFER_HOURS,
   browserNotifications: false,
   notificationTypes: { ...DEFAULT_NOTIFICATION_TYPES },
   allowAccountActions: false,
@@ -219,6 +235,11 @@ function applyParsedSettings(
     settings.preferredTwitchStreamers =
       parsePreferredTwitchStreamers(rawLogins.join('\n'));
   }
+  if (typeof parsed.utcDailyEndBufferHours === 'number') {
+    settings.utcDailyEndBufferHours = clampUtcDailyEndBufferHours(
+      parsed.utcDailyEndBufferHours,
+    );
+  }
   if (typeof parsed.browserNotifications === 'boolean') {
     settings.browserNotifications = parsed.browserNotifications;
   }
@@ -279,6 +300,22 @@ export function parsePreferredTwitchStreamers(raw: string): string[] {
   return logins;
 }
 
+export function clampUtcDailyEndBufferHours(hours: number): number {
+  if (!Number.isFinite(hours)) {
+    return DEFAULT_UTC_DAILY_END_BUFFER_HOURS;
+  }
+  return Math.min(
+    MAX_UTC_DAILY_END_BUFFER_HOURS,
+    Math.max(0, hours),
+  );
+}
+
+export function utcDailyEndBufferMs(
+  settings: ArtifactOptimizerSettings,
+): number {
+  return clampUtcDailyEndBufferHours(settings.utcDailyEndBufferHours) * MS_PER_HOUR;
+}
+
 export async function getArtifactSettings(): Promise<ArtifactOptimizerSettings> {
   const raw: string | Partial<ArtifactOptimizerSettings> | undefined =
     await GM.getValue(SETTINGS_KEY);
@@ -322,6 +359,9 @@ export async function saveArtifactSettings(
     notificationTypes: patch.notificationTypes
       ? { ...previous.notificationTypes, ...patch.notificationTypes }
       : previous.notificationTypes,
+    utcDailyEndBufferHours: clampUtcDailyEndBufferHours(
+      patch.utcDailyEndBufferHours ?? previous.utcDailyEndBufferHours,
+    ),
   };
   await GM.setValue(SETTINGS_KEY, JSON.stringify(next));
   return next;

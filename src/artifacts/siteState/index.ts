@@ -474,6 +474,7 @@ export {
   steamQuestsCapFromRows,
   remainingSteamQuestRows,
   remainingSteamQuestRewards,
+  scrapedRemainingSteamQuestRewards,
   requiresSteamQuestEligibilityFetch,
   scrapeSteamPlayEligibilityFromDocument,
   applySteamQuestsFromDocument,

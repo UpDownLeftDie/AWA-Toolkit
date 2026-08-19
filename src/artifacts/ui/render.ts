@@ -1,36 +1,38 @@
-import { ARTIFACTS, CREDIT_SOURCES, TIER_LABELS } from '../data';
+import { ARTIFACTS, CREDIT_SOURCES, TIER_LABELS } from "../data";
 import type {
   BreakdownLine,
   OptimizerResult,
   UpgradeSuggestion,
-} from '../optimizer';
-import type { ArtifactSnapshot } from '../scraper';
+} from "../optimizer";
+import type { ArtifactSnapshot } from "../scraper";
 import {
   areAccountActionsEnabled,
   isNotificationTypeEnabled,
+  MAX_UTC_DAILY_END_BUFFER_HOURS,
   NOTIFICATION_TYPE_COPY,
   NOTIFICATION_TYPE_KEYS,
   saveArtifactSettings,
   type ArtifactOptimizerSettings,
-} from '../settings';
+} from "../settings";
 import {
   battlePassRemainingMs,
   describeCommunityEventPendingParts,
   type ActivityKey,
   type SiteState,
-} from '../siteState';
+} from "../siteState";
 import {
   battlePassClaimButtonLabel,
   shouldShowBattlePassClaimAll,
   shouldSkipArpInBattlePassClaimAll,
-} from '../siteState/battlePass';
+} from "../siteState/battlePass";
+import { wrapArtifactNames } from "./artifactTip";
 import {
   comboLabel,
   escapeHtml,
   formatLockedSlotParts,
   formatMs,
   sortArtifactsForDisplay,
-} from './loadoutPlan';
+} from "./loadoutPlan";
 
 export function renderSectionDivider(): string {
   return '<hr class="ao-divider" />';
@@ -43,7 +45,7 @@ function renderNotifySwitch(options: {
   isChecked: boolean;
   isSmall?: boolean;
 }): string {
-  const sizeClass = options.isSmall === true ? ' ao-switch-sm' : '';
+  const sizeClass = options.isSmall === true ? " ao-switch-sm" : "";
   return `
       <label class="ao-switch${sizeClass}">
         <span class="ao-switch-copy">
@@ -51,7 +53,7 @@ function renderNotifySwitch(options: {
           <span class="ao-switch-hint">${escapeHtml(options.hint)}</span>
         </span>
         <input type="checkbox" id="${escapeHtml(options.id)}" class="ao-switch-input" ${
-          options.isChecked ? 'checked' : ''
+          options.isChecked ? "checked" : ""
         }/>
         <span class="ao-switch-track" aria-hidden="true"><span class="ao-switch-knob"></span></span>
       </label>`;
@@ -61,7 +63,7 @@ function renderNotifyTypeSwitches(settings: ArtifactOptimizerSettings): string {
   const switches = NOTIFICATION_TYPE_KEYS.map((key) => {
     const copy = NOTIFICATION_TYPE_COPY[key];
     if (!copy) {
-      return '';
+      return "";
     }
     return renderNotifySwitch({
       id: `ao-notify-type-${key}`,
@@ -70,16 +72,16 @@ function renderNotifyTypeSwitches(settings: ArtifactOptimizerSettings): string {
       isChecked: isNotificationTypeEnabled(settings, key),
       isSmall: true,
     });
-  }).join('');
+  }).join("");
   return `
       <div class="ao-notify-types"${
-        settings.browserNotifications ? '' : ' data-off=""'
+        settings.browserNotifications ? "" : ' data-off=""'
       }>
         ${switches}
       </div>`;
 }
 
-const SKELETON_BAR_WIDTHS = ['88%', '72%', '64%', '48%'] as const;
+const SKELETON_BAR_WIDTHS = ["88%", "72%", "64%", "48%"] as const;
 
 export function renderHydrateBanner(message: string): string {
   return `<div class="ao-hydrate" role="status" aria-live="polite"><span class="ao-spinner" aria-hidden="true"></span><span>${escapeHtml(message)}</span></div>`;
@@ -88,7 +90,7 @@ export function renderHydrateBanner(message: string): string {
 function renderSkeletonBars(): string {
   return SKELETON_BAR_WIDTHS.map(
     (width) => `<div class="ao-skel" style="width:${width}"></div>`,
-  ).join('');
+  ).join("");
 }
 
 export function renderPanelError(message: string): string {
@@ -99,7 +101,7 @@ export function renderPanelError(message: string): string {
 }
 
 export function renderPanelSkeleton(
-  message = 'Loading recommendations…',
+  message = "Loading recommendations…",
 ): string {
   return `
     <div class="ao-heading">AWA Toolkit</div>
@@ -121,7 +123,7 @@ export function renderPanelSkeleton(
 
 export function renderModalSkeleton(): string {
   return `
-    ${renderHydrateBanner('Loading recommendations…')}
+    ${renderHydrateBanner("Loading recommendations…")}
     <div id="ao-action-plan" class="ao-skel-block">
       <div class="ao-heading">What to do</div>
       ${renderSkeletonBars()}
@@ -133,7 +135,7 @@ export function renderModalSkeleton(): string {
 
 export function formatEquippedLabel(result: OptimizerResult): string {
   if (!result.current) {
-    return 'None detected';
+    return "None detected";
   }
   return sortArtifactsForDisplay(result.current.artifacts)
     .map((artifact) => {
@@ -142,24 +144,24 @@ export function formatEquippedLabel(result: OptimizerResult): string {
         ? `${artifact.displayName} (locked)`
         : artifact.displayName;
     })
-    .join(' + ');
+    .join(" + ");
 }
 
 const ACTIVITY_LABELS: Record<string, string> = {
-  timeOnSite: 'Time on Site',
-  steamQuests: 'Steam Quests',
-  watchTwitch: 'Watch Twitch',
-  dailyCalendar: 'Daily Calendar',
-  discordPoll: 'Discord Poll',
-  dailyQuests: 'Daily / weekend quests',
-  steamCommunityEvent: 'Steam Community Event',
+  timeOnSite: "Time on Site",
+  steamQuests: "Steam Quests",
+  watchTwitch: "Watch Twitch",
+  dailyCalendar: "Daily Calendar",
+  discordPoll: "Discord Poll",
+  dailyQuests: "Daily / weekend quests",
+  steamCommunityEvent: "Steam Community Event",
 };
 
 const BREAKDOWN_LABELS: Record<string, string> = {
   ...ACTIVITY_LABELS,
-  dailyQuests: 'Daily quests',
-  weekendQuests: 'Weekend quests',
-  battlePassClaims: 'Battle Pass claims',
+  dailyQuests: "Daily quests",
+  weekendQuests: "Weekend quests",
+  battlePassClaims: "Battle Pass claims",
 };
 
 function breakdownLabel(key: string): string {
@@ -177,12 +179,12 @@ function formatBreakdownLine(entry: BreakdownLine): string {
   if (parts.length === 1) {
     return `~${entry.total} ARP`;
   }
-  return `~${entry.total} (${parts.join(' + ')})`;
+  return `~${entry.total} (${parts.join(" + ")})`;
 }
 
-export function renderBreakdown(result: OptimizerResult['best']): string {
+export function renderBreakdown(result: OptimizerResult["best"]): string {
   if (!result) {
-    return '';
+    return "";
   }
   const rows = Object.entries(result.breakdown)
     .filter(([, entry]) => entry.total !== 0)
@@ -190,18 +192,18 @@ export function renderBreakdown(result: OptimizerResult['best']): string {
       ([k, entry]) =>
         `<div class="ao-row ao-muted">${escapeHtml(breakdownLabel(k))}: ${formatBreakdownLine(entry)}</div>`,
     )
-    .join('');
+    .join("");
   return `
     ${
       result.activeSetNames.length > 0
-        ? `<div class="ao-row"><strong>Set:</strong> ${escapeHtml(result.activeSetNames.join(', '))}</div>`
-        : ''
+        ? `<div class="ao-row"><strong>Set:</strong> ${escapeHtml(result.activeSetNames.join(", "))}</div>`
+        : ""
     }
     <div class="ao-row">Estimated lock-window ARP: <strong>${result.weeklyArp}</strong></div>
     ${
       result.marketplaceSavingsArp > 0
         ? `<div class="ao-row">Market savings: <strong>${result.marketplaceSavingsArp}</strong></div>`
-        : ''
+        : ""
     }
     <div class="ao-row">All ARP multiplier: <strong>${(
       result.allArpPct * 100
@@ -218,18 +220,18 @@ export function renderTextLink(
   url: string,
   dateAccessed?: string,
 ): string {
-  const accessedSuffix = dateAccessed ? ` (on ${dateAccessed})` : '';
+  const accessedSuffix = dateAccessed ? ` (on ${dateAccessed})` : "";
   return `<a class="ao-text-link" href="${escapeHtml(url)}" target="_blank" rel="noopener noreferrer">${escapeHtml(label)}</a>${accessedSuffix}`;
 }
 
 export function renderCredits(options?: { compact?: boolean }): string {
   if (CREDIT_SOURCES.length === 0) {
-    return '';
+    return "";
   }
 
   const sourceLinks = CREDIT_SOURCES.map((source) =>
     renderTextLink(source.label, source.url, source.dateAccessed),
-  ).join(', ');
+  ).join(", ");
 
   if (options?.compact) {
     return `<div class="ao-muted ao-credit">Sources: ${sourceLinks}</div>`;
@@ -237,8 +239,8 @@ export function renderCredits(options?: { compact?: boolean }): string {
 
   const detailLinks = CREDIT_SOURCES.flatMap((source) => source.links ?? [])
     .map((link) => renderTextLink(link.label, link.url))
-    .join(', ');
-  const details = detailLinks ? ` · ${detailLinks}` : '';
+    .join(", ");
+  const details = detailLinks ? ` · ${detailLinks}` : "";
   return `<div class="ao-muted ao-credit">Sources: ${sourceLinks}${details}</div>`;
 }
 
@@ -248,7 +250,7 @@ Notes already covered by the action plan — keep market / inventory extras only
 export function renderVaultDiscountBlock(result: OptimizerResult): string {
   const hint = result.vaultDiscount;
   if (!hint || hint.dismissed || !hint.note) {
-    return '';
+    return "";
   }
   return `<div class="ao-note ao-vault-discount">
     <div>${escapeHtml(hint.note)}</div>
@@ -260,7 +262,7 @@ export function renderVaultDiscountBlock(result: OptimizerResult): string {
 
 function renderVaultDiscountRestore(result: OptimizerResult): string {
   if (!result.vaultDiscount?.dismissed) {
-    return '';
+    return "";
   }
   return `<div class="ao-row">
     Game Vault discount recs skipped for this rotation
@@ -273,7 +275,7 @@ async function applyVaultDiscountDismiss(cycleId: string): Promise<void> {
 }
 
 async function restoreVaultDiscountRecs(): Promise<void> {
-  await saveArtifactSettings({ vaultDiscountDismissedCycle: '' });
+  await saveArtifactSettings({ vaultDiscountDismissedCycle: "" });
 }
 
 export function bindVaultDiscountActions(
@@ -281,9 +283,9 @@ export function bindVaultDiscountActions(
   onChanged: () => void | Promise<void>,
 ): void {
   const dismiss = root.querySelector<HTMLButtonElement>(
-    '[data-ao-dismiss-vault]',
+    "[data-ao-dismiss-vault]",
   );
-  dismiss?.addEventListener('click', () => {
+  dismiss?.addEventListener("click", () => {
     const cycleId = dismiss.dataset.aoDismissVault;
     if (!cycleId) {
       return;
@@ -291,8 +293,8 @@ export function bindVaultDiscountActions(
     void applyVaultDiscountDismiss(cycleId).then(() => onChanged());
   });
   root
-    .querySelector('[data-ao-restore-vault]')
-    ?.addEventListener('click', () => {
+    .querySelector("[data-ao-restore-vault]")
+    ?.addEventListener("click", () => {
       void restoreVaultDiscountRecs().then(() => onChanged());
     });
 }
@@ -321,9 +323,9 @@ function renderCommunityEventBlock(
 ): string {
   const event = siteState?.communityEvent;
   if (!event?.isLive) {
-    return '';
+    return "";
   }
-  const title = escapeHtml(event.title ?? 'Steam Community Event');
+  const title = escapeHtml(event.title ?? "Steam Community Event");
   const pendingParts = describeCommunityEventPendingParts(event);
   const pending = `<strong>${escapeHtml(pendingParts.text)}</strong>`;
   const lines = [
@@ -343,12 +345,12 @@ function renderCommunityEventBlock(
     }
     if (awardParts.length > 0) {
       lines.push(
-        `<div class="ao-muted">Awarded: ${awardParts.join(' · ')}</div>`,
+        `<div class="ao-muted">Awarded: ${awardParts.join(" · ")}</div>`,
       );
     }
   }
-  lines.push(`<div>${renderTextLink('Open event', event.url)}</div>`);
-  return `<div class="ao-note">${lines.join('')}</div>`;
+  lines.push(`<div>${renderTextLink("Open event", event.url)}</div>`);
+  return `<div class="ao-note">${lines.join("")}</div>`;
 }
 
 function renderBattlePassBlock(
@@ -357,34 +359,34 @@ function renderBattlePassBlock(
 ): string {
   const bp = siteState?.battlePass;
   if (!bp) {
-    return '';
+    return "";
   }
   const remaining = battlePassRemainingMs(bp);
-  let endsPart = '';
+  let endsPart = "";
   if (remaining !== undefined) {
     endsPart = ` · ends in ${formatMs(remaining)}`;
   } else if (bp.endsInText) {
     endsPart = ` · ends in ${escapeHtml(bp.endsInText)}`;
   }
   const lines: string[] = [
-    `<div><strong>Battle Pass</strong> · ${bp.tokens ?? '?'} / ${bp.tokensMax ?? '?'} tokens${endsPart}</div>`,
+    `<div><strong>Battle Pass</strong> · ${bp.tokens ?? "?"} / ${bp.tokensMax ?? "?"} tokens${endsPart}</div>`,
   ];
   if (bp.readyToClaim > 0) {
     const arpBoostPart =
-      bp.readyToClaimArp > 0 ? ` (${bp.readyToClaimArp} ARP Boost)` : '';
+      bp.readyToClaimArp > 0 ? ` (${bp.readyToClaimArp} ARP Boost)` : "";
     lines.push(
       `<div><strong>${bp.readyToClaim} ready to claim</strong>${arpBoostPart}</div>`,
     );
   }
   if (options.showClaimAll === true) {
     const skipArp =
-      options.shouldSkipArpBoosts === true ? ' data-skip-arp="1"' : '';
+      options.shouldSkipArpBoosts === true ? ' data-skip-arp="1"' : "";
     lines.push(
       `<div class="ao-note-actions"><button type="button" class="ao-claim-btn"${skipArp}>${battlePassClaimButtonLabel(options.shouldSkipArpBoosts === true)}</button></div>`,
     );
   }
-  lines.push(`<div>${renderTextLink('Open Battle Pass', bp.url)}</div>`);
-  return `<div class="ao-note">${lines.join('')}</div>`;
+  lines.push(`<div>${renderTextLink("Open Battle Pass", bp.url)}</div>`);
+  return `<div class="ao-note">${lines.join("")}</div>`;
 }
 
 export function renderCooldownBlock(
@@ -394,28 +396,28 @@ export function renderCooldownBlock(
   // Only show slots the Showroom currently marks locked. GM timers alone are
   // not enough — that was painting 22h leftovers after slots had unlocked.
   if (!slotLocks) {
-    return '';
+    return "";
   }
   const lockedSlots = ([1, 2, 3] as const).filter(
     (position) => slotLocks[position] === true,
   );
   if (lockedSlots.length === 0) {
-    return '';
+    return "";
   }
   const lockParts = formatLockedSlotParts(settings, lockedSlots, slotLocks);
-  return `<div class="ao-note">24h slot cooldown: ${lockParts.join(', ')}</div>`;
+  return `<div class="ao-note">24h slot cooldown: ${lockParts.join(", ")}</div>`;
 }
 
 function renderArpLogCard(siteState: SiteState | undefined): string {
   const arp = siteState?.arpLog;
   if (!arp) {
-    return '';
+    return "";
   }
   const when = new Date(arp.scrapedAt).toLocaleString();
-  const redeemable = arp.redeemableArp?.toLocaleString() ?? '?';
+  const redeemable = arp.redeemableArp?.toLocaleString() ?? "?";
   const today =
     arp.todayDelta === undefined
-      ? ''
+      ? ""
       : `<div>Today so far: <strong>+${arp.todayDelta}</strong> ARP</div>`;
   const recent = arp.recent
     .slice(0, 5)
@@ -423,41 +425,41 @@ function renderArpLogCard(siteState: SiteState | undefined): string {
       (entry) =>
         `<div class="ao-muted">${escapeHtml(entry.action)} · ${entry.arp}</div>`,
     )
-    .join('');
+    .join("");
   return `<div class="ao-note">
       <div><strong>ARP Log</strong> · scraped ${escapeHtml(when)}</div>
       <div>Redeemable: <strong>${redeemable}</strong></div>
       ${today}
-      ${recent ? `<div style="margin-top:6px">Recent:</div>${recent}` : ''}
+      ${recent ? `<div style="margin-top:6px">Recent:</div>${recent}` : ""}
     </div>`;
 }
 
 function renderActivityCapsCard(siteState: SiteState | undefined): string {
   if (!siteState) {
-    return '';
+    return "";
   }
   const caps = siteState.caps;
   const rows = (Object.keys(ACTIVITY_LABELS) as ActivityKey[])
     .map((key) => {
       const status = caps[key];
-      if (!status || status === 'unknown') {
-        return '';
+      if (!status || status === "unknown") {
+        return "";
       }
       const label = ACTIVITY_LABELS[key] ?? key;
-      const word = status === 'available' ? 'available' : 'done / capped';
-      const tone = status === 'available' ? '' : ' ao-muted';
+      const word = status === "available" ? "available" : "done / capped";
+      const tone = status === "available" ? "" : " ao-muted";
       return `<div class="${tone.trim()}">${escapeHtml(label)} · ${word}</div>`;
     })
     .filter(Boolean);
   if (rows.length === 0) {
-    return '';
+    return "";
   }
   const updated = siteState.updatedAt
     ? ` · ${escapeHtml(new Date(siteState.updatedAt).toLocaleString())}`
-    : '';
+    : "";
   return `<div class="ao-note">
       <div><strong>Activity caps</strong>${updated}</div>
-      ${rows.join('')}
+      ${rows.join("")}
     </div>`;
 }
 
@@ -481,17 +483,17 @@ export function renderStatusSection(
     renderArpLogCard(siteState),
   ].filter(Boolean);
   if (cards.length === 0) {
-    return '';
+    return "";
   }
   return `
     <div class="ao-heading">Status</div>
-    ${cards.join('')}
+    ${cards.join("")}
   `;
 }
 
 export function formatSwapMessage(result: OptimizerResult): string {
   if (result.dailySwap) {
-    return `<div class="ao-row">${escapeHtml(result.dailySwap.reason)}</div>`;
+    return `<div class="ao-row">${wrapArtifactNames(result.dailySwap.reason)}</div>`;
   }
   const currentIds = new Set(
     (result.current?.artifacts ?? []).map((a) => a.instanceId),
@@ -532,14 +534,14 @@ export function renderUpgradePath(
           upgrade.artifact.instanceId,
         );
         seenAffordable.add(upgrade.artifact.instanceId);
-        const verb = isFirstAffordable ? 'Upgrade' : 'Then';
+        const verb = isFirstAffordable ? "Upgrade" : "Then";
         const button =
           shouldShowUpgradeButtons && isFirstAffordable
             ? `<button type="button" class="ao-upgrade-btn" data-id="${upgrade.artifact.instanceId}">Upgrade</button>`
-            : '';
+            : "";
         return `
         <div class="ao-row">
-          ${verb} <strong>${upgrade.artifact.displayName}</strong>
+          ${verb} <strong>${wrapArtifactNames(upgrade.artifact.displayName)}</strong>
           ${step}
           (${upgrade.fragmentCost} frag, ${gain}, ${upgrade.efficiency.toFixed(1)} ARP/frag)
           ${button}
@@ -549,19 +551,19 @@ export function renderUpgradePath(
         hasReachedSave = true;
         return `
         <div class="ao-row ao-muted">
-          Save for <strong>${upgrade.artifact.displayName}</strong>
+          Save for <strong>${wrapArtifactNames(upgrade.artifact.displayName)}</strong>
           ${step}
           (need ${upgrade.fragmentCost}, have ${fragments}, ${gain})
         </div>`;
       }
       return `
         <div class="ao-row ao-muted">
-          Then <strong>${upgrade.artifact.displayName}</strong>
+          Then <strong>${wrapArtifactNames(upgrade.artifact.displayName)}</strong>
           ${step}
           (${upgrade.fragmentCost} frag, ${gain})
         </div>`;
     })
-    .join('');
+    .join("");
 }
 
 export function renderResultBody(
@@ -573,15 +575,15 @@ export function renderResultBody(
 ): string {
   const scrapedAt = snapshot?.scrapedAt
     ? new Date(snapshot.scrapedAt).toLocaleString()
-    : 'never';
+    : "never";
   const fragments = settings.manualFragments ?? snapshot?.fragments ?? 0;
   const hydrateBanner = options.isHydrating
-    ? renderHydrateBanner('Updating in the background…')
-    : '';
+    ? renderHydrateBanner("Updating in the background…")
+    : "";
 
   const extras = supplementalNotes(result.notes)
-    .map((n) => `<div class="ao-note">${escapeHtml(n)}</div>`)
-    .join('');
+    .map((n) => `<div class="ao-note">${wrapArtifactNames(n)}</div>`)
+    .join("");
   const vaultDiscount = renderVaultDiscountBlock(result);
 
   const areActionsEnabled = areAccountActionsEnabled(settings);
@@ -612,25 +614,25 @@ export function renderResultBody(
       const label = ACTIVITY_LABELS[key] ?? key;
       return `
         <label class="ao-toggle">
-          <input type="checkbox" data-activity="${key}" ${a.enabled ? 'checked' : ''}/>
+          <input type="checkbox" data-activity="${key}" ${a.enabled ? "checked" : ""}/>
           ${label} <span class="ao-muted">(freq)</span>
           <input type="number" min="0" max="2" step="0.1" data-freq="${key}" value="${a.frequency}"/>
         </label>`;
     })
-    .join('');
+    .join("");
 
   return `
     <div class="ao-notify">
       ${renderNotifySwitch({
-        id: 'ao-account-actions',
-        title: 'Account actions',
-        hint: 'Equip artifacts, upgrade, and claim Battle Pass for you. Use at your own risk.',
+        id: "ao-account-actions",
+        title: "Account actions",
+        hint: "Equip artifacts, upgrade, and claim Battle Pass for you. Use at your own risk.",
         isChecked: areActionsEnabled,
       })}
       ${renderNotifySwitch({
-        id: 'ao-browser-notifications',
-        title: 'Desktop notifications',
-        hint: 'Master switch. Turning this on asks the browser for permission.',
+        id: "ao-browser-notifications",
+        title: "Desktop notifications",
+        hint: "Master switch. Turning this on asks the browser for permission.",
         isChecked: settings.browserNotifications,
       })}
       ${renderNotifyTypeSwitches(settings)}
@@ -641,11 +643,11 @@ export function renderResultBody(
     ${extras}
     ${renderSectionDivider()}
     <div class="ao-heading">Recommended loadout</div>
-    <div class="ao-row"><strong>${comboLabel(result.best)}</strong></div>
+    <div class="ao-row"><strong>${wrapArtifactNames(comboLabel(result.best))}</strong></div>
     ${renderBreakdown(result.best)}
     <div class="ao-heading">Currently equipped</div>
-    <div class="ao-row">${equippedLabel}</div>
-    ${result.current ? renderBreakdown(result.current) : ''}
+    <div class="ao-row">${wrapArtifactNames(equippedLabel)}</div>
+    ${result.current ? renderBreakdown(result.current) : ""}
     <div class="ao-heading">Suggested swap</div>
     ${swap}
     <div class="ao-heading">Upgrade priority</div>
@@ -663,22 +665,27 @@ export function renderResultBody(
       <div class="ao-row">
         Manual fragment override (blank = scraped):
         <input type="number" id="ao-manual-frags" min="0" step="1" value="${
-          settings.manualFragments ?? ''
+          settings.manualFragments ?? ""
         }" placeholder="auto"/>
       </div>
       <div class="ao-heading">Preferred Twitch streamers</div>
       <div class="ao-muted">One login per line. Live preferred channels open first (top to bottom). If none are live: random Featured/Hive/Nexus with "drops" in the title, then any Featured/Hive/Nexus, then any "drops" title, then a random remaining stream.</div>
-      <textarea id="ao-preferred-twitch" class="ao-textarea" rows="4" placeholder="ludwig">${escapeHtml(settings.preferredTwitchStreamers.join('\n'))}</textarea>
+      <textarea id="ao-preferred-twitch" class="ao-textarea" rows="4" placeholder="ludwig">${escapeHtml(settings.preferredTwitchStreamers.join("\n"))}</textarea>
+      <div class="ao-heading">UTC daily cutoff</div>
+      <div class="ao-muted">Hours before 00:00 UTC to keep free for Twitch / Time on Site. Raise this if a 24h All-ARP% lock would leave too little time after it ends (a +1 community bump is not worth squeezing Twitch).</div>
+      <div class="ao-row">
+        <input type="number" id="ao-utc-daily-cutoff" min="0" max="${MAX_UTC_DAILY_END_BUFFER_HOURS}" step="0.5" value="${settings.utcDailyEndBufferHours}"/>
+      </div>
       <div class="ao-heading">Manual artifacts</div>
       <div class="ao-muted">Only needed if auto-scrape fails.</div>
       <div class="ao-row">
         <select id="ao-manual-family">
-          ${ARTIFACTS.map((a) => `<option value="${a.id}">${a.id}</option>`).join('')}
+          ${ARTIFACTS.map((a) => `<option value="${a.id}">${a.id}</option>`).join("")}
         </select>
         <select id="ao-manual-tier">
           ${Object.entries(TIER_LABELS)
             .map(([k, v]) => `<option value="${k}">${v}</option>`)
-            .join('')}
+            .join("")}
         </select>
         <button type="button" id="ao-add-manual">Add</button>
       </div>
@@ -693,7 +700,7 @@ export function renderResultBody(
                       <button type="button" class="ao-remove-manual ao-secondary" data-index="${index}">Remove</button>
                      </div>`,
                 )
-                .join('')
+                .join("")
         }
       </div>
     </details>

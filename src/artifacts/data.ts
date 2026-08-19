@@ -23,31 +23,31 @@ Attribution sources for optimizer math / META guidance. Expand as needed.
 */
 export const CREDIT_SOURCES: readonly CreditSource[] = [
   {
-    id: 'megumin-tools',
+    id: "megumin-tools",
     label: "Megumin's Tools",
-    dateAccessed: '2026-08-10',
-    url: 'https://docs.google.com/spreadsheets/d/1VCzq6Trwc9T_wEsvTANpL7yy8FaJ6psSsKYn4O4riw8/edit?usp=sharing',
+    dateAccessed: "2026-08-10",
+    url: "https://docs.google.com/spreadsheets/d/1VCzq6Trwc9T_wEsvTANpL7yy8FaJ6psSsKYn4O4riw8/edit?usp=sharing",
     links: [
       {
-        label: 'Artifact Upgrade C/P',
-        url: 'https://docs.google.com/spreadsheets/d/1VCzq6Trwc9T_wEsvTANpL7yy8FaJ6psSsKYn4O4riw8/edit?gid=1046753957#gid=1046753957',
+        label: "Artifact Upgrade C/P",
+        url: "https://docs.google.com/spreadsheets/d/1VCzq6Trwc9T_wEsvTANpL7yy8FaJ6psSsKYn4O4riw8/edit?gid=1046753957#gid=1046753957",
       },
       {
-        label: 'ARP Calculator',
-        url: 'https://docs.google.com/spreadsheets/d/1VCzq6Trwc9T_wEsvTANpL7yy8FaJ6psSsKYn4O4riw8/edit?gid=1289162159#gid=1289162159',
+        label: "ARP Calculator",
+        url: "https://docs.google.com/spreadsheets/d/1VCzq6Trwc9T_wEsvTANpL7yy8FaJ6psSsKYn4O4riw8/edit?gid=1289162159#gid=1289162159",
       },
     ],
   },
   {
-    id: 'megumin-ucf-artifacts-info',
-    label: '【Artifacts】Info',
-    dateAccessed: '2026-08-06',
-    url: 'https://www.alienwarearena.com/ucf/show/2167784',
+    id: "megumin-ucf-artifacts-info",
+    label: "【Artifacts】Info",
+    dateAccessed: "2026-08-06",
+    url: "https://www.alienwarearena.com/ucf/show/2167784",
   },
   {
-    id: 'asce',
-    label: 'ASCE',
-    url: 'https://github.com/MarvashMagalli/ASCE',
+    id: "asce",
+    label: "ASCE",
+    url: "https://github.com/MarvashMagalli/ASCE",
   },
 ];
 
@@ -61,12 +61,12 @@ export enum ArtifactTier {
 }
 
 export const TIER_LABELS: Record<ArtifactTier, string> = {
-  [ArtifactTier.Rust]: 'Rust',
-  [ArtifactTier.Bronze]: 'Bronze',
-  [ArtifactTier.Silver]: 'Silver',
-  [ArtifactTier.Gold]: 'Gold',
-  [ArtifactTier.Platinum]: 'Platinum',
-  [ArtifactTier.Interstellar]: 'Interstellar',
+  [ArtifactTier.Rust]: "Rust",
+  [ArtifactTier.Bronze]: "Bronze",
+  [ArtifactTier.Silver]: "Silver",
+  [ArtifactTier.Gold]: "Gold",
+  [ArtifactTier.Platinum]: "Platinum",
+  [ArtifactTier.Interstellar]: "Interstellar",
 };
 
 /**
@@ -82,27 +82,27 @@ export const FRAGMENT_COST_TO_TIER: Record<ArtifactTier, number> = {
 };
 
 export type ArtifactCategory =
-  | 'Weapon'
-  | 'Clothing'
-  | 'Power'
-  | 'Language'
-  | 'Precious Gems'
-  | 'Tech'
-  | 'Knowledge'
-  | 'Social'
-  | 'Architecture';
+  | "Weapon"
+  | "Clothing"
+  | "Power"
+  | "Language"
+  | "Precious Gems"
+  | "Tech"
+  | "Knowledge"
+  | "Social"
+  | "Architecture";
 
 export enum ArtifactEffectType {
-  SteamQuests = 'SteamQuests',
-  WatchTwitch = 'WatchTwitch',
-  DailyCalendar = 'DailyCalendar',
-  TimeOnSite = 'TimeOnSite',
-  DiscordPoll = 'DiscordPoll',
-  MarketDiscountPct = 'MarketDiscountPct',
-  AllArpPct = 'AllArpPct',
-  CommunityPlaytimePct = 'CommunityPlaytimePct',
-  UsernameColor = 'UsernameColor',
-  None = 'None',
+  SteamQuests = "SteamQuests",
+  WatchTwitch = "WatchTwitch",
+  DailyCalendar = "DailyCalendar",
+  TimeOnSite = "TimeOnSite",
+  DiscordPoll = "DiscordPoll",
+  MarketDiscountPct = "MarketDiscountPct",
+  AllArpPct = "AllArpPct",
+  CommunityPlaytimePct = "CommunityPlaytimePct",
+  UsernameColor = "UsernameColor",
+  None = "None",
 }
 
 export type EffectValue = number | string | undefined;
@@ -122,7 +122,7 @@ export interface ArtifactDefinition {
   /**
   Unit: 'flat' ARP, 'pct' (0.01 = 1%), or 'cosmetic'.
   */
-  effectUnit: 'flat' | 'pct' | 'cosmetic';
+  effectUnit: "flat" | "pct" | "cosmetic";
 }
 
 export interface ArtifactSetDefinition {
@@ -132,94 +132,94 @@ export interface ArtifactSetDefinition {
   effects: {
     type: ArtifactEffectType;
     value: number;
-    unit: 'flat' | 'pct' | 'cosmetic';
+    unit: "flat" | "pct" | "cosmetic";
   }[];
   unconfirmed?: boolean;
 }
 
 export const ARTIFACTS: ArtifactDefinition[] = [
   {
-    id: 'sylphin-fission-blade',
-    category: 'Weapon',
+    id: "sylphin-fission-blade",
+    category: "Weapon",
     tierNames: [
-      'Broken Sylphin Fission Blade',
-      'Basic Sylphin Fission Blade',
-      'Extended Sylphin Fission Blade',
-      'Sylphin Fission Blade Mk1',
-      'Sylphin Fission Blade Mk3',
+      "Broken Sylphin Fission Blade",
+      "Basic Sylphin Fission Blade",
+      "Extended Sylphin Fission Blade",
+      "Sylphin Fission Blade Mk1",
+      "Sylphin Fission Blade Mk3",
       "Kylorf's Sylphin Fission Blade",
     ],
     effects: [1, 2, 4, 6, 8, 12],
     effectType: ArtifactEffectType.SteamQuests,
-    effectUnit: 'flat',
+    effectUnit: "flat",
   },
   {
-    id: 'pn295',
-    category: 'Tech',
+    id: "pn295",
+    category: "Tech",
     tierNames: [
-      'Pn295 Unstable',
-      'Pn295 Controlled',
-      'Pn295 Fusion',
-      'Pn295 Alloy',
-      'Slyphin Battle Armor',
-      'Pn295 Collapsed Star',
+      "Pn295 Unstable",
+      "Pn295 Controlled",
+      "Pn295 Fusion",
+      "Pn295 Alloy",
+      "Slyphin Battle Armor",
+      "Pn295 Collapsed Star",
     ],
     // Live Showroom also uses "Pn295 Recycler" as Interstellar display — see aliases below.
     // Flat is treated as a higher daily Twitch cap at 1 ARP/min (Alloy +7 → ~22m).
     effects: [1, 2, 4, 7, 10, 15],
     effectType: ArtifactEffectType.WatchTwitch,
-    effectUnit: 'flat',
+    effectUnit: "flat",
   },
   {
-    id: 'light-warping',
-    category: 'Language',
+    id: "light-warping",
+    category: "Language",
     tierNames: [
-      'Rudimentary Light Warping',
-      'Simplistic Light Warping',
-      'Phase Light Warping',
-      'Bonded Phase Light Warping',
-      'PLW Conduit RX13',
-      'Light Warp Forerunners',
+      "Rudimentary Light Warping",
+      "Simplistic Light Warping",
+      "Phase Light Warping",
+      "Bonded Phase Light Warping",
+      "PLW Conduit RX13",
+      "Light Warp Forerunners",
     ],
     effects: [-0.01, -0.03, -0.05, -0.08, -0.1, -0.15],
     effectType: ArtifactEffectType.MarketDiscountPct,
-    effectUnit: 'pct',
+    effectUnit: "pct",
   },
   {
-    id: 'herkow-plasma-chamber',
-    category: 'Power',
+    id: "herkow-plasma-chamber",
+    category: "Power",
     tierNames: [
       undefined,
       undefined,
       undefined,
-      'H`erkow Plasma Chamber',
-      'H`erkow Control Center',
-      'H`erkow Orb Reactor',
+      "H`erkow Plasma Chamber",
+      "H`erkow Control Center",
+      "H`erkow Orb Reactor",
     ],
     effects: [undefined, undefined, undefined, 0.1, 0.15, 0.25],
     effectType: ArtifactEffectType.AllArpPct,
-    effectUnit: 'pct',
+    effectUnit: "pct",
   },
   {
-    id: 'them',
-    category: 'Power',
+    id: "them",
+    category: "Power",
     tierNames: [
-      '*** THEM ***',
-      '*** THEM CONTAINED ***',
-      '*** THEM ESCAPED ***',
+      "*** THEM ***",
+      "*** THEM CONTAINED ***",
+      "*** THEM ESCAPED ***",
       undefined,
       undefined,
       undefined,
     ],
     effects: [-0.2, -0.25, -0.25, undefined, undefined, undefined],
     effectType: ArtifactEffectType.AllArpPct,
-    effectUnit: 'pct',
+    effectUnit: "pct",
   },
   {
-    id: 'herkow-warrior-script',
-    category: 'Weapon',
+    id: "herkow-warrior-script",
+    category: "Weapon",
     tierNames: [
-      'H`erkow Warrior Script',
+      "H`erkow Warrior Script",
       undefined,
       undefined,
       undefined,
@@ -228,14 +228,14 @@ export const ARTIFACTS: ArtifactDefinition[] = [
     ],
     effects: [1, undefined, undefined, undefined, undefined, undefined],
     effectType: ArtifactEffectType.SteamQuests,
-    effectUnit: 'flat',
+    effectUnit: "flat",
   },
   {
-    id: 'scion-of-the-light',
-    category: 'Tech',
+    id: "scion-of-the-light",
+    category: "Tech",
     tierNames: [
-      'Scion of the Light',
-      'Scion of the Light: 2nd Sighting',
+      "Scion of the Light",
+      "Scion of the Light: 2nd Sighting",
       undefined,
       undefined,
       undefined,
@@ -243,14 +243,14 @@ export const ARTIFACTS: ArtifactDefinition[] = [
     ],
     effects: [1, 2, undefined, undefined, undefined, undefined],
     effectType: ArtifactEffectType.WatchTwitch,
-    effectUnit: 'flat',
+    effectUnit: "flat",
   },
   {
-    id: 'mysterious-text',
-    category: 'Language',
+    id: "mysterious-text",
+    category: "Language",
     tierNames: [
-      'Mysterious Text',
-      'Mysterious Text Decipher',
+      "Mysterious Text",
+      "Mysterious Text Decipher",
       undefined,
       undefined,
       undefined,
@@ -258,133 +258,133 @@ export const ARTIFACTS: ArtifactDefinition[] = [
     ],
     effects: [-0.01, -0.02, undefined, undefined, undefined, undefined],
     effectType: ArtifactEffectType.MarketDiscountPct,
-    effectUnit: 'pct',
+    effectUnit: "pct",
   },
   {
-    id: 'chai-stones',
-    category: 'Precious Gems',
+    id: "chai-stones",
+    category: "Precious Gems",
     tierNames: [
-      'Chai Stones - Raw',
-      'Chai Stones - Unprocessed',
-      'Chai Stones - Processed',
-      'The Stone of Cromcote`',
-      'H`erkow Fertility Stone',
-      'Chai Stone H`erkow Display',
+      "Chai Stones - Raw",
+      "Chai Stones - Unprocessed",
+      "Chai Stones - Processed",
+      "The Stone of Cromcote`",
+      "H`erkow Fertility Stone",
+      "Chai Stone H`erkow Display",
     ],
     effects: [1, 2, 3, 4, 5, 6],
     effectType: ArtifactEffectType.DailyCalendar,
-    effectUnit: 'flat',
+    effectUnit: "flat",
   },
   {
-    id: 'herkow-fertility-robes',
-    category: 'Clothing',
+    id: "herkow-fertility-robes",
+    category: "Clothing",
     tierNames: [
       undefined,
       undefined,
       undefined,
-      'H`erkow Fertility Robes',
+      "H`erkow Fertility Robes",
       undefined,
       undefined,
     ],
-    effects: [undefined, undefined, undefined, 'Pink', undefined, undefined],
+    effects: [undefined, undefined, undefined, "Pink", undefined, undefined],
     effectType: ArtifactEffectType.UsernameColor,
-    effectUnit: 'cosmetic',
+    effectUnit: "cosmetic",
   },
   {
-    id: 'pn295-unstable-battery',
-    category: 'Weapon',
+    id: "pn295-unstable-battery",
+    category: "Weapon",
     tierNames: [
-      'Pn 295 Unstable Battery',
-      'Pn 295 Stable Battery',
-      'Pn 295 Contained Battery',
-      'Pn 295 Battery Amplifier',
-      'Pn 295 Cruiser Class Battery Amplifier',
-      'Pn 295 Recycler',
+      "Pn 295 Unstable Battery",
+      "Pn 295 Stable Battery",
+      "Pn 295 Contained Battery",
+      "Pn 295 Battery Amplifier",
+      "Pn 295 Cruiser Class Battery Amplifier",
+      "Pn 295 Recycler",
     ],
     effects: [2, 4, 6, 8, 10, 15],
     effectType: ArtifactEffectType.SteamQuests,
-    effectUnit: 'flat',
+    effectUnit: "flat",
   },
   {
-    id: 'zorathian-cosmotheque',
-    category: 'Knowledge',
+    id: "zorathian-cosmotheque",
+    category: "Knowledge",
     tierNames: [
       undefined,
-      'Zorathian Cosmotheque',
-      'Zorathian Data Mine',
-      '5th Dimensional Data',
-      'Crystalline Quantum Shelving',
-      'Zorathian Library',
+      "Zorathian Cosmotheque",
+      "Zorathian Data Mine",
+      "5th Dimensional Data",
+      "Crystalline Quantum Shelving",
+      "Zorathian Library",
     ],
     effects: [undefined, 1, 2, 3, 4, 5],
     effectType: ArtifactEffectType.DiscordPoll,
-    effectUnit: 'flat',
+    effectUnit: "flat",
   },
   {
-    id: 'flux',
-    category: 'Social',
+    id: "flux",
+    category: "Social",
     tierNames: [
-      'Flux',
-      'Advanced Flux',
-      'Spocot Board',
-      'Spocot Flux Epoc',
-      'Spocot Flux Final',
-      'Spocot Flux Champion',
+      "Flux",
+      "Advanced Flux",
+      "Spocot Board",
+      "Spocot Flux Epoc",
+      "Spocot Flux Final",
+      "Spocot Flux Champion",
     ],
     effects: [0.05, 0.1, 0.2, 0.3, 0.4, 0.5],
     effectType: ArtifactEffectType.CommunityPlaytimePct,
-    effectUnit: 'pct',
+    effectUnit: "pct",
   },
   {
-    id: 'bali-arches',
-    category: 'Architecture',
+    id: "bali-arches",
+    category: "Architecture",
     tierNames: [
       undefined,
       "Ba'li Arches",
-      'Northop Arches',
-      'Golden Arches',
-      'Apotho Arches',
-      'Eye of the Night',
+      "Northop Arches",
+      "Golden Arches",
+      "Apotho Arches",
+      "Eye of the Night",
     ],
     effects: [undefined, 1, 2, 3, 4, 6],
     effectType: ArtifactEffectType.TimeOnSite,
-    effectUnit: 'flat',
+    effectUnit: "flat",
   },
   {
-    id: 'gamers-wanted',
-    category: 'Architecture',
+    id: "gamers-wanted",
+    category: "Architecture",
     tierNames: [
       undefined,
       undefined,
-      'Gamers Wanted',
+      "Gamers Wanted",
       "They're Out There",
-      'Defy Boundaries',
-      'Rise',
+      "Defy Boundaries",
+      "Rise",
     ],
     effects: [undefined, undefined, 1, 2, 3, 4],
     effectType: ArtifactEffectType.TimeOnSite,
-    effectUnit: 'flat',
+    effectUnit: "flat",
   },
   {
-    id: 'omniversal-override',
-    category: 'Language',
+    id: "omniversal-override",
+    category: "Language",
     tierNames: [
       undefined,
       undefined,
-      'Omniversal Override',
-      'Planetary Tranverser',
-      'Dimensional Articulator',
-      'Multi-Planar Transmuter',
+      "Omniversal Override",
+      "Planetary Tranverser",
+      "Dimensional Articulator",
+      "Multi-Planar Transmuter",
     ],
     effects: [undefined, undefined, -0.02, -0.03, -0.04, -0.05],
     effectType: ArtifactEffectType.MarketDiscountPct,
-    effectUnit: 'pct',
+    effectUnit: "pct",
   },
   {
-    id: 'the-black-rose',
-    category: 'Clothing',
+    id: "the-black-rose",
+    category: "Clothing",
     tierNames: [
-      'The Black Rose',
+      "The Black Rose",
       undefined,
       undefined,
       undefined,
@@ -392,7 +392,7 @@ export const ARTIFACTS: ArtifactDefinition[] = [
       undefined,
     ],
     effects: [
-      'Dark Gray',
+      "Dark Gray",
       undefined,
       undefined,
       undefined,
@@ -400,13 +400,13 @@ export const ARTIFACTS: ArtifactDefinition[] = [
       undefined,
     ],
     effectType: ArtifactEffectType.UsernameColor,
-    effectUnit: 'cosmetic',
+    effectUnit: "cosmetic",
   },
   {
-    id: 'the-fractured-lilly',
-    category: 'Precious Gems',
+    id: "the-fractured-lilly",
+    category: "Precious Gems",
     tierNames: [
-      'The Fractured Lilly',
+      "The Fractured Lilly",
       undefined,
       undefined,
       undefined,
@@ -415,13 +415,13 @@ export const ARTIFACTS: ArtifactDefinition[] = [
     ],
     effects: [0, undefined, undefined, undefined, undefined, undefined],
     effectType: ArtifactEffectType.None,
-    effectUnit: 'flat',
+    effectUnit: "flat",
   },
   {
-    id: 'the-veiled-thorn',
-    category: 'Weapon',
+    id: "the-veiled-thorn",
+    category: "Weapon",
     tierNames: [
-      'The Veiled Thorn',
+      "The Veiled Thorn",
       undefined,
       undefined,
       undefined,
@@ -430,22 +430,22 @@ export const ARTIFACTS: ArtifactDefinition[] = [
     ],
     effects: [0, undefined, undefined, undefined, undefined, undefined],
     effectType: ArtifactEffectType.None,
-    effectUnit: 'flat',
+    effectUnit: "flat",
   },
   {
-    id: 'audio-archive-stone',
-    category: 'Clothing',
+    id: "audio-archive-stone",
+    category: "Clothing",
     tierNames: [
       undefined,
       undefined,
       undefined,
       undefined,
       undefined,
-      'Audio Archive Stone',
+      "Audio Archive Stone",
     ],
-    effects: [undefined, undefined, undefined, undefined, undefined, 'Tomato'],
+    effects: [undefined, undefined, undefined, undefined, undefined, "Tomato"],
     effectType: ArtifactEffectType.UsernameColor,
-    effectUnit: 'cosmetic',
+    effectUnit: "cosmetic",
   },
 ];
 
@@ -454,57 +454,57 @@ Extra live display names that don't match the guide's tier-name list exactly.
 */
 const TIER_NAME_ALIASES: Record<string, { id: string; tier: ArtifactTier }> = {
   // Live Showroom sometimes drops the space after "Pn"
-  'Pn295 Recycler': {
-    id: 'pn295-unstable-battery',
+  "Pn295 Recycler": {
+    id: "pn295-unstable-battery",
     tier: ArtifactTier.Interstellar,
   },
   // Megumin guide spelling uses an apostrophe; Showroom uses a backtick
   "H'erkow Warrior Script": {
-    id: 'herkow-warrior-script',
+    id: "herkow-warrior-script",
     tier: ArtifactTier.Rust,
   },
 };
 
 export const ARTIFACT_SETS: ArtifactSetDefinition[] = [
   {
-    id: 'first-contact',
-    name: 'First Contact',
-    memberIds: ['sylphin-fission-blade', 'pn295', 'light-warping'],
+    id: "first-contact",
+    name: "First Contact",
+    memberIds: ["sylphin-fission-blade", "pn295", "light-warping"],
     effects: [
-      { type: ArtifactEffectType.DailyCalendar, value: 1, unit: 'flat' },
-      { type: ArtifactEffectType.UsernameColor, value: 1, unit: 'cosmetic' },
+      { type: ArtifactEffectType.DailyCalendar, value: 1, unit: "flat" },
+      { type: ArtifactEffectType.UsernameColor, value: 1, unit: "cosmetic" },
     ],
   },
   {
-    id: 'stanley-excavation',
-    name: 'The Stanley Excavation',
+    id: "stanley-excavation",
+    name: "The Stanley Excavation",
     memberIds: [
-      'chai-stones',
-      'herkow-fertility-robes',
-      'pn295-unstable-battery',
+      "chai-stones",
+      "herkow-fertility-robes",
+      "pn295-unstable-battery",
     ],
     effects: [
-      { type: ArtifactEffectType.SteamQuests, value: 5, unit: 'flat' },
-      { type: ArtifactEffectType.MarketDiscountPct, value: -0.15, unit: 'pct' },
+      { type: ArtifactEffectType.SteamQuests, value: 5, unit: "flat" },
+      { type: ArtifactEffectType.MarketDiscountPct, value: -0.15, unit: "pct" },
     ],
   },
   {
-    id: 'zorathian-renaissance',
-    name: 'Zorathian Renaissance',
-    memberIds: ['zorathian-cosmotheque', 'flux', 'bali-arches'],
+    id: "zorathian-renaissance",
+    name: "Zorathian Renaissance",
+    memberIds: ["zorathian-cosmotheque", "flux", "bali-arches"],
     effects: [
-      { type: ArtifactEffectType.AllArpPct, value: 0.1, unit: 'pct' },
-      { type: ArtifactEffectType.UsernameColor, value: 1, unit: 'cosmetic' },
+      { type: ArtifactEffectType.AllArpPct, value: 0.1, unit: "pct" },
+      { type: ArtifactEffectType.UsernameColor, value: 1, unit: "cosmetic" },
     ],
   },
   {
-    id: 'braxtine-garden',
-    name: 'Braxtine Garden',
+    id: "braxtine-garden",
+    name: "Braxtine Garden",
     // This set is an April Fools joke, and likely unobtainable.
-    memberIds: ['the-black-rose', 'the-crimsom-t', 'the-nebula-c'],
+    memberIds: ["the-black-rose", "the-crimsom-t", "the-nebula-c"],
     effects: [
-      { type: ArtifactEffectType.AllArpPct, value: 5, unit: 'pct' },
-      { type: ArtifactEffectType.TimeOnSite, value: 100, unit: 'flat' },
+      { type: ArtifactEffectType.AllArpPct, value: 5, unit: "pct" },
+      { type: ArtifactEffectType.TimeOnSite, value: 100, unit: "flat" },
     ],
   },
 ];
@@ -577,46 +577,46 @@ export const MONTHLY_ARP_FOR_PCT = 1800;
 Megumin end-game upgrade order when HPC is owned.
 */
 export const END_GAME_HPC_UPGRADE_ORDER = [
-  'herkow-plasma-chamber',
-  'pn295',
-  'chai-stones',
-  'pn295-unstable-battery',
-  'bali-arches',
-  'sylphin-fission-blade',
-  'zorathian-cosmotheque',
-  'scion-of-the-light',
+  "herkow-plasma-chamber",
+  "pn295",
+  "chai-stones",
+  "pn295-unstable-battery",
+  "bali-arches",
+  "sylphin-fission-blade",
+  "zorathian-cosmotheque",
+  "scion-of-the-light",
 ] as const;
 
 /**
 Megumin end-game upgrade order without HPC (Pn295 Watch Twitch first).
 */
 export const END_GAME_NO_HPC_UPGRADE_ORDER = [
-  'pn295',
-  'chai-stones',
-  'pn295-unstable-battery',
-  'bali-arches',
-  'sylphin-fission-blade',
-  'zorathian-cosmotheque',
-  'scion-of-the-light',
+  "pn295",
+  "chai-stones",
+  "pn295-unstable-battery",
+  "bali-arches",
+  "sylphin-fission-blade",
+  "zorathian-cosmotheque",
+  "scion-of-the-light",
 ] as const;
 
 /**
 New-game: finish the Zorathian set, then Scion. Other owned ARP pieces follow.
 */
 export const NEW_GAME_UPGRADE_ORDER = [
-  'bali-arches',
-  'zorathian-cosmotheque',
-  'flux',
-  'scion-of-the-light',
+  "bali-arches",
+  "zorathian-cosmotheque",
+  "flux",
+  "scion-of-the-light",
 ] as const;
 
 export function upgradeFocusOrder(
   ownedFamilyIds: ReadonlySet<string>,
 ): readonly string[] {
-  if (ownedFamilyIds.has('herkow-plasma-chamber')) {
+  if (ownedFamilyIds.has("herkow-plasma-chamber")) {
     return END_GAME_HPC_UPGRADE_ORDER;
   }
-  if (ownedFamilyIds.has('pn295')) {
+  if (ownedFamilyIds.has("pn295")) {
     return END_GAME_NO_HPC_UPGRADE_ORDER;
   }
   return NEW_GAME_UPGRADE_ORDER;
@@ -626,21 +626,21 @@ export function upgradeFocusOrder(
 Megumin ❌ Swap standing 3-set (wear all month). Fill order covers missing pieces.
 */
 export const END_GAME_HPC_STANDING = [
-  'herkow-plasma-chamber',
-  'chai-stones',
-  'pn295',
+  "herkow-plasma-chamber",
+  "chai-stones",
+  "pn295",
 ] as const;
 
 export const END_GAME_NO_HPC_STANDING = [
-  'pn295',
-  'chai-stones',
-  'bali-arches',
+  "pn295",
+  "chai-stones",
+  "bali-arches",
 ] as const;
 
 export const NEW_GAME_STANDING = [
-  'bali-arches',
-  'zorathian-cosmotheque',
-  'flux',
+  "bali-arches",
+  "zorathian-cosmotheque",
+  "flux",
 ] as const;
 
 export function monthlyMetaStandingFamilies(
@@ -649,13 +649,13 @@ export function monthlyMetaStandingFamilies(
   standing: readonly string[];
   fillOrder: readonly string[];
 } {
-  if (ownedFamilyIds.has('herkow-plasma-chamber')) {
+  if (ownedFamilyIds.has("herkow-plasma-chamber")) {
     return {
       standing: END_GAME_HPC_STANDING,
       fillOrder: END_GAME_HPC_UPGRADE_ORDER,
     };
   }
-  if (ownedFamilyIds.has('pn295')) {
+  if (ownedFamilyIds.has("pn295")) {
     return {
       standing: END_GAME_NO_HPC_STANDING,
       fillOrder: END_GAME_NO_HPC_UPGRADE_ORDER,
@@ -669,6 +669,48 @@ export function monthlyMetaStandingFamilies(
 
 export function getArtifactById(id: string): ArtifactDefinition | undefined {
   return ARTIFACTS.find((a) => a.id === id);
+}
+
+export interface ArtifactNameEntry {
+  name: string;
+  definition: ArtifactDefinition;
+  tier: ArtifactTier;
+}
+
+/**
+ * Every known display name (tier names + Showroom aliases), longest first so
+ * wrap/search matches "Pn295 Alloy" before a shorter family prefix.
+ */
+export function listArtifactNameEntries(): readonly ArtifactNameEntry[] {
+  const seen = new Set<string>();
+  const entries: ArtifactNameEntry[] = [];
+  const push = (
+    name: string,
+    definition: ArtifactDefinition,
+    tier: ArtifactTier,
+  ): void => {
+    if (seen.has(name)) {
+      return;
+    }
+    seen.add(name);
+    entries.push({ name, definition, tier });
+  };
+  for (const definition of ARTIFACTS) {
+    for (const [tier, name] of definition.tierNames.entries()) {
+      if (name) {
+        push(name, definition, tier as ArtifactTier);
+      }
+    }
+  }
+  for (const [name, alias] of Object.entries(TIER_NAME_ALIASES)) {
+    const definition = getArtifactById(alias.id);
+    if (definition) {
+      push(name, definition, alias.tier);
+    }
+  }
+  return entries.toSorted(
+    (left, right) => right.name.length - left.name.length,
+  );
 }
 
 export function resolveArtifactByDisplayName(
@@ -708,8 +750,8 @@ export function resolveArtifactByDisplayName(
 function normalizeName(name: string): string {
   return name
     .toLowerCase()
-    .replaceAll(/[`'’]/g, '')
-    .replaceAll(/\s+/g, ' ')
+    .replaceAll(/[`'’]/g, "")
+    .replaceAll(/\s+/g, " ")
     .trim();
 }
 
@@ -717,11 +759,11 @@ export function getNumericEffect(
   definition: ArtifactDefinition,
   tier: ArtifactTier,
 ): number {
-  if (definition.effectUnit === 'cosmetic') {
+  if (definition.effectUnit === "cosmetic") {
     return 0;
   }
   const value = definition.effects[tier];
-  return typeof value === 'number' ? value : 0;
+  return typeof value === "number" ? value : 0;
 }
 
 export function fragmentCostToUpgradeFrom(

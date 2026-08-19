@@ -25,6 +25,7 @@
   ],
   "biome.enabled": false,
   "eslint.run": "onType",
+  "eslint.workingDirectories": [{ "mode": "auto" }],
   "eslint.validate": [
     "javascript",
     "javascriptreact",

@@ -81,11 +81,10 @@ export function appendCommunityEventNotes(
   if (
     hasAllArpOwned &&
     !hasAllArpOn &&
-    communityEventArpInSwapWindow(context.siteState) > 0
+    communityEventArpInSwapWindow(context.siteState) > 0 &&
+    resolveDeferredAllArp(owned, context) === undefined
   ) {
-    notes.push(
-      `${summary} — grants during this lock (once). Watch Twitch repeats daily; wear All-ARP% for the lump.`,
-    );
+    notes.push(summary);
     return;
   }
 
@@ -142,16 +141,20 @@ export function collectNotes(
   appendCommunityEventNotes(notes, owned, equipped, context);
 
   if (
-    best &&
     isActivityPending(context.siteState.caps, 'steamQuests') &&
     equipped.length > 0
   ) {
     const currentSteam = collectBonuses(equipped).steamQuests;
-    if (best.steamQuestsFlat < currentSteam) {
+    const ownedSteam = Math.max(
+      currentSteam,
+      best?.steamQuestsFlat ?? 0,
+      ...owned.map((artifact) => collectBonuses([artifact]).steamQuests),
+    );
+    if (best && best.steamQuestsFlat < currentSteam) {
       notes.push(
         `Steam Quests still look unfinished — finish them before swapping away from your +${currentSteam} Steam Quests bonus (equip before starting quests).`,
       );
-    } else if (currentSteam === 0 && best.steamQuestsFlat > 0) {
+    } else if (currentSteam === 0 && ownedSteam > 0) {
       notes.push(
         'Equip a Steam Quests artifact before starting any quest — Control Center still shows 15/25; real ARP is on the ARP Log.',
       );

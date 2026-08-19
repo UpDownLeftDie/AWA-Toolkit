@@ -25,7 +25,10 @@ export default [
       },
       parserOptions: {
         ...ts.configs.recommendedTypeChecked[0].languageOptions?.parserOptions,
-        projectService: true,
+        // Explicit project (not projectService): in a multi-root workspace the
+        // IDE otherwise type-checks this package against the wrong tsconfig and
+        // no-unsafe-* fires on error types that CLI + tsc never see.
+        project: './tsconfig.json',
         tsconfigRootDir: import.meta.dirname,
       },
     },

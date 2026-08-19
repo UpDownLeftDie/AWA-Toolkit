@@ -134,6 +134,15 @@ export interface OptimizerResult {
     };
   };
   /**
+  Steam Quests remaining this week, but this 24h lock is not the last chance
+  before Monday. Wear the Steam-flat set before starting quests — not as the
+  24h recommended loadout.
+  */
+  deferredSteam?: {
+    waitMs: number;
+    artifacts: OwnedArtifact[];
+  };
+  /**
   Best owned loadout maximizing market discount (Stanley / Light Warping / etc.).
   */
   marketDiscountLoadout?: ScoredCombo;

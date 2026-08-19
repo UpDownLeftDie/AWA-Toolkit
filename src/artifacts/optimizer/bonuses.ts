@@ -114,6 +114,7 @@ export interface ActivityLoadoutStats {
   watchTwitchFlat: number;
   dailyCalendarFlat: number;
   discordPollFlat: number;
+  timeOnSiteFlat: number;
 }
 
 export function activityStatsForArtifacts(
@@ -126,6 +127,7 @@ export function activityStatsForArtifacts(
     watchTwitchFlat: bonuses.watchTwitch,
     dailyCalendarFlat: bonuses.dailyCalendar,
     discordPollFlat: bonuses.discordPoll,
+    timeOnSiteFlat: bonuses.timeOnSite,
   };
 }
 

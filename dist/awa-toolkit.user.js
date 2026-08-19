@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         AWA Toolkit
 // @namespace    https://github.com/UpDownLeftDie/AWA-Toolkit
-// @version      2.1.1
+// @version      2.2.0
 // @author       jaredcat
 // @description  Artifact Optimizer, Control Center tasks, giveaway/vault filters, and UCF reading mode
 // @license      AGPL-3.0-or-later
@@ -949,6 +949,25 @@
 	function getArtifactById(id) {
 		return ARTIFACTS.find((a) => a.id === id);
 	}
+	function listArtifactNameEntries() {
+		const seen = new Set();
+		const entries = [];
+		const push = (name, definition, tier) => {
+			if (seen.has(name)) return;
+			seen.add(name);
+			entries.push({
+				name,
+				definition,
+				tier
+			});
+		};
+		for (const definition of ARTIFACTS) for (const [tier, name] of definition.tierNames.entries()) if (name) push(name, definition, tier);
+		for (const [name, alias] of Object.entries(TIER_NAME_ALIASES)) {
+			const definition = getArtifactById(alias.id);
+			if (definition) push(name, definition, alias.tier);
+		}
+		return entries.toSorted((left, right) => right.name.length - left.name.length);
+	}
 	function resolveArtifactByDisplayName(displayName) {
 		const alias = TIER_NAME_ALIASES[displayName];
 		if (alias) {
@@ -989,7 +1008,7 @@
 	function displayNameFor(definition, tier) {
 		return definition.tierNames[tier] ?? definition.id;
 	}
-	var MS_PER_DAY = 864e5;
+	var MS_PER_DAY$2 = 864e5;
 	function utcAtHour(date, hour) {
 		return new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate(), hour, 0, 0, 0));
 	}
@@ -999,14 +1018,14 @@
 	}
 	function nextDiscordPollPostAt(now = new Date()) {
 		for (let offset = 0; offset <= 7; offset += 1) {
-			const post = utcAtHour(new Date(now.getTime() + offset * MS_PER_DAY), BASE_ACTIVITY.discordPollPostHourUtc);
+			const post = utcAtHour(new Date(now.getTime() + offset * MS_PER_DAY$2), BASE_ACTIVITY.discordPollPostHourUtc);
 			if (isUtcWeekday(post) && post.getTime() > now.getTime()) return post;
 		}
 		return utcAtHour(now, BASE_ACTIVITY.discordPollPostHourUtc);
 	}
 	function lastDiscordPollPostAt(now = new Date()) {
 		for (let offset = 0; offset <= 7; offset += 1) {
-			const post = utcAtHour(new Date(now.getTime() - offset * MS_PER_DAY), BASE_ACTIVITY.discordPollPostHourUtc);
+			const post = utcAtHour(new Date(now.getTime() - offset * MS_PER_DAY$2), BASE_ACTIVITY.discordPollPostHourUtc);
 			if (isUtcWeekday(post) && post.getTime() <= now.getTime()) return post;
 		}
 		return utcAtHour(now, BASE_ACTIVITY.discordPollPostHourUtc);
@@ -1141,8 +1160,13 @@
 		return remainingSteamQuestRowsFromList(siteState.steamQuests?.quests ?? []);
 	}
 	function remainingSteamQuestRewards(siteState) {
+		const scraped = scrapedRemainingSteamQuestRewards(siteState);
+		if (scraped !== void 0) return scraped;
+		return [...BASE_ACTIVITY.steamQuestBases];
+	}
+	function scrapedRemainingSteamQuestRewards(siteState) {
 		const quests = siteState.steamQuests?.quests;
-		if (!quests || quests.length === 0) return [...BASE_ACTIVITY.steamQuestBases];
+		if (!quests || quests.length === 0) return;
 		return remainingSteamQuestRowsFromList(quests).map((quest) => quest.rewardArp);
 	}
 	function requiresSteamQuestEligibilityFetch(state) {
@@ -2299,7 +2323,9 @@
 		return readPageGiveawayKeys().find((entry) => entry.giveawayId === giveawayId);
 	}
 	var SETTINGS_KEY = "artifactOptimizerSettings";
-	var COOLDOWN_MS = 864e5;
+	var HOURS_PER_DAY = 24;
+	var MS_PER_HOUR$1 = 36e5;
+	var COOLDOWN_MS = HOURS_PER_DAY * MS_PER_HOUR$1;
 	var NOTIFICATION_TYPE_KEYS = [
 		"swap",
 		"community",
@@ -2367,6 +2393,7 @@
 		preferScraped: true,
 		slotCooldowns: [],
 		preferredTwitchStreamers: [],
+		utcDailyEndBufferHours: 1,
 		browserNotifications: false,
 		notificationTypes: { ...DEFAULT_NOTIFICATION_TYPES },
 		allowAccountActions: false
@@ -2404,6 +2431,7 @@
 			else delete settings.vaultDiscountDismissedCycle;
 		}
 		if (Array.isArray(parsed.preferredTwitchStreamers)) settings.preferredTwitchStreamers = parsePreferredTwitchStreamers(parsed.preferredTwitchStreamers.filter((item) => typeof item === "string").join("\n"));
+		if (typeof parsed.utcDailyEndBufferHours === "number") settings.utcDailyEndBufferHours = clampUtcDailyEndBufferHours(parsed.utcDailyEndBufferHours);
 		if (typeof parsed.browserNotifications === "boolean") settings.browserNotifications = parsed.browserNotifications;
 		if (typeof parsed.allowAccountActions === "boolean") settings.allowAccountActions = parsed.allowAccountActions;
 		settings.notificationTypes = mergeNotificationTypes(settings.notificationTypes, parsed.notificationTypes);
@@ -2432,6 +2460,13 @@
 			logins.push(login);
 		}
 		return logins;
+	}
+	function clampUtcDailyEndBufferHours(hours) {
+		if (!Number.isFinite(hours)) return 1;
+		return Math.min(12, Math.max(0, hours));
+	}
+	function utcDailyEndBufferMs(settings) {
+		return clampUtcDailyEndBufferHours(settings.utcDailyEndBufferHours) * MS_PER_HOUR$1;
 	}
 	async function getArtifactSettings() {
 		const raw = await _GM.getValue(SETTINGS_KEY);
@@ -2465,7 +2500,8 @@
 			notificationTypes: patch.notificationTypes ? {
 				...previous.notificationTypes,
 				...patch.notificationTypes
-			} : previous.notificationTypes
+			} : previous.notificationTypes,
+			utcDailyEndBufferHours: clampUtcDailyEndBufferHours(patch.utcDailyEndBufferHours ?? previous.utcDailyEndBufferHours)
 		};
 		await _GM.setValue(SETTINGS_KEY, JSON.stringify(next));
 		return next;
@@ -3673,7 +3709,7 @@
 		if (/Watch Twitch[\s\S]{0,240}Max Cap Reached/i.test(body) && !/twitch-max-reached[^>]*display:\s*none/i.test(body)) return "capped";
 		if (/Watch Twitch[\s\S]{0,80}\bComplete\b/i.test(body)) return "capped";
 	}
-	var TWITCH_MS_PER_ARP = 6e4;
+	var TWITCH_MS_PER_ARP$2 = 6e4;
 	function parseDailyArpTwitchData(document_) {
 		const scripts = [...document_.querySelectorAll("script:not([src])")].map((script) => script.textContent ?? "").join("\n");
 		const assignment = /dailyArpData\s*=\s*(\{[\s\S]*?\});/.exec(scripts)?.[1];
@@ -3739,7 +3775,7 @@
 			timeWatched: twitchData?.timeWatched ?? previous?.timeWatched ?? 0,
 			isUnderCap,
 			capArp,
-			remainingMs: remainingArp * TWITCH_MS_PER_ARP
+			remainingMs: remainingArp * TWITCH_MS_PER_ARP$2
 		};
 	}
 	function twitchWatchRemainingMs(state, twitchFlat = 0, now = new Date()) {
@@ -3748,7 +3784,7 @@
 		const isFreshProgress = progress !== void 0 && utcDateString(new Date(progress.scrapedAt)) === utcDateString(now);
 		if (state?.caps.watchTwitch === "capped" || isFreshProgress && progress && !progress.isUnderCap) return 0;
 		const earned = isFreshProgress && progress ? progress.baseArp : 0;
-		return Math.max(0, baseCap + twitchFlat - earned) * TWITCH_MS_PER_ARP;
+		return Math.max(0, baseCap + twitchFlat - earned) * TWITCH_MS_PER_ARP$2;
 	}
 	function readQuestStatusesFromCard(card) {
 		const statuses = [...card.querySelectorAll("td, th, span, div, li")].map((element) => element.textContent?.trim() ?? "").filter((text) => /^(Incomplete|Complete)$/i.test(text));
@@ -4238,6 +4274,55 @@
 	function isResetInWearWindow(delayMs, waitMs = 0, horizonMs = COOLDOWN_MS) {
 		return delayMs > waitMs && delayMs <= waitMs + horizonMs;
 	}
+	var MS_PER_DAY$1 = 864e5;
+	var UTC_DAILY_END_BUFFER_MS = 36e5;
+	function wearWindowOverlapMs(availableFromMs, availableUntilMs, waitMs = 0, horizonMs = COOLDOWN_MS) {
+		return Math.max(0, Math.min(availableUntilMs, waitMs + horizonMs) - Math.max(availableFromMs, waitMs));
+	}
+	function canCompleteInWearWindow(availableFromMs, availableUntilMs, waitMs, durationMs, horizonMs = COOLDOWN_MS) {
+		const overlap = wearWindowOverlapMs(availableFromMs, availableUntilMs, waitMs, horizonMs);
+		if (durationMs <= 0) return overlap > 0;
+		return overlap >= durationMs;
+	}
+	function canCompleteOutsideWearWindow(availableFromMs, availableUntilMs, waitMs, durationMs, horizonMs = COOLDOWN_MS, deadlineBufferMs = UTC_DAILY_END_BUFFER_MS) {
+		const deadline = availableUntilMs - deadlineBufferMs;
+		const lockStartMs = waitMs === 0 && availableFromMs <= 0 ? availableFromMs + durationMs : waitMs;
+		if (Math.min(deadline, lockStartMs) - availableFromMs >= durationMs) return true;
+		return deadline - Math.max(availableFromMs, waitMs + horizonMs) >= durationMs;
+	}
+	function completableUtcDayStarts(waitMs, durationMs, options) {
+		const midnight = msUntilNextUtcMidnight(options.now ?? Date.now());
+		const horizonMs = options.horizonMs ?? 864e5;
+		const starts = [];
+		if (options.todayAvailable && canCompleteInWearWindow(0, midnight, waitMs, durationMs, horizonMs)) starts.push(0);
+		for (let day = 0; day < 3; day += 1) {
+			const dayStart = midnight + day * MS_PER_DAY$1;
+			if (dayStart >= waitMs + horizonMs) break;
+			if (canCompleteInWearWindow(dayStart, dayStart + MS_PER_DAY$1, waitMs, durationMs, horizonMs)) starts.push(dayStart);
+		}
+		return starts;
+	}
+	function isWeeklyForcedIntoLock(weekendMs, waitMs, horizonMs = COOLDOWN_MS) {
+		return waitMs + horizonMs >= weekendMs;
+	}
+	function comboEquipWaitMs(combo, owned, settings, slotLocks) {
+		if (isSameLoadout$1(combo, currentLoadout(owned))) return 0;
+		const comboIds = new Set(combo.map((artifact) => artifact.instanceId));
+		let waitMs = 0;
+		for (const position of [
+			1,
+			2,
+			3
+		]) {
+			const equipped = owned.find((artifact) => artifact.equippedPosition === position);
+			if (equipped && comboIds.has(equipped.instanceId)) continue;
+			waitMs = Math.max(waitMs, showroomCooldownRemainingMs(settings, position, {
+				...slotLocks && { slotLocks },
+				...typeof equipped?.slotLocked === "boolean" && { equippedSlotLocked: equipped.slotLocked }
+			}));
+		}
+		return waitMs;
+	}
 	function pinHorizonMs(siteState, now = Date.now()) {
 		const untilReset = msUntilNextUtcMidnight(now);
 		const event = siteState.communityEvent;
@@ -4368,7 +4453,8 @@
 			steamQuestsFlat: bonuses.steamQuests,
 			watchTwitchFlat: bonuses.watchTwitch,
 			dailyCalendarFlat: bonuses.dailyCalendar,
-			discordPollFlat: bonuses.discordPoll
+			discordPollFlat: bonuses.discordPoll,
+			timeOnSiteFlat: bonuses.timeOnSite
 		};
 	}
 	function setBreakdownParts(breakdown, key, base, categoryBonus = 0) {
@@ -4393,14 +4479,21 @@
 		if (bases.length === 0) return 0;
 		return setBreakdownParts(breakdown, "steamQuests", bases.reduce((sum, base) => sum + base, 0) * freq, bonuses.steamQuests * bases.length * freq);
 	}
-	function scoreDailyQuests(breakdown, freq, onDay) {
+	function scoreDailyQuests(breakdown, freq, dayStartsMs, now = Date.now()) {
+		if (dayStartsMs.length === 0) return 0;
 		const B = BASE_ACTIVITY;
-		let flatSum = setBreakdownParts(breakdown, "dailyQuests", B.dailyQuestBase * freq);
-		const day = onDay.getUTCDay();
-		if (day === 0 || day === 6) flatSum += setBreakdownParts(breakdown, "weekendQuests", B.weekendQuestBase * freq);
+		let dailyBase = 0;
+		let weekendBase = 0;
+		for (const startMs of dayStartsMs) {
+			const onDay = new Date(now + startMs);
+			dailyBase += B.dailyQuestBase * freq;
+			if (onDay.getUTCDay() === 0 || onDay.getUTCDay() === 6) weekendBase += B.weekendQuestBase * freq;
+		}
+		let flatSum = setBreakdownParts(breakdown, "dailyQuests", dailyBase);
+		if (weekendBase > 0) flatSum += setBreakdownParts(breakdown, "weekendQuests", weekendBase);
 		return flatSum;
 	}
-	function scoreSecondaryActivities(breakdown, bonuses, context, isEnabled, freq) {
+	function scoreSecondaryActivities(breakdown, bonuses, context, isEnabled, freq, waitMs) {
 		const { siteState } = context;
 		const caps = siteState.caps;
 		const B = BASE_ACTIVITY;
@@ -4410,14 +4503,11 @@
 			flatSum += setBreakdownParts(breakdown, "discordPoll", B.discordPollBase * polls, bonuses.discordPoll * polls);
 		}
 		if (isEnabled("dailyQuests")) {
-			if (isActivityPending(caps, "dailyQuests")) flatSum += scoreDailyQuests(breakdown, freq("dailyQuests"), new Date());
-			else if (isResetInWearWindow(msUntilNextUtcMidnight())) {
-				const nextDay = new Date(Date.now() + msUntilNextUtcMidnight());
-				flatSum += scoreDailyQuests(breakdown, freq("dailyQuests"), nextDay);
-			}
+			const questDays = completableUtcDayStarts(waitMs, 0, { todayAvailable: isActivityPending(caps, "dailyQuests") });
+			flatSum += scoreDailyQuests(breakdown, freq("dailyQuests"), questDays);
 		}
 		if (isEnabled("steamCommunityEvent")) {
-			const eventArp = communityEventArpInSwapWindow(siteState);
+			const eventArp = communityEventArpInSwapWindow(siteState, waitMs);
 			if (eventArp > 0) flatSum += setBreakdownParts(breakdown, "steamCommunityEvent", eventArp * freq("steamCommunityEvent"));
 		}
 		const readyClaims = battlePassClaimableArp(siteState.battlePass);
@@ -4426,7 +4516,7 @@
 		}
 		return flatSum;
 	}
-	function communityEventArpInSwapWindow(siteState) {
+	function communityEventArpInSwapWindow(siteState, waitMs = 0) {
 		const event = siteState.communityEvent;
 		if (!event?.isLive || !canEarnCommunityEventArp(event)) return 0;
 		let arp = breakDownCommunityEventPending(event).waitingPersonalArp;
@@ -4435,11 +4525,31 @@
 			const target = milestone.communityHoursRequired;
 			if (target === void 0) continue;
 			const eta = estimateCommunityUnlockAt(event, target);
-			if (eta !== void 0 && eta.etaMs <= 864e5) arp += milestone.arpReward;
+			if (eta !== void 0 && eta.etaMs >= waitMs && eta.etaMs <= waitMs + 864e5) arp += milestone.arpReward;
 		}
 		return arp;
 	}
-	function scoreWindowActivities(bonuses, context) {
+	var TWITCH_MS_PER_ARP$1 = 6e4;
+	var TIME_ON_SITE_DURATION_MS$2 = BASE_ACTIVITY.timeOnSiteBasePerDay * 6e4;
+	function twitchArpInWearWindow(siteState, twitchFlat, waitMs) {
+		const midnight = msUntilNextUtcMidnight();
+		const todayRemaining = twitchWatchRemainingMs(siteState, twitchFlat) / 6e4;
+		const fullDay = (siteState.watchTwitch?.capArp ?? BASE_ACTIVITY.watchTwitchBasePerDay) + twitchFlat;
+		let twitchArp = 0;
+		if (todayRemaining > 0 && canCompleteInWearWindow(0, midnight, waitMs, todayRemaining * TWITCH_MS_PER_ARP$1)) twitchArp += todayRemaining;
+		const laterDays = completableUtcDayStarts(waitMs, fullDay * TWITCH_MS_PER_ARP$1, { todayAvailable: false });
+		for (const dayStart of laterDays) if (dayStart > 0) twitchArp += fullDay;
+		return twitchArp;
+	}
+	function steamBasesInWearWindow(siteState, waitMs) {
+		const mondayResetMs = msUntilNextSteamQuestWeek();
+		const steamBases = [];
+		const remaining = scrapedRemainingSteamQuestRewards(siteState);
+		if (remaining && remaining.length > 0 && isActivityPending(siteState.caps, "steamQuests") && isWeeklyForcedIntoLock(mondayResetMs, waitMs)) steamBases.push(...remaining);
+		if (isResetInWearWindow(mondayResetMs, waitMs)) steamBases.push(...BASE_ACTIVITY.steamQuestBases);
+		return steamBases;
+	}
+	function scoreWindowActivities(bonuses, context, waitMs) {
 		const { settings, siteState } = context;
 		const acts = settings.activities;
 		const caps = siteState.caps;
@@ -4448,19 +4558,23 @@
 		let flatSum = 0;
 		const isEnabled = (key) => (acts[key]?.enabled ?? false) && (acts[key]?.frequency ?? 0) > 0;
 		const freq = (key) => isEnabled(key) ? acts[key]?.frequency ?? 0 : 0;
-		const isNextUtcResetInLock = isResetInWearWindow(msUntilNextUtcMidnight());
-		if (isEnabled("timeOnSite") && (isNextUtcResetInLock || isActivityAvailable(caps, "timeOnSite"))) flatSum += addDailyCategory(breakdown, "timeOnSite", B.timeOnSiteBasePerDay, bonuses.timeOnSite, B.days, freq("timeOnSite"));
+		if (isEnabled("timeOnSite")) {
+			const tosDays = completableUtcDayStarts(waitMs, TIME_ON_SITE_DURATION_MS$2, { todayAvailable: isActivityAvailable(caps, "timeOnSite") });
+			if (tosDays.length > 0) flatSum += addDailyCategory(breakdown, "timeOnSite", B.timeOnSiteBasePerDay, bonuses.timeOnSite, tosDays.length, freq("timeOnSite"));
+		}
 		if (isEnabled("watchTwitch")) {
-			let twitchArp = twitchWatchRemainingMs(siteState, bonuses.watchTwitch) / 6e4;
-			if (isNextUtcResetInLock && twitchArp <= 0) twitchArp = (siteState.watchTwitch?.capArp ?? B.watchTwitchBasePerDay) + bonuses.watchTwitch;
+			const twitchArp = twitchArpInWearWindow(siteState, bonuses.watchTwitch, waitMs);
 			if (twitchArp > 0) flatSum += setBreakdownParts(breakdown, "watchTwitch", twitchArp);
 		}
 		if (isEnabled("steamQuests")) {
-			if (isActivityPending(caps, "steamQuests")) flatSum += scoreSteamQuestBases(breakdown, bonuses, freq("steamQuests"), remainingSteamQuestRewards(siteState));
-			else if (isResetInWearWindow(msUntilNextSteamQuestWeek())) flatSum += scoreSteamQuestBases(breakdown, bonuses, freq("steamQuests"), [...B.steamQuestBases]);
+			const steamBases = steamBasesInWearWindow(siteState, waitMs);
+			if (steamBases.length > 0) flatSum += scoreSteamQuestBases(breakdown, bonuses, freq("steamQuests"), steamBases);
 		}
-		if (isEnabled("dailyCalendar")) flatSum += addDailyCategory(breakdown, "dailyCalendar", B.dailyCalendarBasePerDay, bonuses.dailyCalendar, B.days, freq("dailyCalendar"));
-		flatSum += scoreSecondaryActivities(breakdown, bonuses, context, isEnabled, freq);
+		if (isEnabled("dailyCalendar")) {
+			const calendarDays = completableUtcDayStarts(waitMs, 0, { todayAvailable: false });
+			if (calendarDays.length > 0) flatSum += addDailyCategory(breakdown, "dailyCalendar", B.dailyCalendarBasePerDay, bonuses.dailyCalendar, calendarDays.length, freq("dailyCalendar"));
+		}
+		flatSum += scoreSecondaryActivities(breakdown, bonuses, context, isEnabled, freq, waitMs);
 		return {
 			flatSum,
 			breakdown
@@ -4485,9 +4599,10 @@
 		if (!canAffordVaultPrice(context.siteState.arpLog?.redeemableArp, vaultPayArp(price, discountPct))) return 0;
 		return price;
 	}
-	function scoreCombo(three, context) {
+	function scoreCombo(three, context, waitMsOverride) {
 		const bonuses = collectBonuses(three);
-		const { flatSum, breakdown: rawBreakdown } = scoreWindowActivities(bonuses, context);
+		const owned = resolveOwnedList(context);
+		const { flatSum, breakdown: rawBreakdown } = scoreWindowActivities(bonuses, context, waitMsOverride ?? comboEquipWaitMs(three, owned, context.settings, context.snapshot.slotLocks));
 		const multiplier = 1 + bonuses.allArpPct;
 		const windowArp = flatSum * multiplier;
 		const breakdown = {};
@@ -4610,7 +4725,113 @@
 			const frozen = findBestComboBy(owned, context, (combo) => combo.weeklyArp, (combo) => combo.allArpPct > 0 || isSameLoadout$1(combo.artifacts, equipped));
 			if (frozen) return frozen;
 		}
-		return findBestComboBy(owned, context, (combo) => combo.weeklyArp, () => true);
+		const best = findBestComboBy(owned, context, (combo) => combo.weeklyArp, () => true);
+		const equipped = currentLoadout(owned);
+		if (best && best.allArpPct > 0 && !isSameLoadout$1(best.artifacts, equipped)) {
+			const waitMs = comboEquipWaitMs(best.artifacts, owned, context.settings, context.snapshot.slotLocks);
+			if (waitMs > 0 && !isAllArpWorthTheLock(best.artifacts, owned, context, waitMs)) return findBestComboBy(owned, context, (combo) => combo.weeklyArp, (combo) => combo.allArpPct <= 0 || isSameLoadout$1(combo.artifacts, equipped));
+		}
+		return best;
+	}
+	function isAllArpWorthTheLock(allArpArtifacts, owned, context, waitMs) {
+		const allArpBonuses = collectBonuses(allArpArtifacts);
+		const alternative = bestFlatBonusesForLock(owned, context, waitMs);
+		if (!alternative) return true;
+		return communityEventArpInSwapWindow(context.siteState, waitMs) * allArpBonuses.allArpPct + forcedDailyArpDelta(context.siteState, waitMs, allArpBonuses, alternative, utcDailyEndBufferMs(context.settings)) > 0;
+	}
+	function bestFlatBonusesForLock(owned, context, waitMs) {
+		const size = Math.min(3, owned.length);
+		const pinned = pinnedEquippedArtifacts(owned, context.settings, context.siteState, context.snapshot.slotLocks);
+		let best;
+		let bestArp = Number.NEGATIVE_INFINITY;
+		const consider = (combo) => {
+			const bonuses = collectBonuses(combo);
+			if (bonuses.allArpPct > 0) return;
+			const scored = scoreCombo(combo, context, waitMs).weeklyArp;
+			if (!best || scored > bestArp) {
+				best = bonuses;
+				bestArp = scored;
+			}
+		};
+		for (const combo of combinationsWithPinned(owned, size, pinned)) consider(combo);
+		const equipped = currentLoadout(owned);
+		if (equipped.length > 0) consider(equipped);
+		return best;
+	}
+	var MS_PER_DAY = 864e5;
+	var TWITCH_MS_PER_ARP = 6e4;
+	var TIME_ON_SITE_DURATION_MS$1 = BASE_ACTIVITY.timeOnSiteBasePerDay * 6e4;
+	function utcDayBounds(dayStartMs, midnight) {
+		if (dayStartMs <= 0) return {
+			fromMs: 0,
+			untilMs: midnight
+		};
+		return {
+			fromMs: dayStartMs,
+			untilMs: dayStartMs + MS_PER_DAY
+		};
+	}
+	function isAutoClaimForcedIntoLock(dayStartMs, waitMs) {
+		return dayStartMs > waitMs && dayStartMs <= waitMs + 864e5;
+	}
+	function isTimedDailyForcedIntoLock(dayStartMs, waitMs, durationMs, midnight, deadlineBufferMs) {
+		const { fromMs, untilMs } = utcDayBounds(dayStartMs, midnight);
+		return canCompleteInWearWindow(fromMs, untilMs, waitMs, durationMs) && !canCompleteOutsideWearWindow(fromMs, untilMs, waitMs, durationMs, 864e5, deadlineBufferMs);
+	}
+	function twitchDayArp(bonuses, siteState, isToday) {
+		const cap = (siteState.watchTwitch?.capArp ?? BASE_ACTIVITY.watchTwitchBasePerDay) + bonuses.watchTwitch;
+		const remaining = twitchWatchRemainingMs(siteState, bonuses.watchTwitch) / 6e4;
+		return (isToday ? remaining : cap) * (1 + bonuses.allArpPct);
+	}
+	function twitchDayDurationMs(bonuses, siteState, isToday) {
+		const cap = (siteState.watchTwitch?.capArp ?? BASE_ACTIVITY.watchTwitchBasePerDay) + bonuses.watchTwitch;
+		const remaining = twitchWatchRemainingMs(siteState, bonuses.watchTwitch) / 6e4;
+		return (isToday ? remaining : cap) * TWITCH_MS_PER_ARP;
+	}
+	function forcedDailyArpDelta(siteState, waitMs, allArp, flat, deadlineBufferMs) {
+		const midnight = msUntilNextUtcMidnight();
+		let delta = 0;
+		const twitchDays = [];
+		if (twitchWatchRemainingMs(siteState, flat.watchTwitch) > 0) twitchDays.push(0);
+		twitchDays.push(midnight, midnight + MS_PER_DAY);
+		for (const dayStart of twitchDays) {
+			if (dayStart > waitMs + 864e5) continue;
+			const isToday = dayStart === 0;
+			if (!isTimedDailyForcedIntoLock(dayStart, waitMs, twitchDayDurationMs(flat, siteState, isToday), midnight, deadlineBufferMs)) continue;
+			delta += twitchDayArp(allArp, siteState, isToday) - twitchDayArp(flat, siteState, isToday);
+		}
+		const tosDays = [
+			0,
+			midnight,
+			midnight + MS_PER_DAY
+		].filter((dayStart) => (dayStart > 0 || isActivityAvailable(siteState.caps, "timeOnSite")) && isTimedDailyForcedIntoLock(dayStart, waitMs, TIME_ON_SITE_DURATION_MS$1, midnight, deadlineBufferMs));
+		if (tosDays.length > 0) {
+			const allArpTos = (BASE_ACTIVITY.timeOnSiteBasePerDay + allArp.timeOnSite) * (1 + allArp.allArpPct);
+			const flatTos = (BASE_ACTIVITY.timeOnSiteBasePerDay + flat.timeOnSite) * (1 + flat.allArpPct);
+			delta += tosDays.length * (allArpTos - flatTos);
+		}
+		const calendarDays = [midnight, midnight + MS_PER_DAY].filter((dayStart) => isAutoClaimForcedIntoLock(dayStart, waitMs));
+		if (calendarDays.length > 0) {
+			const allArpCal = (BASE_ACTIVITY.dailyCalendarBasePerDay + allArp.dailyCalendar) * (1 + allArp.allArpPct);
+			const flatCal = (BASE_ACTIVITY.dailyCalendarBasePerDay + flat.dailyCalendar) * (1 + flat.allArpPct);
+			delta += calendarDays.length * (allArpCal - flatCal);
+		}
+		const questDays = [
+			0,
+			midnight,
+			midnight + MS_PER_DAY
+		].filter((dayStart) => {
+			const isTodayDue = dayStart === 0 && isActivityAvailable(siteState.caps, "dailyQuests");
+			if (dayStart === 0 && !isTodayDue) return false;
+			return isTimedDailyForcedIntoLock(dayStart, waitMs, 0, midnight, deadlineBufferMs);
+		});
+		for (const dayStart of questDays) {
+			const onDay = new Date(Date.now() + dayStart);
+			const weekend = onDay.getUTCDay() === 0 || onDay.getUTCDay() === 6 ? BASE_ACTIVITY.weekendQuestBase : 0;
+			const base = BASE_ACTIVITY.dailyQuestBase + weekend;
+			delta += base * (1 + allArp.allArpPct) - base * (1 + flat.allArpPct);
+		}
+		return delta;
 	}
 	function resolveDeferredAllArp(owned, context) {
 		const event = context.siteState.communityEvent;
@@ -4633,10 +4854,28 @@
 		const unlock = { arpReward: later.reduce((sum, milestone) => sum + milestone.arpReward, 0) };
 		if (laterTarget !== void 0) unlock.targetHours = laterTarget;
 		if (laterEta !== void 0) unlock.etaMs = laterEta.etaMs;
+		if (!isAllArpWorthTheLock(artifacts, owned, context, waitMs)) return;
 		return {
 			waitMs,
 			artifacts,
 			unlock
+		};
+	}
+	function resolveDeferredSteam(owned, context, best) {
+		if (!isActivityPending(context.siteState.caps, "steamQuests")) return;
+		const remaining = scrapedRemainingSteamQuestRewards(context.siteState);
+		if (!remaining || remaining.length === 0) return;
+		const steam = findBestSteamCombo(owned, context);
+		if (!steam || steam.steamQuestsFlat <= 0) return;
+		const equipped = currentLoadout(owned);
+		if (isSameLoadout$1(steam.artifacts, equipped)) return;
+		if (best && isSameLoadout$1(steam.artifacts, best.artifacts)) return;
+		if (collectBonuses(equipped).steamQuests >= steam.steamQuestsFlat) return;
+		const waitMs = comboEquipWaitMs(steam.artifacts, owned, context.settings, context.snapshot.slotLocks);
+		if (isWeeklyForcedIntoLock(msUntilNextSteamQuestWeek(), waitMs)) return;
+		return {
+			waitMs,
+			artifacts: steam.artifacts
 		};
 	}
 	function comboTieBreakDelta(scored, best, equipped) {
@@ -4665,6 +4904,9 @@
 	}
 	function findBestAllArpCombo(owned, context) {
 		return findBestComboBy(owned, context, (combo) => combo.allArpPct, (combo) => combo.allArpPct > 0);
+	}
+	function findBestSteamCombo(owned, context) {
+		return findBestComboBy(owned, context, (combo) => combo.steamQuestsFlat, (combo) => combo.steamQuestsFlat > 0);
 	}
 	function findBestMarketDiscountCombo(owned, context) {
 		return findBestComboBy(owned, context, (combo) => combo.marketDiscountPct, (combo) => combo.marketDiscountPct > 0);
@@ -4741,22 +4983,7 @@
 		if (hasAllArpEffect(currentLoadout(owned))) return 0;
 		const combo = unconstrainedAllArpCombo(owned);
 		if (!combo) return;
-		const comboIds = new Set(combo.map((artifact) => artifact.instanceId));
-		const slots = [
-			1,
-			2,
-			3
-		];
-		let waitMs = 0;
-		for (const position of slots) {
-			const equipped = owned.find((artifact) => artifact.equippedPosition === position);
-			if (equipped && comboIds.has(equipped.instanceId)) continue;
-			waitMs = Math.max(waitMs, showroomCooldownRemainingMs(settings, position, {
-				...slotLocks && { slotLocks },
-				...typeof equipped?.slotLocked === "boolean" && { equippedSlotLocked: equipped.slotLocked }
-			}));
-		}
-		return waitMs;
+		return comboEquipWaitMs(combo, owned, settings, slotLocks);
 	}
 	function shouldWaitForAllArpBeforeBattlePass(owned, settings, siteState, slotLocks) {
 		if (!hasInventoryAllArp(owned)) return false;
@@ -4804,8 +5031,8 @@
 			notes.push(`${summary} — equip All-ARP% first.`);
 			return;
 		}
-		if (hasAllArpOwned && !hasAllArpOn && communityEventArpInSwapWindow(context.siteState) > 0) {
-			notes.push(`${summary} — grants during this lock (once). Watch Twitch repeats daily; wear All-ARP% for the lump.`);
+		if (hasAllArpOwned && !hasAllArpOn && communityEventArpInSwapWindow(context.siteState) > 0 && resolveDeferredAllArp(owned, context) === void 0) {
+			notes.push(summary);
 			return;
 		}
 		if (hasAllArpOwned && !hasAllArpOn && breakdown.waitingCommunityArp > 0) {
@@ -4832,10 +5059,11 @@
 		const notes = [];
 		appendBattlePassNotes(notes, owned, equipped, context);
 		appendCommunityEventNotes(notes, owned, equipped, context);
-		if (best && isActivityPending(context.siteState.caps, "steamQuests") && equipped.length > 0) {
+		if (isActivityPending(context.siteState.caps, "steamQuests") && equipped.length > 0) {
 			const currentSteam = collectBonuses(equipped).steamQuests;
-			if (best.steamQuestsFlat < currentSteam) notes.push(`Steam Quests still look unfinished — finish them before swapping away from your +${currentSteam} Steam Quests bonus (equip before starting quests).`);
-			else if (currentSteam === 0 && best.steamQuestsFlat > 0) notes.push("Equip a Steam Quests artifact before starting any quest — Control Center still shows 15/25; real ARP is on the ARP Log.");
+			const ownedSteam = Math.max(currentSteam, best?.steamQuestsFlat ?? 0, ...owned.map((artifact) => collectBonuses([artifact]).steamQuests));
+			if (best && best.steamQuestsFlat < currentSteam) notes.push(`Steam Quests still look unfinished — finish them before swapping away from your +${currentSteam} Steam Quests bonus (equip before starting quests).`);
+			else if (currentSteam === 0 && ownedSteam > 0) notes.push("Equip a Steam Quests artifact before starting any quest — Control Center still shows 15/25; real ARP is on the ARP Log.");
 		}
 		return notes;
 	}
@@ -4970,6 +5198,7 @@
 		const marketDiscountLoadout = guarded.marketDiscountLoadout;
 		if (marketDiscountLoadout && alternatives.every((combo) => !isSameLoadout$1(combo.artifacts, marketDiscountLoadout.artifacts))) alternatives.push(marketDiscountLoadout);
 		const deferredAllArp = resolveDeferredAllArp(owned, context);
+		const deferredSteam = resolveDeferredSteam(owned, context, best);
 		const shouldDeferBattlePassClaims = shouldDeferBattlePassForContext(context);
 		const isDedicatedLockWorthIt = isAllArpLockWorthBattlePassBoost(best, allArpLoadout, battlePassClaimableArp(context.siteState.battlePass));
 		const notes = collectNotes(owned, equipped, best, context);
@@ -4988,6 +5217,7 @@
 		if (context.snapshot.slotLocks) result.slotLocks = context.snapshot.slotLocks;
 		if (allArpLoadout) result.allArpLoadout = allArpLoadout;
 		if (deferredAllArp) result.deferredAllArp = deferredAllArp;
+		if (deferredSteam) result.deferredSteam = deferredSteam;
 		if (marketDiscountLoadout) result.marketDiscountLoadout = marketDiscountLoadout;
 		if (monthlyMetaLoadout) result.monthlyMetaLoadout = monthlyMetaLoadout;
 		if (guarded.vaultDiscount) result.vaultDiscount = guarded.vaultDiscount;
@@ -5194,6 +5424,866 @@
 	function escapeHtml(value) {
 		return value.replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;").replaceAll("\"", "&quot;").replaceAll("'", "&#39;");
 	}
+	var MODAL_ID = "alienware-artifact-optimizer";
+	var INLINE_ID = "alienware-artifact-optimizer-inline";
+	var CC_PANEL_ID = "alienware-artifact-optimizer-cc";
+	var BP_CLAIM_BAR_ID = "alienware-artifact-optimizer-bp-claim";
+	var STYLE_ID$1 = "alienware-artifact-optimizer-styles";
+	var BACKDROP_ID = "alienware-artifact-optimizer-backdrop";
+	var DIALOG_ID = "alienware-artifact-optimizer-dialog";
+	var TOAST_ID = "alienware-artifact-optimizer-toast";
+	var ARTIFACT_TIP_ID = "ao-artifact-tip-float";
+	var TOAST_MS = 2200;
+	var MODAL_LAYOUT = [
+		["position", "fixed"],
+		["top", "50%"],
+		["left", "50%"],
+		["transform", "translate(-50%, -50%)"],
+		["z-index", "10001"],
+		["width", "min(560px, 94vw)"],
+		["max-height", "90vh"],
+		["overflow-y", "auto"]
+	];
+	var BACKDROP_LAYOUT = [
+		["position", "fixed"],
+		["inset", "0"],
+		["background", "rgba(0, 0, 0, 0.85)"],
+		["z-index", "10000"]
+	];
+	function cssDeclarations(layout) {
+		return layout.map(([property, value]) => `${property}: ${value};`).join("\n        ");
+	}
+	function buildOptimizerCss() {
+		return `
+      #${BACKDROP_ID} {
+        display: none;
+        ${cssDeclarations(BACKDROP_LAYOUT)}
+      }
+      #${MODAL_ID} {
+        display: none;
+        ${cssDeclarations(MODAL_LAYOUT)}
+        background: transparent;
+      }
+      #${INLINE_ID},
+      #${CC_PANEL_ID} {
+        display: block;
+        margin: 16px 0;
+        width: 100%;
+        max-width: 100%;
+        box-sizing: border-box;
+      }
+      body > #${INLINE_ID},
+      body > #${CC_PANEL_ID},
+      html > #${INLINE_ID},
+      html > #${CC_PANEL_ID} {
+        margin: 88px auto 16px;
+        padding: 0 16px;
+        max-width: 1100px;
+      }
+      #${DIALOG_ID} {
+        position: fixed;
+        inset: 0;
+        z-index: 10002;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+      }
+      #${DIALOG_ID}[hidden] {
+        display: none !important;
+      }
+      #${DIALOG_ID} .ao-dialog-scrim {
+        position: absolute;
+        inset: 0;
+        background: rgba(0, 0, 0, 0.85);
+      }
+      #${DIALOG_ID} .ao-dialog {
+        position: relative;
+        z-index: 1;
+        width: min(420px, 92vw);
+        background: #1a1a1a;
+        color: #fff;
+        border: 1px solid #00bc8c;
+        border-radius: 8px;
+        padding: 20px;
+        box-shadow: 0 12px 40px rgba(0, 0, 0, 0.85);
+        font-family: system-ui, -apple-system, BlinkMacSystemFont, sans-serif;
+        font-size: 14px;
+        line-height: 1.45;
+      }
+      #${DIALOG_ID} .ao-dialog-title {
+        margin: 0 0 10px;
+        color: #00bc8c;
+        font-size: 1.1em;
+        font-weight: bold;
+      }
+      #${DIALOG_ID} .ao-dialog-message {
+        margin: 0 0 16px;
+        color: #eee;
+        white-space: pre-wrap;
+      }
+      #${DIALOG_ID} .ao-dialog-actions {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+        justify-content: flex-end;
+      }
+      #${DIALOG_ID} button {
+        background: #00bc8c;
+        color: #fff;
+        border: none;
+        padding: 6px 12px;
+        border-radius: 4px;
+        cursor: pointer;
+        font-size: 14px;
+      }
+      #${DIALOG_ID} button.ao-secondary {
+        background: #555;
+      }
+      #${DIALOG_ID} button.ao-danger {
+        background: #e74c3c;
+      }
+      #${TOAST_ID} {
+        position: fixed;
+        bottom: 24px;
+        left: 50%;
+        transform: translateX(-50%);
+        z-index: 10003;
+        max-width: min(420px, 92vw);
+        background: #1a1a1a;
+        color: #fff;
+        border: 1px solid #00bc8c;
+        border-radius: 8px;
+        padding: 10px 16px;
+        box-shadow: 0 8px 24px rgba(0, 0, 0, 0.6);
+        font-family: system-ui, -apple-system, BlinkMacSystemFont, sans-serif;
+        font-size: 14px;
+      }
+      #${TOAST_ID}[hidden] {
+        display: none !important;
+      }
+      #${ARTIFACT_TIP_ID} {
+        position: fixed;
+        z-index: 10004;
+        max-width: min(280px, 92vw);
+        background: #1a1a1a;
+        color: #fff;
+        border: 1px solid #00bc8c;
+        border-radius: 8px;
+        padding: 10px 12px;
+        font-family: system-ui, -apple-system, BlinkMacSystemFont, sans-serif;
+        font-size: 13px;
+        line-height: 1.4;
+        pointer-events: none;
+      }
+      #${ARTIFACT_TIP_ID}[hidden] {
+        display: none !important;
+      }
+      #${ARTIFACT_TIP_ID} .ao-artifact-tip-name {
+        color: #00bc8c;
+        font-weight: 700;
+        margin: 0 0 4px;
+      }
+      #${ARTIFACT_TIP_ID} .ao-artifact-tip-meta {
+        color: #aaa;
+        font-size: 0.92em;
+        margin: 0 0 6px;
+      }
+      #${ARTIFACT_TIP_ID} .ao-artifact-tip-effect {
+        color: #fff;
+        font-weight: 600;
+      }
+      #${ARTIFACT_TIP_ID} .ao-artifact-tip-detail,
+      #${ARTIFACT_TIP_ID} .ao-artifact-tip-set {
+        color: #ccc;
+        font-size: 0.92em;
+        margin-top: 4px;
+      }
+  `;
+	}
+	function ensureOptimizerStyles() {
+		let style = document.querySelector(`#${STYLE_ID$1}`);
+		if (!style) {
+			style = document.createElement("style");
+			style.id = STYLE_ID$1;
+			(document.head || document.documentElement).append(style);
+		}
+		style.textContent = buildOptimizerCss();
+	}
+	function applyOpaqueModalChrome(modal) {
+		const paint = [
+			...MODAL_LAYOUT,
+			["background", "transparent"],
+			["opacity", "1"]
+		];
+		for (const [property, value] of paint) modal.style.setProperty(property, value, "important");
+	}
+	function applyOpaqueBackdropChrome(backdrop) {
+		const paint = [
+			...BACKDROP_LAYOUT,
+			["background-color", "rgba(0, 0, 0, 0.85)"],
+			["opacity", "1"]
+		];
+		for (const [property, value] of paint) backdrop.style.setProperty(property, value, "important");
+	}
+	function buildPanelShadowCss(variant) {
+		return `
+    ${variant === "modal" ? `
+    :host {
+      display: none;
+      ${cssDeclarations(MODAL_LAYOUT)}
+      box-sizing: border-box;
+    }
+  ` : `
+    :host {
+      display: block;
+      margin: 0;
+      width: 100%;
+      max-width: 100%;
+      box-sizing: border-box;
+    }
+  `}
+    .ao-panel,
+    .ao-panel * {
+      text-decoration: none !important;
+      text-decoration-line: none !important;
+      -webkit-text-fill-color: unset !important;
+      text-transform: none !important;
+      letter-spacing: normal !important;
+      text-shadow: none !important;
+      font-family: system-ui, -apple-system, BlinkMacSystemFont, sans-serif !important;
+      box-sizing: border-box;
+    }
+    .ao-panel {
+      display: block;
+      background: #1a1a1a;
+      color: #fff;
+      padding: ${variant === "modal" ? "20px" : "16px"};
+      border-radius: 8px;
+      border: 1px solid ${variant === "modal" ? "#444" : "#00bc8c"};
+      box-shadow: ${variant === "modal" ? "0 12px 40px rgba(0, 0, 0, 0.85)" : "0 0 10px rgba(0, 188, 140, 0.25)"};
+      font-size: 14px;
+      line-height: 1.4;
+      width: 100%;
+    }
+    .ao-panel > * {
+      display: block;
+      width: 100%;
+    }
+    .ao-title {
+      color: #fff !important;
+      font-size: 1.4em !important;
+      font-weight: bold !important;
+      margin: 0 0 12px !important;
+    }
+    .ao-heading {
+      color: #00bc8c !important;
+      font-size: 1.05em !important;
+      font-weight: bold !important;
+      margin: 14px 0 8px !important;
+    }
+    .ao-heading:first-child {
+      margin-top: 0 !important;
+    }
+    .ao-row {
+      display: block;
+      margin: 6px 0 6px 8px;
+      color: #fff !important;
+      line-height: 1.4;
+    }
+    .ao-panel .ao-artifact-tip {
+      border-bottom: 1px dotted #00bc8c;
+      cursor: help;
+    }
+    .ao-muted {
+      color: #aaa !important;
+      font-size: 0.9em !important;
+    }
+    .ao-credit {
+      margin: 0 0 10px !important;
+    }
+    .ao-note {
+      display: block;
+      background: #2a2a2a;
+      border-left: 3px solid #00bc8c;
+      padding: 8px 10px;
+      margin: 8px 0;
+      color: #eee !important;
+    }
+    .ao-note > div + div {
+      margin-top: 4px;
+    }
+    .ao-note-actions {
+      margin-top: 8px;
+    }
+    .ao-status-details {
+      margin: 8px 0 4px;
+    }
+    .ao-status-details summary {
+      cursor: pointer;
+      user-select: none;
+    }
+    .ao-status-details[open] summary {
+      margin-bottom: 6px;
+    }
+    .ao-text-link {
+      color: #00bc8c !important;
+      text-decoration: underline !important;
+      text-decoration-line: underline !important;
+      cursor: pointer;
+    }
+    .ao-actions {
+      display: flex !important;
+      flex-wrap: wrap;
+      gap: 8px;
+      margin-top: 12px;
+      width: 100%;
+    }
+    .ao-actions-sep {
+      width: 1px;
+      align-self: stretch;
+      min-height: 28px;
+      background: #555;
+      margin: 0 4px;
+    }
+    .ao-todo-list {
+      display: block;
+      margin: 0 0 4px;
+      padding: 0;
+      list-style: none;
+      width: 100%;
+    }
+    .ao-divider {
+      display: block;
+      border: 0;
+      border-top: 1px solid #444;
+      margin: 14px 0;
+      width: 100%;
+    }
+    .ao-todo-item {
+      display: flex;
+      gap: 6px;
+      margin: 6px 0;
+      line-height: 1.45;
+      color: #eee !important;
+      align-items: flex-start;
+    }
+    .ao-todo-index {
+      color: #00bc8c !important;
+      font-weight: 600;
+      flex: 0 0 auto;
+      padding-top: 1px;
+    }
+    .ao-todo-item > .ao-upgrade-btn,
+    .ao-todo-item > .ao-claim-btn,
+    .ao-todo-item > .ao-twitch-btn {
+      flex: 0 0 auto;
+      padding: 4px 10px;
+      font-size: 13px !important;
+    }
+    .ao-row .ao-upgrade-btn {
+      margin-left: 8px;
+    }
+    .ao-todo-text {
+      display: flex;
+      flex-direction: column;
+      gap: 2px;
+      min-width: 0;
+      flex: 1 1 auto;
+    }
+    .ao-todo-headline {
+      display: block;
+      font-weight: 600;
+    }
+    .ao-todo-loadout {
+      display: block;
+      color: #fff !important;
+      margin: 2px 0 2px;
+    }
+    .ao-todo-reasons {
+      display: block;
+      margin: 4px 0 0;
+      padding: 0 0 0 1.1em;
+      list-style: disc;
+      color: #ccc !important;
+    }
+    .ao-todo-reasons > li {
+      display: list-item;
+      margin: 2px 0;
+    }
+    .ao-todo-reason-text {
+      display: block;
+    }
+    .ao-todo-reason-detail {
+      display: block;
+      margin-top: 1px;
+      color: #aaa !important;
+      font-size: 0.92em;
+    }
+    .ao-todo-muted {
+      color: #aaa !important;
+    }
+    .ao-todo-warn {
+      color: #f0c674 !important;
+    }
+    .ao-caution {
+      display: block;
+      margin: 0 0 10px;
+      padding: 8px 10px;
+      border: 1px solid #f0c674;
+      border-radius: 6px;
+      background: rgba(240, 198, 116, 0.12);
+      color: #f0c674 !important;
+    }
+    .ao-caution .ao-todo-headline {
+      font-weight: 700;
+    }
+    .ao-caution .ao-todo-reasons {
+      color: #e6d5a3 !important;
+      padding-left: 1.1em;
+    }
+    button {
+      display: inline-block;
+      width: auto;
+      background: #00bc8c;
+      color: #fff !important;
+      border: none;
+      padding: 6px 12px;
+      border-radius: 4px;
+      cursor: pointer;
+      font-size: 14px !important;
+    }
+    button[hidden] {
+      display: none !important;
+    }
+    button.ao-secondary {
+      background: #555;
+    }
+    button.ao-loadout-preview {
+      white-space: normal;
+      text-align: left;
+      max-width: 100%;
+    }
+    button.ao-danger {
+      background: #e74c3c;
+    }
+    button:disabled {
+      opacity: 0.5;
+      cursor: not-allowed;
+    }
+    label.ao-toggle {
+      display: block;
+      margin: 4px 0 4px 8px;
+      color: #fff !important;
+    }
+    input[type="number"],
+    input[type="text"],
+    select,
+    textarea.ao-textarea {
+      width: 90px;
+      margin-left: 6px;
+      padding: 2px 4px;
+      background: #2a2a2a;
+      color: #fff !important;
+      border: 1px solid #555;
+      border-radius: 3px;
+      caret-color: #fff;
+      font-size: 14px !important;
+    }
+    textarea.ao-textarea {
+      display: block;
+      width: calc(100% - 8px);
+      min-height: 72px;
+      margin: 6px 0 6px 8px;
+      resize: vertical;
+    }
+    select {
+      width: auto;
+      min-width: 120px;
+    }
+    input[type="checkbox"] {
+      margin-right: 6px;
+      accent-color: #00bc8c;
+    }
+    .ao-notify {
+      display: block;
+      margin: 0 0 12px;
+      padding: 10px 12px;
+      background: #222;
+      border: 1px solid #333;
+      border-radius: 8px;
+    }
+    .ao-switch {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 14px;
+      margin: 0;
+      cursor: pointer;
+      color: #fff !important;
+    }
+    .ao-switch-copy {
+      display: flex;
+      flex-direction: column;
+      gap: 3px;
+      min-width: 0;
+      flex: 1 1 auto;
+    }
+    .ao-switch-title {
+      font-weight: 600;
+      color: #fff !important;
+    }
+    .ao-switch-hint {
+      color: #aaa !important;
+      font-size: 0.88em !important;
+      line-height: 1.4;
+    }
+    .ao-switch-input {
+      position: absolute;
+      width: 1px;
+      height: 1px;
+      padding: 0;
+      margin: -1px;
+      overflow: hidden;
+      clip: rect(0, 0, 0, 0);
+      white-space: nowrap;
+      border: 0;
+    }
+    .ao-switch-track {
+      position: relative;
+      flex: 0 0 auto;
+      width: 44px;
+      height: 24px;
+      border-radius: 999px;
+      background: #3a3a3a;
+      box-shadow: inset 0 0 0 1px #555;
+      transition: background 0.16s ease, box-shadow 0.16s ease;
+    }
+    .ao-switch-knob {
+      position: absolute;
+      top: 2px;
+      left: 2px;
+      width: 20px;
+      height: 20px;
+      border-radius: 50%;
+      background: #fff;
+      box-shadow: 0 1px 3px rgba(0, 0, 0, 0.45);
+      transition: transform 0.16s ease;
+    }
+    .ao-switch-input:checked + .ao-switch-track {
+      background: #00bc8c;
+      box-shadow: inset 0 0 0 1px #00bc8c;
+    }
+    .ao-switch-input:checked + .ao-switch-track .ao-switch-knob {
+      transform: translateX(20px);
+    }
+    .ao-switch-input:focus-visible + .ao-switch-track {
+      outline: 2px solid #00bc8c;
+      outline-offset: 3px;
+    }
+    .ao-notify-types {
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      margin-top: 10px;
+      padding-top: 10px;
+      border-top: 1px solid #333;
+    }
+    .ao-notify-types[data-off] {
+      opacity: 0.45;
+      pointer-events: none;
+    }
+    .ao-switch-sm .ao-switch-title {
+      font-weight: 500;
+      font-size: 0.92em !important;
+    }
+    .ao-switch-sm .ao-switch-hint {
+      font-size: 0.8em !important;
+    }
+    .ao-switch-sm .ao-switch-track {
+      width: 36px;
+      height: 20px;
+    }
+    .ao-switch-sm .ao-switch-knob {
+      width: 16px;
+      height: 16px;
+    }
+    .ao-switch-sm .ao-switch-input:checked + .ao-switch-track .ao-switch-knob {
+      transform: translateX(16px);
+    }
+    details {
+      display: block;
+      width: 100%;
+    }
+    details.ao-advanced {
+      margin-top: 14px;
+      border-top: 1px solid #333;
+      padding-top: 10px;
+    }
+    details.ao-advanced > summary {
+      cursor: pointer;
+      color: #00bc8c !important;
+      font-weight: bold;
+      list-style: none;
+    }
+    details.ao-advanced > summary::-webkit-details-marker {
+      display: none;
+    }
+    details.ao-advanced > summary::before {
+      content: '▸ ';
+    }
+    details.ao-advanced[open] > summary::before {
+      content: '▾ ';
+    }
+    details > summary {
+      color: #aaa !important;
+      cursor: pointer;
+    }
+    .ao-hydrate {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      margin: 0 0 10px;
+      padding: 8px 10px;
+      background: #222;
+      border: 1px solid #00bc8c55;
+      border-radius: 4px;
+      color: #ccc !important;
+      font-size: 0.92em !important;
+    }
+    .ao-spinner {
+      width: 14px;
+      height: 14px;
+      border: 2px solid #00bc8c44;
+      border-top-color: #00bc8c;
+      border-radius: 50%;
+      animation: ao-spin 0.7s linear infinite;
+      flex: 0 0 auto;
+    }
+    .ao-skel {
+      display: block;
+      height: 12px;
+      margin: 8px 0;
+      border-radius: 4px;
+      background: linear-gradient(90deg, #2a2a2a 25%, #333 37%, #2a2a2a 63%);
+      background-size: 400% 100%;
+      animation: ao-skel 1.2s ease-in-out infinite;
+    }
+    @keyframes ao-spin {
+      to {
+        transform: rotate(360deg);
+      }
+    }
+    @keyframes ao-skel {
+      0% {
+        background-position: 100% 0;
+      }
+      100% {
+        background-position: 0 0;
+      }
+    }
+    @media (prefers-reduced-motion: reduce) {
+      .ao-spinner,
+      .ao-skel {
+        animation: none;
+      }
+      .ao-switch-track,
+      .ao-switch-knob {
+        transition: none;
+      }
+    }
+  `;
+	}
+	function buildModalShadowCss() {
+		return buildPanelShadowCss("modal");
+	}
+	function buildInlineShadowCss() {
+		return buildPanelShadowCss("inline");
+	}
+	function formatSigned(value) {
+		return value < 0 ? `−${Math.abs(value)}` : `+${value}`;
+	}
+	function formatPct(value) {
+		const pct = value * 100;
+		const abs = Math.abs(pct);
+		const rounded = Number.isSafeInteger(abs) ? String(abs) : abs.toFixed(1);
+		return `${pct < 0 ? "−" : "+"}${rounded}%`;
+	}
+	function describeNumericEffect(type, value) {
+		switch (type) {
+			case ArtifactEffectType.SteamQuests: return { effect: `${formatSigned(value)} Steam Quests ARP` };
+			case ArtifactEffectType.WatchTwitch: {
+				const cap = BASE_ACTIVITY.watchTwitchBasePerDay + value;
+				return {
+					effect: `${formatSigned(value)} Watch Twitch ARP`,
+					detail: `Raises the daily Twitch cap to ${cap} (1 ARP/min).`
+				};
+			}
+			case ArtifactEffectType.DailyCalendar: return { effect: `${formatSigned(value)} Daily Calendar ARP` };
+			case ArtifactEffectType.TimeOnSite: return { effect: `${formatSigned(value)} Time on Site ARP` };
+			case ArtifactEffectType.DiscordPoll: return { effect: `${formatSigned(value)} Discord Poll ARP` };
+			case ArtifactEffectType.MarketDiscountPct: return { effect: `${Math.round(Math.abs(value) * 100)}% Game Vault / marketplace discount` };
+			case ArtifactEffectType.AllArpPct: return {
+				effect: `${formatPct(value)} All ARP`,
+				detail: value > 0 ? "Multiplies ARP from activities and claims while equipped." : "Reduces All ARP while this is equipped."
+			};
+			case ArtifactEffectType.CommunityPlaytimePct: return { effect: `${formatPct(value)} Community Event playtime` };
+			default: return { effect: "No ARP bonus" };
+		}
+	}
+	function describeDefinitionEffect(definition, tier) {
+		const raw = definition.effects[tier];
+		if (definition.effectType === ArtifactEffectType.UsernameColor) return { effect: typeof raw === "string" && raw.length > 0 ? `Username color: ${raw}` : "Username color" };
+		if (definition.effectType === ArtifactEffectType.None) return { effect: "No ARP bonus" };
+		if (typeof raw !== "number") return { effect: "No ARP bonus" };
+		return describeNumericEffect(definition.effectType, raw);
+	}
+	function describeSetEffects(set) {
+		return set.effects.map((effect) => {
+			if (effect.unit === "cosmetic") return "username color";
+			return describeNumericEffect(effect.type, effect.value).effect;
+		}).join(", ");
+	}
+	function artifactSetForFamily(familyId) {
+		return ARTIFACT_SETS.find((set) => set.unconfirmed !== true && set.memberIds.includes(familyId));
+	}
+	function artifactTipCopy(definition, tier, displayName) {
+		const described = describeDefinitionEffect(definition, tier);
+		const set = artifactSetForFamily(definition.id);
+		const copy = {
+			title: displayName,
+			meta: `${definition.category} · ${TIER_LABELS[tier]}`,
+			effect: described.effect
+		};
+		if (described.detail) copy.detail = described.detail;
+		if (set) copy.setBonus = `Set: ${set.name} — ${describeSetEffects(set)} when all 3 are equipped`;
+		return copy;
+	}
+	function artifactTipSpan(copy, visibleName) {
+		const detailAttribute = copy.detail ? ` data-tip-detail="${escapeHtml(copy.detail)}"` : "";
+		const bonusAttribute = copy.setBonus ? ` data-tip-set="${escapeHtml(copy.setBonus)}"` : "";
+		const aria = [
+			copy.title,
+			copy.meta,
+			copy.effect,
+			copy.detail,
+			copy.setBonus
+		].filter((part) => Boolean(part)).join(". ");
+		return `<span class="ao-artifact-tip" data-tip-title="${escapeHtml(copy.title)}" data-tip-meta="${escapeHtml(copy.meta)}" data-tip-effect="${escapeHtml(copy.effect)}"${detailAttribute}${bonusAttribute} aria-label="${escapeHtml(aria)}">${escapeHtml(visibleName)}</span>`;
+	}
+	function nextArtifactNameMatch(text, entries) {
+		let match;
+		for (const entry of entries) {
+			const index = text.indexOf(entry.name);
+			if (index === -1) continue;
+			if (!match || index < match.index || index === match.index && entry.name.length > match.entry.name.length) match = {
+				index,
+				entry
+			};
+		}
+		return match;
+	}
+	function wrapArtifactNames(text) {
+		const entries = listArtifactNameEntries();
+		let remaining = text;
+		let html = "";
+		while (remaining.length > 0) {
+			const match = nextArtifactNameMatch(remaining, entries);
+			if (!match) {
+				html += escapeHtml(remaining);
+				break;
+			}
+			html += escapeHtml(remaining.slice(0, match.index));
+			const name = remaining.slice(match.index, match.index + match.entry.name.length);
+			html += artifactTipSpan(artifactTipCopy(match.entry.definition, match.entry.tier, name), name);
+			remaining = remaining.slice(match.index + match.entry.name.length);
+		}
+		return html;
+	}
+	function ensureArtifactTipFloat() {
+		ensureOptimizerStyles();
+		let tip = document.querySelector(`#${ARTIFACT_TIP_ID}`);
+		if (tip) return tip;
+		tip = document.createElement("div");
+		tip.id = ARTIFACT_TIP_ID;
+		tip.setAttribute("role", "tooltip");
+		tip.hidden = true;
+		document.body.append(tip);
+		return tip;
+	}
+	function hideArtifactTip() {
+		const tip = document.querySelector(`#${ARTIFACT_TIP_ID}`);
+		if (!tip) return;
+		tip.hidden = true;
+		tip.replaceChildren();
+	}
+	function renderTipFloat(copy) {
+		const detail = copy.detail ? `<div class="ao-artifact-tip-detail">${escapeHtml(copy.detail)}</div>` : "";
+		const bonusHtml = copy.setBonus ? `<div class="ao-artifact-tip-set">${escapeHtml(copy.setBonus)}</div>` : "";
+		return `
+    <div class="ao-artifact-tip-name">${escapeHtml(copy.title)}</div>
+    <div class="ao-artifact-tip-meta">${escapeHtml(copy.meta)}</div>
+    <div class="ao-artifact-tip-effect">${escapeHtml(copy.effect)}</div>
+    ${detail}
+    ${bonusHtml}
+  `;
+	}
+	function showArtifactTip(trigger) {
+		const title = trigger.dataset.tipTitle;
+		const meta = trigger.dataset.tipMeta;
+		const effect = trigger.dataset.tipEffect;
+		if (!title || !meta || !effect) return;
+		const tip = ensureArtifactTipFloat();
+		tip.innerHTML = renderTipFloat({
+			title,
+			meta,
+			effect,
+			...trigger.dataset.tipDetail && { detail: trigger.dataset.tipDetail },
+			...trigger.dataset.tipSet && { setBonus: trigger.dataset.tipSet }
+		});
+		tip.hidden = false;
+		const gap = 8;
+		const rect = trigger.getBoundingClientRect();
+		const tipRect = tip.getBoundingClientRect();
+		let top = rect.bottom + gap;
+		let left = rect.left;
+		if (top + tipRect.height > window.innerHeight - gap) top = rect.top - tipRect.height - gap;
+		if (left + tipRect.width > window.innerWidth - gap) left = window.innerWidth - tipRect.width - gap;
+		if (left < gap) left = gap;
+		if (top < gap) top = gap;
+		tip.style.top = `${top}px`;
+		tip.style.left = `${left}px`;
+	}
+	function tipTriggerFrom(target) {
+		if (!(target instanceof Element)) return;
+		const trigger = target.closest(".ao-artifact-tip");
+		return trigger instanceof HTMLElement ? trigger : void 0;
+	}
+	var boundTipRoots = new WeakSet();
+	function bindWindowTipDismiss() {
+		if (document.documentElement.dataset.aoTipWatch === "1") return;
+		document.documentElement.dataset.aoTipWatch = "1";
+		window.addEventListener("scroll", hideArtifactTip, { capture: true });
+		window.addEventListener("resize", hideArtifactTip);
+		document.addEventListener("keydown", (event) => {
+			if (event.key === "Escape") hideArtifactTip();
+		});
+	}
+	function bindArtifactTips(root) {
+		if (boundTipRoots.has(root)) return;
+		boundTipRoots.add(root);
+		bindWindowTipDismiss();
+		root.addEventListener("pointerover", (event) => {
+			if (!(event instanceof PointerEvent)) return;
+			const trigger = tipTriggerFrom(event.target);
+			if (trigger) showArtifactTip(trigger);
+		});
+		root.addEventListener("pointerout", (event) => {
+			if (!(event instanceof PointerEvent)) return;
+			const from = tipTriggerFrom(event.target);
+			const to = tipTriggerFrom(event.relatedTarget);
+			if (from && from !== to) hideArtifactTip();
+		});
+	}
 	function actionUrgency(partial) {
 		const urgency = {
 			kind: partial.kind,
@@ -5268,6 +6358,47 @@
 			isDue: (caps) => isActivityAvailable(caps, "timeOnSite")
 		}
 	];
+	var UTC_DAILY_KEYS = new Set([
+		"watchTwitch",
+		"dailyQuests",
+		"timeOnSite"
+	]);
+	var TIME_ON_SITE_DURATION_MS = BASE_ACTIVITY.timeOnSiteBasePerDay * 6e4;
+	var STEAM_WEEK_MS = 6048e5;
+	function isUtcDailyActivity(key) {
+		return UTC_DAILY_KEYS.has(key);
+	}
+	function activityDurationMs(key, watchRemainingMs) {
+		if (key === "watchTwitch") return Math.max(0, watchRemainingMs);
+		if (key === "timeOnSite") return TIME_ON_SITE_DURATION_MS;
+		return 0;
+	}
+	function twitchFullDayMs(stats, siteState) {
+		return ((siteState.watchTwitch?.capArp ?? BASE_ACTIVITY.watchTwitchBasePerDay) + comboBonusForActivity(stats, "watchTwitch")) * 6e4;
+	}
+	function loadoutStats(combo) {
+		if (!combo) return;
+		if ("artifacts" in combo && combo.artifacts.length > 0) return activityStatsForArtifacts(combo.artifacts);
+		if ("timeOnSiteFlat" in combo) return combo;
+	}
+	function plannedWearForResets(result, swapWaitMs) {
+		const deferred = result.deferredAllArp;
+		if (deferred && deferred.waitMs > 0 && deferred.artifacts.length > 0) return {
+			stats: activityStatsForArtifacts(deferred.artifacts),
+			waitMs: deferred.waitMs
+		};
+		const steam = result.deferredSteam;
+		if (steam && steam.artifacts.length > 0) return {
+			stats: activityStatsForArtifacts(steam.artifacts),
+			waitMs: steam.waitMs
+		};
+		const best = result.best;
+		const current = result.current;
+		if (best && (best.allArpPct ?? 0) > (current?.allArpPct ?? 0) && swapWaitMs > 0) return {
+			stats: activityStatsForArtifacts(best.artifacts),
+			waitMs: swapWaitMs
+		};
+	}
 	function isActivityEnabled(settings, key) {
 		return settings.activities[key]?.enabled;
 	}
@@ -5423,19 +6554,24 @@
 			case "steamQuests": return combo.steamQuestsFlat;
 			case "watchTwitch": return combo.watchTwitchFlat;
 			case "discordPoll": return combo.discordPollFlat;
+			case "timeOnSite": return loadoutStats(combo)?.timeOnSiteFlat ?? 0;
 			default: return 0;
 		}
 	}
 	function twitchActivityLabel(options) {
 		if (options.phase === "after" || options.phase === "afterNow") return "Watch Twitch";
-		if (options.phase === "before" && options.waitMs > 0 && !canFinishTwitchAfterUnlock(options.waitMs, options.watchRemainingMs)) return "Watch Twitch now";
+		if (options.phase === "before" && options.waitMs > 0 && !canFinishTwitchAfterUnlock(options.waitMs, options.watchRemainingMs, options.utcDailyEndBufferMs)) return "Watch Twitch now";
 		if (options.utcDeadline) return `Watch Twitch (${utcResetDeadlineLabel()})`;
 		return `Watch Twitch${options.beforeSwap ? " before swapping" : ""}`;
 	}
 	function twitchArpReason(options) {
 		const arp = Math.round(options.watchRemainingMs / 6e4 * (1 + options.allArpPct));
 		if (arp <= 0) return;
-		if (options.phase === "after" && options.waitMs > 0) return { text: `+${arp} ARP (fits in ${formatMs(msAfterUnlockBeforeReset(options.waitMs))} before reset)` };
+		if (options.upcomingReset === "utc") return { text: `+${arp} ARP after 00:00 UTC` };
+		if (options.phase === "after" && options.waitMs > 0) {
+			const left = msAfterUnlockBeforeReset(options.waitMs);
+			if (left > 0) return { text: `+${arp} ARP (fits in ${formatMs(left)} before reset)` };
+		}
 		return { text: `+${arp} ARP` };
 	}
 	function discordPollActivityLabel(bonus, options) {
@@ -5487,50 +6623,64 @@
 			default: return key;
 		}
 	}
-	var TWITCH_UNLOCK_BUFFER_MS = 3e5;
 	function msAfterUnlockBeforeReset(waitMs, now = new Date()) {
 		return Math.max(0, msUntilUtcMidnight(now) - waitMs);
 	}
-	function canFinishTwitchAfterUnlock(waitMs, watchRemainingMs, now = new Date()) {
-		return msAfterUnlockBeforeReset(waitMs, now) >= watchRemainingMs + TWITCH_UNLOCK_BUFFER_MS;
+	function canFinishTwitchAfterUnlock(waitMs, watchRemainingMs, bufferMs, now = new Date()) {
+		return Math.max(0, msUntilUtcMidnight(now) - waitMs - bufferMs) >= watchRemainingMs;
 	}
-	function activityWindowArp(combo, key) {
+	function activityWindowArp(combo, key, siteState, options) {
+		const stats = loadoutStats(combo);
+		const allArpPct = stats?.allArpPct ?? combo?.allArpPct ?? 0;
 		let base = 0;
 		switch (key) {
 			case "watchTwitch":
-				base = BASE_ACTIVITY.watchTwitchBasePerDay;
+				base = siteState === void 0 || options?.fullDay === true ? (siteState?.watchTwitch?.capArp ?? BASE_ACTIVITY.watchTwitchBasePerDay) + (stats?.watchTwitchFlat ?? comboBonusForActivity(combo, key)) : twitchWatchRemainingMs(siteState, stats?.watchTwitchFlat ?? comboBonusForActivity(combo, key)) / 6e4;
 				break;
 			case "dailyQuests":
 				base = BASE_ACTIVITY.dailyQuestBase;
 				break;
+			case "timeOnSite":
+				base = BASE_ACTIVITY.timeOnSiteBasePerDay + (stats?.timeOnSiteFlat ?? 0);
+				break;
+			case "steamQuests": {
+				const remaining = siteState ? remainingSteamQuestRewards(siteState) : [...BASE_ACTIVITY.steamQuestBases];
+				const bases = options?.fullDay === true ? [...BASE_ACTIVITY.steamQuestBases] : remaining;
+				const flat = stats?.steamQuestsFlat ?? comboBonusForActivity(combo, key);
+				return (bases.reduce((sum, value) => sum + value, 0) + flat * bases.length) * (1 + allArpPct);
+			}
 			case "discordPoll": base = BASE_ACTIVITY.discordPollBase;
 		}
-		const flat = comboBonusForActivity(combo, key);
-		return (base + flat) * (1 + (combo?.allArpPct ?? 0));
+		const flat = key === "watchTwitch" || key === "timeOnSite" ? 0 : comboBonusForActivity(combo, key);
+		return (base + flat) * (1 + allArpPct);
 	}
 	function resolveUtcDailyPhase(options) {
-		const { key, needsSwap, waitMs, canEquipBeforeReset, current, best, afterNow, hasImmediateEquip, watchRemainingMs } = options;
-		const currentArp = activityWindowArp(current, key);
-		const afterNowArp = activityWindowArp(afterNow ?? current, key);
+		const { key, needsSwap, waitMs, current, best, afterNow, hasImmediateEquip, watchRemainingMs, siteState, plannedWear, utcDailyEndBufferMs: cutoffMs } = options;
+		const currentArp = activityWindowArp(current, key, siteState);
+		const afterNowArp = activityWindowArp(afterNow ?? current, key, siteState);
 		if (needsSwap && hasImmediateEquip && afterNowArp >= currentArp) return "afterNow";
-		const bestArp = activityWindowArp(best, key);
-		if (!needsSwap || !canEquipBeforeReset || bestArp <= currentArp) return "before";
-		if (key === "watchTwitch" && !canFinishTwitchAfterUnlock(waitMs, watchRemainingMs)) return "before";
-		return "after";
+		const futureWaitMs = plannedWear?.waitMs ?? waitMs;
+		const futureArp = activityWindowArp(plannedWear?.stats ?? best, key, siteState);
+		const durationMs = activityDurationMs(key, watchRemainingMs);
+		if ((key === "watchTwitch" ? canFinishTwitchAfterUnlock(futureWaitMs, watchRemainingMs, cutoffMs) : canCompleteInWearWindow(0, msUntilUtcMidnight(), futureWaitMs, durationMs)) && futureArp > currentArp) return "after";
+		return "before";
 	}
 	function resolveActivityPhase(options) {
-		const { key, needsSwap, expiresBeforeUnlock, currentBonus, bestBonus, afterNowBonus, waitMs, canEquipBeforeReset, isUtcDaily, current, best, afterNow, hasImmediateEquip, watchRemainingMs } = options;
+		const { key, needsSwap, expiresBeforeUnlock, currentBonus, bestBonus, afterNowBonus, waitMs, canEquipBeforeReset, isUtcDaily, current, best, afterNow, hasImmediateEquip, watchRemainingMs, siteState, plannedWear, utcDailyEndBufferMs: cutoffMs } = options;
 		if (isUtcDaily) return resolveUtcDailyPhase({
 			key,
 			needsSwap,
 			waitMs,
-			canEquipBeforeReset,
 			current,
 			best,
 			afterNow,
 			hasImmediateEquip,
-			watchRemainingMs
+			watchRemainingMs,
+			siteState,
+			plannedWear,
+			utcDailyEndBufferMs: cutoffMs
 		});
+		if (key === "steamQuests" && plannedWear && activityWindowArp(plannedWear.stats, key, siteState) > activityWindowArp(current, key, siteState) && canCompleteInWearWindow(0, msUntilNextSteamQuestWeek(), plannedWear.waitMs, 0)) return "after";
 		if (!needsSwap) return "other";
 		if (hasImmediateEquip && afterNowBonus >= currentBonus) return "afterNow";
 		if (expiresBeforeUnlock || currentBonus > bestBonus) return "before";
@@ -5539,8 +6689,8 @@
 		if (bestBonus <= 0) return "other";
 		return !canEquipBeforeReset && waitMs > 0 ? "other" : "after";
 	}
-	function allArpPctForPhase(phase, current, best, afterNow) {
-		if (phase === "after") return best?.allArpPct ?? 0;
+	function allArpPctForPhase(phase, current, best, afterNow, plannedWear) {
+		if (phase === "after") return plannedWear?.stats.allArpPct ?? best?.allArpPct ?? 0;
 		if (phase === "afterNow") return afterNow?.allArpPct ?? current?.allArpPct ?? 0;
 		return current?.allArpPct ?? 0;
 	}
@@ -5550,15 +6700,27 @@
 		if (phase === "before") return currentBonus;
 		return 0;
 	}
+	function activityTodoArp(options) {
+		const { key, bonusForText, allArpPct, twitchArp } = options;
+		if (key === "watchTwitch") return twitchArp;
+		if (key === "timeOnSite") return Math.round((BASE_ACTIVITY.timeOnSiteBasePerDay + bonusForText) * (1 + allArpPct));
+		return bonusForText;
+	}
 	function activityTodoUrgency(options) {
 		const { key, phase, waitMs, watchRemainingMs, isUtcDaily, bonusForText, allArpPct } = options;
+		const readyAtMs = phase === "after" ? waitMs : 0;
 		const twitchArp = key === "watchTwitch" ? Math.round(Math.max(0, watchRemainingMs) / 6e4 * (1 + allArpPct)) : 0;
 		return actionUrgency({
-			kind: "action",
-			readyAtMs: phase === "after" ? waitMs : 0,
-			durationMs: key === "watchTwitch" ? Math.max(0, watchRemainingMs) : 0,
+			kind: readyAtMs > 0 ? "schedule" : "action",
+			readyAtMs,
+			durationMs: activityDurationMs(key, watchRemainingMs),
 			...isUtcDaily && { deadlineMs: msUntilUtcMidnight() },
-			arp: key === "watchTwitch" ? twitchArp : bonusForText,
+			arp: activityTodoArp({
+				key,
+				bonusForText,
+				allArpPct,
+				twitchArp
+			}),
 			chain: phaseChain(phase)
 		});
 	}
@@ -5578,18 +6740,37 @@
 		if (pending.map((quest) => quest.name).filter((name) => name.length > 0).length === 0) return { pending };
 		return { pending };
 	}
+	function activityTodoReasons(options) {
+		const { key, phase, waitMs, watchRemainingMs, allArpPct, upcomingReset, steamQuests, dailyQuests } = options;
+		const reasons = [];
+		if (key === "watchTwitch") {
+			const twitchReason = twitchArpReason({
+				phase,
+				waitMs,
+				watchRemainingMs,
+				allArpPct,
+				...upcomingReset && { upcomingReset }
+			});
+			if (twitchReason) reasons.push(twitchReason);
+		} else if (steamQuests?.reasons) reasons.push(...steamQuests.reasons);
+		else if (dailyQuests?.reasons) reasons.push(...dailyQuests.reasons);
+		if (upcomingReset === "steam") reasons.push({ text: "after Monday 00:00 UTC reset" });
+		else if (upcomingReset === "utc" && key !== "watchTwitch") reasons.push({ text: "after 00:00 UTC reset" });
+		return reasons.length > 0 ? reasons : void 0;
+	}
 	function buildActivityTodo(options) {
-		const { key, phase, needsSwap, currentBonus, bestBonus, afterNowBonus, isUtcDaily, waitMs, watchRemainingMs, allArpPct, siteState } = options;
+		const { key, phase, needsSwap, currentBonus, bestBonus, afterNowBonus, isUtcDaily, waitMs, watchRemainingMs, allArpPct, siteState, utcDailyEndBufferMs: cutoffMs, upcomingReset } = options;
 		const bonusForText = bonusForActivityPhase(phase, currentBonus, bestBonus, afterNowBonus);
 		const steamQuests = key === "steamQuests" ? steamQuestsTodoExtras(siteState, bonusForText) : void 0;
 		const dailyQuests = key === "dailyQuests" ? dailyQuestsTodoExtras(siteState) : void 0;
 		const todo = {
 			text: activityLabel(key, bonusForText, {
 				beforeSwap: phase === "before" && needsSwap && currentBonus > 0,
-				utcDeadline: isUtcDaily,
+				utcDeadline: isUtcDaily && upcomingReset === void 0,
 				phase,
 				waitMs,
 				watchRemainingMs,
+				utcDailyEndBufferMs: cutoffMs,
 				...steamQuests && { steamQuestCount: steamQuests.count },
 				...dailyQuests && { dailyQuestPending: dailyQuests.pending }
 			}),
@@ -5598,23 +6779,24 @@
 				phase,
 				waitMs,
 				watchRemainingMs,
-				isUtcDaily,
+				isUtcDaily: isUtcDaily && upcomingReset === void 0,
 				bonusForText,
 				allArpPct
 			})
 		};
-		if (key === "watchTwitch") {
-			todo.openTwitchStream = true;
-			const twitchReason = twitchArpReason({
-				phase,
-				waitMs,
-				watchRemainingMs,
-				allArpPct
-			});
-			if (twitchReason) todo.reasons = [twitchReason];
-		} else if (steamQuests?.reasons) todo.reasons = steamQuests.reasons;
-		else if (dailyQuests?.reasons) todo.reasons = dailyQuests.reasons;
-		if (isUtcDaily && msUntilUtcMidnight() <= 72e5) todo.tone = "warn";
+		const reasons = activityTodoReasons({
+			key,
+			phase,
+			waitMs,
+			watchRemainingMs,
+			allArpPct,
+			...upcomingReset && { upcomingReset },
+			...steamQuests && { steamQuests },
+			...dailyQuests && { dailyQuests }
+		});
+		if (reasons) todo.reasons = reasons;
+		if (key === "watchTwitch" && upcomingReset === void 0) todo.openTwitchStream = true;
+		if (isUtcDaily && upcomingReset === void 0 && msUntilUtcMidnight() <= 72e5) todo.tone = "warn";
 		return todo;
 	}
 	function pushTodoByPhase(buckets, phase, todo) {
@@ -5645,6 +6827,81 @@
 			return utcResetTodoRank(left) - utcResetTodoRank(right);
 		});
 	}
+	function upcomingResetAtMs(key, siteState, plannedWear, isTodayDue) {
+		if (!plannedWear || isTodayDue) return;
+		if (key === "steamQuests") {
+			if (isActivityPending(siteState.caps, "steamQuests")) return;
+			const monday = msUntilNextSteamQuestWeek();
+			if (!canCompleteInWearWindow(monday, monday + STEAM_WEEK_MS, plannedWear.waitMs, 0)) return;
+			return monday;
+		}
+		if (!isUtcDailyActivity(key)) return;
+		const midnight = msUntilUtcMidnight();
+		const duration = key === "watchTwitch" ? twitchFullDayMs(plannedWear.stats, siteState) : activityDurationMs(key, 0);
+		if (!canCompleteInWearWindow(midnight, midnight + 864e5, plannedWear.waitMs, duration)) return;
+		return midnight;
+	}
+	function waitMsForActivityPhase(phase, delayWaitMs, waitMs) {
+		if (phase === "afterNow") return 0;
+		if (phase === "after") return delayWaitMs;
+		return waitMs;
+	}
+	function appendDueActivityTodo(options) {
+		const { buckets, rule, needsSwap, current, best, afterNow, hasImmediateEquip, watchAfterMs, siteState, plannedWear, currentBonus, bestBonus, afterNowBonus, isUtcDaily, delayWaitMs, waitMs, isExpiresBeforeUnlock, utcDailyEndBufferMs: cutoffMs } = options;
+		const phase = resolveActivityPhase({
+			key: rule.key,
+			needsSwap,
+			expiresBeforeUnlock: isExpiresBeforeUnlock,
+			currentBonus,
+			bestBonus,
+			afterNowBonus,
+			waitMs: delayWaitMs,
+			canEquipBeforeReset: delayWaitMs <= msUntilUtcMidnight(),
+			isUtcDaily,
+			current,
+			best,
+			afterNow,
+			hasImmediateEquip,
+			watchRemainingMs: watchAfterMs,
+			siteState,
+			plannedWear,
+			utcDailyEndBufferMs: cutoffMs
+		});
+		const watchRemainingMs = rule.key === "watchTwitch" ? twitchWatchRemainingMs(siteState, bonusForActivityPhase(phase, currentBonus, bestBonus, afterNowBonus)) : watchAfterMs;
+		pushTodoByPhase(buckets, phase, buildActivityTodo({
+			key: rule.key,
+			phase,
+			needsSwap,
+			currentBonus,
+			bestBonus,
+			afterNowBonus,
+			isUtcDaily,
+			waitMs: waitMsForActivityPhase(phase, delayWaitMs, waitMs),
+			watchRemainingMs,
+			allArpPct: allArpPctForPhase(phase, current, best, afterNow, plannedWear),
+			siteState,
+			utcDailyEndBufferMs: cutoffMs
+		}));
+	}
+	function appendUpcomingActivityTodo(options) {
+		const { buckets, rule, needsSwap, plannedWear, upcomingAt, currentBonus, bestBonus, afterNowBonus, isUtcDaily, watchAfterMs, siteState, utcDailyEndBufferMs: cutoffMs } = options;
+		const upcomingWatchMs = rule.key === "watchTwitch" ? twitchFullDayMs(plannedWear.stats, siteState) : watchAfterMs;
+		pushTodoByPhase(buckets, "after", buildActivityTodo({
+			key: rule.key,
+			phase: "after",
+			needsSwap,
+			currentBonus,
+			bestBonus,
+			afterNowBonus,
+			isUtcDaily,
+			waitMs: Math.max(upcomingAt, plannedWear.waitMs),
+			watchRemainingMs: upcomingWatchMs,
+			allArpPct: plannedWear.stats.allArpPct,
+			siteState,
+			utcDailyEndBufferMs: cutoffMs,
+			upcomingReset: rule.key === "steamQuests" ? "steam" : "utc"
+		}));
+	}
 	function isSequencedActivityDue(rule, settings, siteState, watchRemainingMs) {
 		if (!isActivityEnabled(settings, rule.key)) return false;
 		if (rule.key === "watchTwitch") return watchRemainingMs > 0 && isActivityAvailable(siteState.caps, "watchTwitch");
@@ -5662,47 +6919,56 @@
 		const best = result.best;
 		const plan = best ? planLoadoutChanges(best.artifacts, current, settings, result.slotLocks) : void 0;
 		const waitMs = plan?.waitMs ?? fallbackWaitMs;
-		const canEquipBeforeReset = waitMs <= msUntilUtcMidnight();
+		const cutoffMs = utcDailyEndBufferMs(settings);
+		const plannedWear = plannedWearForResets(result, waitMs);
 		const hasImmediateEquip = (plan?.now.length ?? 0) > 0;
 		const afterNow = best && plan ? activityStatsForArtifacts(artifactsAfterImmediateEquip(current, best, plan)) : void 0;
-		const watchAfterMs = twitchWatchRemainingMs(siteState, Math.max(comboBonusForActivity(current, "watchTwitch"), comboBonusForActivity(afterNow ?? current, "watchTwitch"), comboBonusForActivity(best, "watchTwitch")));
+		const watchAfterMs = twitchWatchRemainingMs(siteState, Math.max(comboBonusForActivity(current, "watchTwitch"), comboBonusForActivity(afterNow ?? current, "watchTwitch"), comboBonusForActivity(best, "watchTwitch"), comboBonusForActivity(plannedWear?.stats, "watchTwitch")));
 		for (const rule of ACTIVITY_TODO_RULES) {
-			if (!isSequencedActivityDue(rule, settings, siteState, watchAfterMs)) continue;
+			if (!isActivityEnabled(settings, rule.key)) continue;
+			const isTodayDue = isSequencedActivityDue(rule, settings, siteState, watchAfterMs);
+			const upcomingAt = upcomingResetAtMs(rule.key, siteState, plannedWear, isTodayDue);
+			if (!isTodayDue && upcomingAt === void 0) continue;
 			const currentBonus = comboBonusForActivity(current, rule.key);
-			const bestBonus = comboBonusForActivity(best, rule.key);
+			const bestBonus = comboBonusForActivity(plannedWear?.stats ?? best, rule.key);
 			const afterNowBonus = comboBonusForActivity(afterNow ?? current, rule.key);
-			const isUtcDaily = ["watchTwitch", "dailyQuests"].includes(rule.key);
-			const isExpiresBeforeUnlock = isUtcDaily && !canEquipBeforeReset && waitMs > 0;
-			const phase = resolveActivityPhase({
-				key: rule.key,
+			const isUtcDaily = isUtcDailyActivity(rule.key);
+			const delayWaitMs = plannedWear?.waitMs ?? waitMs;
+			const isExpiresBeforeUnlock = isUtcDaily && delayWaitMs > msUntilUtcMidnight() && delayWaitMs > 0;
+			if (isTodayDue) appendDueActivityTodo({
+				buckets,
+				rule,
 				needsSwap,
-				expiresBeforeUnlock: isExpiresBeforeUnlock,
-				currentBonus,
-				bestBonus,
-				afterNowBonus,
-				waitMs,
-				canEquipBeforeReset,
-				isUtcDaily,
 				current,
 				best,
 				afterNow,
 				hasImmediateEquip,
-				watchRemainingMs: watchAfterMs
-			});
-			const watchRemainingMs = rule.key === "watchTwitch" ? twitchWatchRemainingMs(siteState, bonusForActivityPhase(phase, currentBonus, bestBonus, afterNowBonus)) : watchAfterMs;
-			pushTodoByPhase(buckets, phase, buildActivityTodo({
-				key: rule.key,
-				phase,
-				needsSwap,
+				watchAfterMs,
+				siteState,
+				plannedWear,
 				currentBonus,
 				bestBonus,
 				afterNowBonus,
 				isUtcDaily,
-				waitMs: phase === "afterNow" ? 0 : waitMs,
-				watchRemainingMs,
-				allArpPct: allArpPctForPhase(phase, current, best, afterNow),
-				siteState
-			}));
+				delayWaitMs,
+				waitMs,
+				isExpiresBeforeUnlock,
+				utcDailyEndBufferMs: cutoffMs
+			});
+			if (upcomingAt !== void 0 && plannedWear) appendUpcomingActivityTodo({
+				buckets,
+				rule,
+				needsSwap,
+				plannedWear,
+				upcomingAt,
+				currentBonus,
+				bestBonus,
+				afterNowBonus,
+				isUtcDaily,
+				watchAfterMs,
+				siteState,
+				utcDailyEndBufferMs: cutoffMs
+			});
 		}
 		pushCommunityEventTodo(buckets.other, siteState, settings, current?.allArpPct ?? 0);
 		return {
@@ -5758,6 +7024,21 @@
 		if (reasons.length > 0) todo.reasons = reasons;
 		if (tone) todo.tone = tone;
 		return todo;
+	}
+	function deferredSteamTodo(deferred, siteState) {
+		const { waitMs, artifacts } = deferred;
+		return buildEquipTodo({
+			headline: waitMs > 0 ? `Equip Steam Quests set in ${formatMs(waitMs)}` : "Equip Steam Quests set now",
+			loadout: loadoutLabel(artifacts),
+			reasons: collectEquipReasons(siteState, waitMs, artifacts),
+			urgency: actionUrgency({
+				kind: waitMs > 0 ? "schedule" : "action",
+				readyAtMs: waitMs,
+				durationMs: 0,
+				deadlineMs: msUntilNextSteamQuestWeek(),
+				chain: "equip"
+			})
+		});
 	}
 	function deferredAllArpTodo(deferred) {
 		const { waitMs, artifacts, unlock } = deferred;
@@ -5911,6 +7192,22 @@
 			});
 		}
 		pushCommunityAllArpGuards(todos, siteState, isLocked, options.hasDeferredAllArp === true);
+	}
+	function pushScheduledAllArpTodos(todos, result, settings, siteState, plan, isNeedsSwap, shouldAddBattlePassEquip) {
+		const deferredAllArp = result.deferredAllArp;
+		if (deferredAllArp && !isSameLoadout(result.best?.artifacts ?? [], deferredAllArp.artifacts)) {
+			todos.push(deferredAllArpTodo(deferredAllArp));
+			return;
+		}
+		if (deferredAllArp || !shouldAddBattlePassEquip) return;
+		const allArpTodo = battlePassAllArpEquipTodo({
+			result,
+			settings,
+			siteState,
+			plan,
+			isNeedsSwap
+		});
+		if (allArpTodo) todos.push(allArpTodo);
 	}
 	function nowEquipHeadline(plan) {
 		return `Equip: ${plan.now.map((change) => change.displayName).join(" + ")} now (${plan.now.map((change) => `slot ${change.position}`).join(", ")} free)`;
@@ -6225,6 +7522,7 @@
 			hasDeferredAllArp: deferredAllArp !== void 0,
 			hasScheduledAllArp
 		});
+		if (result.deferredSteam) todos.push(deferredSteamTodo(result.deferredSteam, siteState));
 		if (shouldDeferBattlePassClaim) pushBattlePassTodo(todos, siteState, {
 			ownsAllArp: hasOwnedAllArp,
 			hasAllArpEquipped: false,
@@ -6237,17 +7535,7 @@
 			seasonEndsBeforeAllArp: hasOwnedAllArp && !hasAllArpEquipped
 		});
 		pushAfterSwapTodos(todos, sequenced, discord, isNeedsSwap);
-		if (deferredAllArp) todos.push(deferredAllArpTodo(deferredAllArp));
-		else if (allArpSchedule.shouldAddEquipTodo) {
-			const allArpTodo = battlePassAllArpEquipTodo({
-				result,
-				settings,
-				siteState,
-				plan,
-				isNeedsSwap
-			});
-			if (allArpTodo) todos.push(allArpTodo);
-		}
+		pushScheduledAllArpTodos(todos, result, settings, siteState, plan, isNeedsSwap, allArpSchedule.shouldAddEquipTodo);
 		if (todos.length === 0) return [{
 			tone: "muted",
 			text: "Nothing urgent — check back after activities refresh",
@@ -6267,12 +7555,12 @@
 		return "";
 	}
 	function renderActionTodoBody(todo) {
-		const parts = [`<span class="ao-todo-headline">${escapeHtml(todo.text)}</span>`];
-		if (todo.loadout) parts.push(`<span class="ao-todo-loadout">${escapeHtml(todo.loadout)}</span>`);
+		const parts = [`<span class="ao-todo-headline">${wrapArtifactNames(todo.text)}</span>`];
+		if (todo.loadout) parts.push(`<span class="ao-todo-loadout">${wrapArtifactNames(todo.loadout)}</span>`);
 		if (todo.reasons && todo.reasons.length > 0) {
 			const items = todo.reasons.map((reason) => {
-				const detail = reason.detail ? `<div class="ao-todo-reason-detail">${escapeHtml(reason.detail)}</div>` : "";
-				return `<li><div class="ao-todo-reason-text">${escapeHtml(reason.text)}</div>${detail}</li>`;
+				const detail = reason.detail ? `<div class="ao-todo-reason-detail">${wrapArtifactNames(reason.detail)}</div>` : "";
+				return `<li><div class="ao-todo-reason-text">${wrapArtifactNames(reason.text)}</div>${detail}</li>`;
 			}).join("");
 			parts.push(`<ul class="ao-todo-reasons">${items}</ul>`);
 		}
@@ -7516,639 +8804,6 @@
 		await saveSiteState(next);
 		return next;
 	}
-	var MODAL_ID = "alienware-artifact-optimizer";
-	var INLINE_ID = "alienware-artifact-optimizer-inline";
-	var CC_PANEL_ID = "alienware-artifact-optimizer-cc";
-	var BP_CLAIM_BAR_ID = "alienware-artifact-optimizer-bp-claim";
-	var STYLE_ID$1 = "alienware-artifact-optimizer-styles";
-	var BACKDROP_ID = "alienware-artifact-optimizer-backdrop";
-	var DIALOG_ID = "alienware-artifact-optimizer-dialog";
-	var TOAST_ID = "alienware-artifact-optimizer-toast";
-	var TOAST_MS = 2200;
-	var MODAL_LAYOUT = [
-		["position", "fixed"],
-		["top", "50%"],
-		["left", "50%"],
-		["transform", "translate(-50%, -50%)"],
-		["z-index", "10001"],
-		["width", "min(560px, 94vw)"],
-		["max-height", "90vh"],
-		["overflow-y", "auto"]
-	];
-	var BACKDROP_LAYOUT = [
-		["position", "fixed"],
-		["inset", "0"],
-		["background", "rgba(0, 0, 0, 0.85)"],
-		["z-index", "10000"]
-	];
-	function cssDeclarations(layout) {
-		return layout.map(([property, value]) => `${property}: ${value};`).join("\n        ");
-	}
-	function buildOptimizerCss() {
-		return `
-      #${BACKDROP_ID} {
-        display: none;
-        ${cssDeclarations(BACKDROP_LAYOUT)}
-      }
-      #${MODAL_ID} {
-        display: none;
-        ${cssDeclarations(MODAL_LAYOUT)}
-        background: transparent;
-      }
-      #${INLINE_ID},
-      #${CC_PANEL_ID} {
-        display: block;
-        margin: 16px 0;
-        width: 100%;
-        max-width: 100%;
-        box-sizing: border-box;
-      }
-      body > #${INLINE_ID},
-      body > #${CC_PANEL_ID},
-      html > #${INLINE_ID},
-      html > #${CC_PANEL_ID} {
-        margin: 88px auto 16px;
-        padding: 0 16px;
-        max-width: 1100px;
-      }
-      #${DIALOG_ID} {
-        position: fixed;
-        inset: 0;
-        z-index: 10002;
-        display: flex;
-        align-items: center;
-        justify-content: center;
-      }
-      #${DIALOG_ID}[hidden] {
-        display: none !important;
-      }
-      #${DIALOG_ID} .ao-dialog-scrim {
-        position: absolute;
-        inset: 0;
-        background: rgba(0, 0, 0, 0.85);
-      }
-      #${DIALOG_ID} .ao-dialog {
-        position: relative;
-        z-index: 1;
-        width: min(420px, 92vw);
-        background: #1a1a1a;
-        color: #fff;
-        border: 1px solid #00bc8c;
-        border-radius: 8px;
-        padding: 20px;
-        box-shadow: 0 12px 40px rgba(0, 0, 0, 0.85);
-        font-family: system-ui, -apple-system, BlinkMacSystemFont, sans-serif;
-        font-size: 14px;
-        line-height: 1.45;
-      }
-      #${DIALOG_ID} .ao-dialog-title {
-        margin: 0 0 10px;
-        color: #00bc8c;
-        font-size: 1.1em;
-        font-weight: bold;
-      }
-      #${DIALOG_ID} .ao-dialog-message {
-        margin: 0 0 16px;
-        color: #eee;
-        white-space: pre-wrap;
-      }
-      #${DIALOG_ID} .ao-dialog-actions {
-        display: flex;
-        flex-wrap: wrap;
-        gap: 8px;
-        justify-content: flex-end;
-      }
-      #${DIALOG_ID} button {
-        background: #00bc8c;
-        color: #fff;
-        border: none;
-        padding: 6px 12px;
-        border-radius: 4px;
-        cursor: pointer;
-        font-size: 14px;
-      }
-      #${DIALOG_ID} button.ao-secondary {
-        background: #555;
-      }
-      #${DIALOG_ID} button.ao-danger {
-        background: #e74c3c;
-      }
-      #${TOAST_ID} {
-        position: fixed;
-        bottom: 24px;
-        left: 50%;
-        transform: translateX(-50%);
-        z-index: 10003;
-        max-width: min(420px, 92vw);
-        background: #1a1a1a;
-        color: #fff;
-        border: 1px solid #00bc8c;
-        border-radius: 8px;
-        padding: 10px 16px;
-        box-shadow: 0 8px 24px rgba(0, 0, 0, 0.6);
-        font-family: system-ui, -apple-system, BlinkMacSystemFont, sans-serif;
-        font-size: 14px;
-      }
-      #${TOAST_ID}[hidden] {
-        display: none !important;
-      }
-  `;
-	}
-	function ensureOptimizerStyles() {
-		let style = document.querySelector(`#${STYLE_ID$1}`);
-		if (!style) {
-			style = document.createElement("style");
-			style.id = STYLE_ID$1;
-			(document.head || document.documentElement).append(style);
-		}
-		style.textContent = buildOptimizerCss();
-	}
-	function applyOpaqueModalChrome(modal) {
-		const paint = [
-			...MODAL_LAYOUT,
-			["background", "transparent"],
-			["opacity", "1"]
-		];
-		for (const [property, value] of paint) modal.style.setProperty(property, value, "important");
-	}
-	function applyOpaqueBackdropChrome(backdrop) {
-		const paint = [
-			...BACKDROP_LAYOUT,
-			["background-color", "rgba(0, 0, 0, 0.85)"],
-			["opacity", "1"]
-		];
-		for (const [property, value] of paint) backdrop.style.setProperty(property, value, "important");
-	}
-	function buildPanelShadowCss(variant) {
-		return `
-    ${variant === "modal" ? `
-    :host {
-      display: none;
-      ${cssDeclarations(MODAL_LAYOUT)}
-      box-sizing: border-box;
-    }
-  ` : `
-    :host {
-      display: block;
-      margin: 0;
-      width: 100%;
-      max-width: 100%;
-      box-sizing: border-box;
-    }
-  `}
-    .ao-panel,
-    .ao-panel * {
-      text-decoration: none !important;
-      text-decoration-line: none !important;
-      -webkit-text-fill-color: unset !important;
-      text-transform: none !important;
-      letter-spacing: normal !important;
-      text-shadow: none !important;
-      font-family: system-ui, -apple-system, BlinkMacSystemFont, sans-serif !important;
-      box-sizing: border-box;
-    }
-    .ao-panel {
-      display: block;
-      background: #1a1a1a;
-      color: #fff;
-      padding: ${variant === "modal" ? "20px" : "16px"};
-      border-radius: 8px;
-      border: 1px solid ${variant === "modal" ? "#444" : "#00bc8c"};
-      box-shadow: ${variant === "modal" ? "0 12px 40px rgba(0, 0, 0, 0.85)" : "0 0 10px rgba(0, 188, 140, 0.25)"};
-      font-size: 14px;
-      line-height: 1.4;
-      width: 100%;
-    }
-    .ao-panel > * {
-      display: block;
-      width: 100%;
-    }
-    .ao-title {
-      color: #fff !important;
-      font-size: 1.4em !important;
-      font-weight: bold !important;
-      margin: 0 0 12px !important;
-    }
-    .ao-heading {
-      color: #00bc8c !important;
-      font-size: 1.05em !important;
-      font-weight: bold !important;
-      margin: 14px 0 8px !important;
-    }
-    .ao-heading:first-child {
-      margin-top: 0 !important;
-    }
-    .ao-row {
-      display: block;
-      margin: 6px 0 6px 8px;
-      color: #fff !important;
-      line-height: 1.4;
-    }
-    .ao-muted {
-      color: #aaa !important;
-      font-size: 0.9em !important;
-    }
-    .ao-credit {
-      margin: 0 0 10px !important;
-    }
-    .ao-note {
-      display: block;
-      background: #2a2a2a;
-      border-left: 3px solid #00bc8c;
-      padding: 8px 10px;
-      margin: 8px 0;
-      color: #eee !important;
-    }
-    .ao-note > div + div {
-      margin-top: 4px;
-    }
-    .ao-note-actions {
-      margin-top: 8px;
-    }
-    .ao-status-details {
-      margin: 8px 0 4px;
-    }
-    .ao-status-details summary {
-      cursor: pointer;
-      user-select: none;
-    }
-    .ao-status-details[open] summary {
-      margin-bottom: 6px;
-    }
-    .ao-text-link {
-      color: #00bc8c !important;
-      text-decoration: underline !important;
-      text-decoration-line: underline !important;
-      cursor: pointer;
-    }
-    .ao-actions {
-      display: flex !important;
-      flex-wrap: wrap;
-      gap: 8px;
-      margin-top: 12px;
-      width: 100%;
-    }
-    .ao-actions-sep {
-      width: 1px;
-      align-self: stretch;
-      min-height: 28px;
-      background: #555;
-      margin: 0 4px;
-    }
-    .ao-todo-list {
-      display: block;
-      margin: 0 0 4px;
-      padding: 0;
-      list-style: none;
-      width: 100%;
-    }
-    .ao-divider {
-      display: block;
-      border: 0;
-      border-top: 1px solid #444;
-      margin: 14px 0;
-      width: 100%;
-    }
-    .ao-todo-item {
-      display: flex;
-      gap: 6px;
-      margin: 6px 0;
-      line-height: 1.45;
-      color: #eee !important;
-      align-items: flex-start;
-    }
-    .ao-todo-index {
-      color: #00bc8c !important;
-      font-weight: 600;
-      flex: 0 0 auto;
-      padding-top: 1px;
-    }
-    .ao-todo-item > .ao-upgrade-btn,
-    .ao-todo-item > .ao-claim-btn,
-    .ao-todo-item > .ao-twitch-btn {
-      flex: 0 0 auto;
-      padding: 4px 10px;
-      font-size: 13px !important;
-    }
-    .ao-row .ao-upgrade-btn {
-      margin-left: 8px;
-    }
-    .ao-todo-text {
-      display: flex;
-      flex-direction: column;
-      gap: 2px;
-      min-width: 0;
-      flex: 1 1 auto;
-    }
-    .ao-todo-headline {
-      display: block;
-      font-weight: 600;
-    }
-    .ao-todo-loadout {
-      display: block;
-      color: #fff !important;
-      margin: 2px 0 2px;
-    }
-    .ao-todo-reasons {
-      display: block;
-      margin: 4px 0 0;
-      padding: 0 0 0 1.1em;
-      list-style: disc;
-      color: #ccc !important;
-    }
-    .ao-todo-reasons > li {
-      display: list-item;
-      margin: 2px 0;
-    }
-    .ao-todo-reason-text {
-      display: block;
-    }
-    .ao-todo-reason-detail {
-      display: block;
-      margin-top: 1px;
-      color: #aaa !important;
-      font-size: 0.92em;
-    }
-    .ao-todo-muted {
-      color: #aaa !important;
-    }
-    .ao-todo-warn {
-      color: #f0c674 !important;
-    }
-    .ao-caution {
-      display: block;
-      margin: 0 0 10px;
-      padding: 8px 10px;
-      border: 1px solid #f0c674;
-      border-radius: 6px;
-      background: rgba(240, 198, 116, 0.12);
-      color: #f0c674 !important;
-    }
-    .ao-caution .ao-todo-headline {
-      font-weight: 700;
-    }
-    .ao-caution .ao-todo-reasons {
-      color: #e6d5a3 !important;
-      padding-left: 1.1em;
-    }
-    button {
-      display: inline-block;
-      width: auto;
-      background: #00bc8c;
-      color: #fff !important;
-      border: none;
-      padding: 6px 12px;
-      border-radius: 4px;
-      cursor: pointer;
-      font-size: 14px !important;
-    }
-    button[hidden] {
-      display: none !important;
-    }
-    button.ao-secondary {
-      background: #555;
-    }
-    button.ao-loadout-preview {
-      white-space: normal;
-      text-align: left;
-      max-width: 100%;
-    }
-    button.ao-danger {
-      background: #e74c3c;
-    }
-    button:disabled {
-      opacity: 0.5;
-      cursor: not-allowed;
-    }
-    label.ao-toggle {
-      display: block;
-      margin: 4px 0 4px 8px;
-      color: #fff !important;
-    }
-    input[type="number"],
-    input[type="text"],
-    select,
-    textarea.ao-textarea {
-      width: 90px;
-      margin-left: 6px;
-      padding: 2px 4px;
-      background: #2a2a2a;
-      color: #fff !important;
-      border: 1px solid #555;
-      border-radius: 3px;
-      caret-color: #fff;
-      font-size: 14px !important;
-    }
-    textarea.ao-textarea {
-      display: block;
-      width: calc(100% - 8px);
-      min-height: 72px;
-      margin: 6px 0 6px 8px;
-      resize: vertical;
-    }
-    select {
-      width: auto;
-      min-width: 120px;
-    }
-    input[type="checkbox"] {
-      margin-right: 6px;
-      accent-color: #00bc8c;
-    }
-    .ao-notify {
-      display: block;
-      margin: 0 0 12px;
-      padding: 10px 12px;
-      background: #222;
-      border: 1px solid #333;
-      border-radius: 8px;
-    }
-    .ao-switch {
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      gap: 14px;
-      margin: 0;
-      cursor: pointer;
-      color: #fff !important;
-    }
-    .ao-switch-copy {
-      display: flex;
-      flex-direction: column;
-      gap: 3px;
-      min-width: 0;
-      flex: 1 1 auto;
-    }
-    .ao-switch-title {
-      font-weight: 600;
-      color: #fff !important;
-    }
-    .ao-switch-hint {
-      color: #aaa !important;
-      font-size: 0.88em !important;
-      line-height: 1.4;
-    }
-    .ao-switch-input {
-      position: absolute;
-      width: 1px;
-      height: 1px;
-      padding: 0;
-      margin: -1px;
-      overflow: hidden;
-      clip: rect(0, 0, 0, 0);
-      white-space: nowrap;
-      border: 0;
-    }
-    .ao-switch-track {
-      position: relative;
-      flex: 0 0 auto;
-      width: 44px;
-      height: 24px;
-      border-radius: 999px;
-      background: #3a3a3a;
-      box-shadow: inset 0 0 0 1px #555;
-      transition: background 0.16s ease, box-shadow 0.16s ease;
-    }
-    .ao-switch-knob {
-      position: absolute;
-      top: 2px;
-      left: 2px;
-      width: 20px;
-      height: 20px;
-      border-radius: 50%;
-      background: #fff;
-      box-shadow: 0 1px 3px rgba(0, 0, 0, 0.45);
-      transition: transform 0.16s ease;
-    }
-    .ao-switch-input:checked + .ao-switch-track {
-      background: #00bc8c;
-      box-shadow: inset 0 0 0 1px #00bc8c;
-    }
-    .ao-switch-input:checked + .ao-switch-track .ao-switch-knob {
-      transform: translateX(20px);
-    }
-    .ao-switch-input:focus-visible + .ao-switch-track {
-      outline: 2px solid #00bc8c;
-      outline-offset: 3px;
-    }
-    .ao-notify-types {
-      display: flex;
-      flex-direction: column;
-      gap: 8px;
-      margin-top: 10px;
-      padding-top: 10px;
-      border-top: 1px solid #333;
-    }
-    .ao-notify-types[data-off] {
-      opacity: 0.45;
-      pointer-events: none;
-    }
-    .ao-switch-sm .ao-switch-title {
-      font-weight: 500;
-      font-size: 0.92em !important;
-    }
-    .ao-switch-sm .ao-switch-hint {
-      font-size: 0.8em !important;
-    }
-    .ao-switch-sm .ao-switch-track {
-      width: 36px;
-      height: 20px;
-    }
-    .ao-switch-sm .ao-switch-knob {
-      width: 16px;
-      height: 16px;
-    }
-    .ao-switch-sm .ao-switch-input:checked + .ao-switch-track .ao-switch-knob {
-      transform: translateX(16px);
-    }
-    details {
-      display: block;
-      width: 100%;
-    }
-    details.ao-advanced {
-      margin-top: 14px;
-      border-top: 1px solid #333;
-      padding-top: 10px;
-    }
-    details.ao-advanced > summary {
-      cursor: pointer;
-      color: #00bc8c !important;
-      font-weight: bold;
-      list-style: none;
-    }
-    details.ao-advanced > summary::-webkit-details-marker {
-      display: none;
-    }
-    details.ao-advanced > summary::before {
-      content: '▸ ';
-    }
-    details.ao-advanced[open] > summary::before {
-      content: '▾ ';
-    }
-    details > summary {
-      color: #aaa !important;
-      cursor: pointer;
-    }
-    .ao-hydrate {
-      display: flex;
-      align-items: center;
-      gap: 8px;
-      margin: 0 0 10px;
-      padding: 8px 10px;
-      background: #222;
-      border: 1px solid #00bc8c55;
-      border-radius: 4px;
-      color: #ccc !important;
-      font-size: 0.92em !important;
-    }
-    .ao-spinner {
-      width: 14px;
-      height: 14px;
-      border: 2px solid #00bc8c44;
-      border-top-color: #00bc8c;
-      border-radius: 50%;
-      animation: ao-spin 0.7s linear infinite;
-      flex: 0 0 auto;
-    }
-    .ao-skel {
-      display: block;
-      height: 12px;
-      margin: 8px 0;
-      border-radius: 4px;
-      background: linear-gradient(90deg, #2a2a2a 25%, #333 37%, #2a2a2a 63%);
-      background-size: 400% 100%;
-      animation: ao-skel 1.2s ease-in-out infinite;
-    }
-    @keyframes ao-spin {
-      to {
-        transform: rotate(360deg);
-      }
-    }
-    @keyframes ao-skel {
-      0% {
-        background-position: 100% 0;
-      }
-      100% {
-        background-position: 0 0;
-      }
-    }
-    @media (prefers-reduced-motion: reduce) {
-      .ao-spinner,
-      .ao-skel {
-        animation: none;
-      }
-      .ao-switch-track,
-      .ao-switch-knob {
-        transition: none;
-      }
-    }
-  `;
-	}
-	function buildModalShadowCss() {
-		return buildPanelShadowCss("modal");
-	}
-	function buildInlineShadowCss() {
-		return buildPanelShadowCss("inline");
-	}
 	var dialogState = {};
 	function onDialogKeydown(event) {
 		if (event.key === "Escape") {
@@ -8727,7 +9382,7 @@
   `;
 	}
 	function formatSwapMessage(result) {
-		if (result.dailySwap) return `<div class="ao-row">${escapeHtml(result.dailySwap.reason)}</div>`;
+		if (result.dailySwap) return `<div class="ao-row">${wrapArtifactNames(result.dailySwap.reason)}</div>`;
 		const currentIds = new Set((result.current?.artifacts ?? []).map((a) => a.instanceId));
 		const bestIds = new Set((result.best?.artifacts ?? []).map((a) => a.instanceId));
 		if (bestIds.size > 0 && bestIds.size === currentIds.size && [...bestIds].every((id) => currentIds.has(id))) return `<div class="ao-row ao-muted">Current loadout matches the recommendation.</div>`;
@@ -8749,7 +9404,7 @@
 				const button = shouldShowUpgradeButtons && isFirstAffordable ? `<button type="button" class="ao-upgrade-btn" data-id="${upgrade.artifact.instanceId}">Upgrade</button>` : "";
 				return `
         <div class="ao-row">
-          ${verb} <strong>${upgrade.artifact.displayName}</strong>
+          ${verb} <strong>${wrapArtifactNames(upgrade.artifact.displayName)}</strong>
           ${step}
           (${upgrade.fragmentCost} frag, ${gain}, ${upgrade.efficiency.toFixed(1)} ARP/frag)
           ${button}
@@ -8759,14 +9414,14 @@
 				hasReachedSave = true;
 				return `
         <div class="ao-row ao-muted">
-          Save for <strong>${upgrade.artifact.displayName}</strong>
+          Save for <strong>${wrapArtifactNames(upgrade.artifact.displayName)}</strong>
           ${step}
           (need ${upgrade.fragmentCost}, have ${fragments}, ${gain})
         </div>`;
 			}
 			return `
         <div class="ao-row ao-muted">
-          Then <strong>${upgrade.artifact.displayName}</strong>
+          Then <strong>${wrapArtifactNames(upgrade.artifact.displayName)}</strong>
           ${step}
           (${upgrade.fragmentCost} frag, ${gain})
         </div>`;
@@ -8776,7 +9431,7 @@
 		const scrapedAt = snapshot?.scrapedAt ? new Date(snapshot.scrapedAt).toLocaleString() : "never";
 		const fragments = settings.manualFragments ?? snapshot?.fragments ?? 0;
 		const hydrateBanner = options.isHydrating ? renderHydrateBanner("Updating in the background…") : "";
-		const extras = supplementalNotes(result.notes).map((n) => `<div class="ao-note">${escapeHtml(n)}</div>`).join("");
+		const extras = supplementalNotes(result.notes).map((n) => `<div class="ao-note">${wrapArtifactNames(n)}</div>`).join("");
 		const vaultDiscount = renderVaultDiscountBlock(result);
 		const areActionsEnabled = areAccountActionsEnabled(settings);
 		const upgrades = renderUpgradePath(result.upgrades, fragments, { shouldShowUpgradeButtons: areActionsEnabled });
@@ -8818,10 +9473,10 @@
     ${extras}
     ${renderSectionDivider()}
     <div class="ao-heading">Recommended loadout</div>
-    <div class="ao-row"><strong>${comboLabel(result.best)}</strong></div>
+    <div class="ao-row"><strong>${wrapArtifactNames(comboLabel(result.best))}</strong></div>
     ${renderBreakdown(result.best)}
     <div class="ao-heading">Currently equipped</div>
-    <div class="ao-row">${equippedLabel}</div>
+    <div class="ao-row">${wrapArtifactNames(equippedLabel)}</div>
     ${result.current ? renderBreakdown(result.current) : ""}
     <div class="ao-heading">Suggested swap</div>
     ${swap}
@@ -8844,6 +9499,11 @@
       <div class="ao-heading">Preferred Twitch streamers</div>
       <div class="ao-muted">One login per line. Live preferred channels open first (top to bottom). If none are live: random Featured/Hive/Nexus with "drops" in the title, then any Featured/Hive/Nexus, then any "drops" title, then a random remaining stream.</div>
       <textarea id="ao-preferred-twitch" class="ao-textarea" rows="4" placeholder="ludwig">${escapeHtml(settings.preferredTwitchStreamers.join("\n"))}</textarea>
+      <div class="ao-heading">UTC daily cutoff</div>
+      <div class="ao-muted">Hours before 00:00 UTC to keep free for Twitch / Time on Site. Raise this if a 24h All-ARP% lock would leave too little time after it ends (a +1 community bump is not worth squeezing Twitch).</div>
+      <div class="ao-row">
+        <input type="number" id="ao-utc-daily-cutoff" min="0" max="12" step="0.5" value="${settings.utcDailyEndBufferHours}"/>
+      </div>
       <div class="ao-heading">Manual artifacts</div>
       <div class="ao-muted">Only needed if auto-scrape fails.</div>
       <div class="ao-row">
@@ -9023,7 +9683,8 @@
 		});
 	}
 	async function persistFormSettings(root) {
-		const activities = { ...(await getArtifactSettings()).activities };
+		const settings = await getArtifactSettings();
+		const activities = { ...settings.activities };
 		for (const key of Object.keys(activities)) {
 			const enabled = root.querySelector(`input[data-activity="${CSS.escape(key)}"]`)?.checked;
 			const frequencyRaw = root.querySelector(`input[data-freq="${CSS.escape(key)}"]`)?.value ?? "";
@@ -9044,6 +9705,11 @@
 		if (fragsRaw.trim() !== "" && !Number.isNaN(parsedFrags)) patch.manualFragments = parsedFrags;
 		const twitchInput = root.querySelector("#ao-preferred-twitch");
 		if (twitchInput) patch.preferredTwitchStreamers = parsePreferredTwitchStreamers(twitchInput.value);
+		const cutoffInput = root.querySelector("#ao-utc-daily-cutoff");
+		if (cutoffInput) {
+			const cutoff = Number(cutoffInput.value);
+			patch.utcDailyEndBufferHours = Number.isNaN(cutoff) ? settings.utcDailyEndBufferHours : clampUtcDailyEndBufferHours(cutoff);
+		}
 		await saveArtifactSettings(patch);
 	}
 	async function confirmAndApplyLoadout(result, settings) {
@@ -9359,6 +10025,7 @@
 		} else {
 			modal.style.setProperty("display", "none", "important");
 			backdrop.style.setProperty("display", "none", "important");
+			hideArtifactTip();
 		}
 	}
 	function panelTree(root) {
@@ -9382,10 +10049,12 @@
 	function bindModalEvents(modal, initial) {
 		let cache = initial;
 		const tree = () => modalTree(modal);
+		bindArtifactTips(modal.shadowRoot ?? modal);
 		const paint = (data, options = {}) => {
 			cache = data;
 			const body = tree().querySelector("#ao-body");
 			if (!body) return;
+			hideArtifactTip();
 			body.innerHTML = renderResultBody(cache.result, cache.snapshot, cache.settings, cache.siteState, { isHydrating: options.isHydrating === true });
 			const equipButton = tree().querySelector("#ao-equip");
 			if (equipButton instanceof HTMLButtonElement) equipButton.hidden = !areAccountActionsEnabled(cache.settings);
@@ -9564,12 +10233,14 @@
     <div class="ao-panel">
       ${bodyHtml}
     </div>
-  `;
+    `;
+		bindArtifactTips(shadow);
 		return shadow;
 	}
 	function replaceInlinePanelBody(panel, bodyHtml) {
 		const box = panelTree(panel).querySelector(".ao-panel");
 		if (box) {
+			hideArtifactTip();
 			box.innerHTML = bodyHtml;
 			return;
 		}
@@ -9600,7 +10271,7 @@
     <div class="ao-heading">Artifact Optimizer</div>
     ${renderCredits({ compact: true })}
     ${hydrateBanner}
-    <div class="ao-row"><strong>${summary.label}:</strong> ${comboLabel(summary.combo)}</div>
+    <div class="ao-row"><strong>${summary.label}:</strong> ${wrapArtifactNames(comboLabel(summary.combo))}</div>
     ${renderBreakdown(summary.combo)}
     ${renderVaultDiscountBlock(data.result)}
     ${renderShowroomEquipActions(data.result, {
@@ -9628,11 +10299,11 @@
     ${hydrateBanner}
     ${renderActionPlan(summary.todos, { allowAccountActions: areActionsEnabled })}
     ${renderSectionDivider()}
-    <div class="ao-row"><strong>${summary.label}:</strong> ${comboLabel(summary.combo)}</div>
+    <div class="ao-row"><strong>${summary.label}:</strong> ${wrapArtifactNames(comboLabel(summary.combo))}</div>
     ${renderBreakdown(summary.combo)}
     ${renderCooldownBlock(data.settings, data.snapshot?.slotLocks)}
     ${renderVaultDiscountBlock(data.result)}
-    ${supplementalNotes(data.result.notes).map((note) => `<div class="ao-note">${escapeHtml(note)}</div>`).join("")}
+    ${supplementalNotes(data.result.notes).map((note) => `<div class="ao-note">${wrapArtifactNames(note)}</div>`).join("")}
     ${actionsOffNote}
     <div class="ao-actions">
       ${equipButton}
@@ -9720,7 +10391,7 @@
 			const className = options.isPrimary === true ? "" : " class=\"ao-secondary\"";
 			return `<button type="button" id="${options.id}"${className} title="${escapeHtml(names)}">Equip ${escapeHtml(options.role)}</button>`;
 		}
-		return `<button type="button" id="${options.id}" class="ao-secondary ao-loadout-preview">${escapeHtml(options.role)}: ${escapeHtml(names)}</button>`;
+		return `<button type="button" id="${options.id}" class="ao-secondary ao-loadout-preview">${escapeHtml(options.role)}: ${wrapArtifactNames(names)}</button>`;
 	}
 	function renderShowroomEquipActions(result, options = {}) {
 		const areActionsEnabled = options.allowAccountActions === true;

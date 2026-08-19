@@ -1,32 +1,33 @@
-export const MODAL_ID = 'alienware-artifact-optimizer';
-export const INLINE_ID = 'alienware-artifact-optimizer-inline';
-export const CC_PANEL_ID = 'alienware-artifact-optimizer-cc';
-export const BP_CLAIM_BAR_ID = 'alienware-artifact-optimizer-bp-claim';
-export const STYLE_ID = 'alienware-artifact-optimizer-styles';
-export const BACKDROP_ID = 'alienware-artifact-optimizer-backdrop';
-export const DIALOG_ID = 'alienware-artifact-optimizer-dialog';
-export const TOAST_ID = 'alienware-artifact-optimizer-toast';
+export const MODAL_ID = "alienware-artifact-optimizer";
+export const INLINE_ID = "alienware-artifact-optimizer-inline";
+export const CC_PANEL_ID = "alienware-artifact-optimizer-cc";
+export const BP_CLAIM_BAR_ID = "alienware-artifact-optimizer-bp-claim";
+export const STYLE_ID = "alienware-artifact-optimizer-styles";
+export const BACKDROP_ID = "alienware-artifact-optimizer-backdrop";
+export const DIALOG_ID = "alienware-artifact-optimizer-dialog";
+export const TOAST_ID = "alienware-artifact-optimizer-toast";
+export const ARTIFACT_TIP_ID = "ao-artifact-tip-float";
 export const TOAST_MS = 2200;
 
 /**
 Shared modal positioning — light-DOM CSS, shadow :host, and inline !important.
 */
 export const MODAL_LAYOUT: ReadonlyArray<readonly [string, string]> = [
-  ['position', 'fixed'],
-  ['top', '50%'],
-  ['left', '50%'],
-  ['transform', 'translate(-50%, -50%)'],
-  ['z-index', '10001'],
-  ['width', 'min(560px, 94vw)'],
-  ['max-height', '90vh'],
-  ['overflow-y', 'auto'],
+  ["position", "fixed"],
+  ["top", "50%"],
+  ["left", "50%"],
+  ["transform", "translate(-50%, -50%)"],
+  ["z-index", "10001"],
+  ["width", "min(560px, 94vw)"],
+  ["max-height", "90vh"],
+  ["overflow-y", "auto"],
 ];
 
 export const BACKDROP_LAYOUT: ReadonlyArray<readonly [string, string]> = [
-  ['position', 'fixed'],
-  ['inset', '0'],
-  ['background', 'rgba(0, 0, 0, 0.85)'],
-  ['z-index', '10000'],
+  ["position", "fixed"],
+  ["inset", "0"],
+  ["background", "rgba(0, 0, 0, 0.85)"],
+  ["z-index", "10000"],
 ];
 
 function cssDeclarations(
@@ -34,7 +35,7 @@ function cssDeclarations(
 ): string {
   return layout
     .map(([property, value]) => `${property}: ${value};`)
-    .join('\n        ');
+    .join("\n        ");
 }
 
 /**
@@ -148,13 +149,50 @@ function buildOptimizerCss(): string {
       #${TOAST_ID}[hidden] {
         display: none !important;
       }
+      #${ARTIFACT_TIP_ID} {
+        position: fixed;
+        z-index: 10004;
+        max-width: min(280px, 92vw);
+        background: #1a1a1a;
+        color: #fff;
+        border: 1px solid #00bc8c;
+        border-radius: 8px;
+        padding: 10px 12px;
+        font-family: system-ui, -apple-system, BlinkMacSystemFont, sans-serif;
+        font-size: 13px;
+        line-height: 1.4;
+        pointer-events: none;
+      }
+      #${ARTIFACT_TIP_ID}[hidden] {
+        display: none !important;
+      }
+      #${ARTIFACT_TIP_ID} .ao-artifact-tip-name {
+        color: #00bc8c;
+        font-weight: 700;
+        margin: 0 0 4px;
+      }
+      #${ARTIFACT_TIP_ID} .ao-artifact-tip-meta {
+        color: #aaa;
+        font-size: 0.92em;
+        margin: 0 0 6px;
+      }
+      #${ARTIFACT_TIP_ID} .ao-artifact-tip-effect {
+        color: #fff;
+        font-weight: 600;
+      }
+      #${ARTIFACT_TIP_ID} .ao-artifact-tip-detail,
+      #${ARTIFACT_TIP_ID} .ao-artifact-tip-set {
+        color: #ccc;
+        font-size: 0.92em;
+        margin-top: 4px;
+      }
   `;
 }
 
 export function ensureOptimizerStyles(): void {
   let style = document.querySelector<HTMLStyleElement>(`#${STYLE_ID}`);
   if (!style) {
-    style = document.createElement('style');
+    style = document.createElement("style");
     style.id = STYLE_ID;
     (document.head || document.documentElement).append(style);
   }
@@ -164,30 +202,30 @@ export function ensureOptimizerStyles(): void {
 export function applyOpaqueModalChrome(modal: HTMLElement): void {
   const paint: Array<readonly [string, string]> = [
     ...MODAL_LAYOUT,
-    ['background', 'transparent'],
-    ['opacity', '1'],
+    ["background", "transparent"],
+    ["opacity", "1"],
   ];
   for (const [property, value] of paint) {
-    modal.style.setProperty(property, value, 'important');
+    modal.style.setProperty(property, value, "important");
   }
 }
 
 export function applyOpaqueBackdropChrome(backdrop: HTMLElement): void {
   const paint: Array<readonly [string, string]> = [
     ...BACKDROP_LAYOUT,
-    ['background-color', 'rgba(0, 0, 0, 0.85)'],
-    ['opacity', '1'],
+    ["background-color", "rgba(0, 0, 0, 0.85)"],
+    ["opacity", "1"],
   ];
   for (const [property, value] of paint) {
-    backdrop.style.setProperty(property, value, 'important');
+    backdrop.style.setProperty(property, value, "important");
   }
 }
 
-type PanelShadowVariant = 'modal' | 'inline';
+type PanelShadowVariant = "modal" | "inline";
 
 function buildPanelShadowCss(variant: PanelShadowVariant): string {
   const hostCss =
-    variant === 'modal'
+    variant === "modal"
       ? `
     :host {
       display: none;
@@ -222,13 +260,13 @@ function buildPanelShadowCss(variant: PanelShadowVariant): string {
       display: block;
       background: #1a1a1a;
       color: #fff;
-      padding: ${variant === 'modal' ? '20px' : '16px'};
+      padding: ${variant === "modal" ? "20px" : "16px"};
       border-radius: 8px;
-      border: 1px solid ${variant === 'modal' ? '#444' : '#00bc8c'};
+      border: 1px solid ${variant === "modal" ? "#444" : "#00bc8c"};
       box-shadow: ${
-        variant === 'modal'
-          ? '0 12px 40px rgba(0, 0, 0, 0.85)'
-          : '0 0 10px rgba(0, 188, 140, 0.25)'
+        variant === "modal"
+          ? "0 12px 40px rgba(0, 0, 0, 0.85)"
+          : "0 0 10px rgba(0, 188, 140, 0.25)"
       };
       font-size: 14px;
       line-height: 1.4;
@@ -258,6 +296,10 @@ function buildPanelShadowCss(variant: PanelShadowVariant): string {
       margin: 6px 0 6px 8px;
       color: #fff !important;
       line-height: 1.4;
+    }
+    .ao-panel .ao-artifact-tip {
+      border-bottom: 1px dotted #00bc8c;
+      cursor: help;
     }
     .ao-muted {
       color: #aaa !important;
@@ -660,9 +702,9 @@ function buildPanelShadowCss(variant: PanelShadowVariant): string {
 }
 
 export function buildModalShadowCss(): string {
-  return buildPanelShadowCss('modal');
+  return buildPanelShadowCss("modal");
 }
 
 export function buildInlineShadowCss(): string {
-  return buildPanelShadowCss('inline');
+  return buildPanelShadowCss("inline");
 }

@@ -46,6 +46,11 @@ import {
   warmNotificationSchedule,
   type GatheredData,
 } from "./gather";
+import {
+  bindArtifactTips,
+  hideArtifactTip,
+  wrapArtifactNames,
+} from "./artifactTip";
 import { comboLabel, escapeHtml } from "./loadoutPlan";
 import {
   bindVaultDiscountActions,
@@ -106,6 +111,7 @@ function setOptimizerModalOpen(isOpen: boolean): void {
   } else {
     modal.style.setProperty("display", "none", "important");
     backdrop.style.setProperty("display", "none", "important");
+    hideArtifactTip();
   }
 }
 
@@ -168,6 +174,7 @@ function bindModalEvents(
 ): void {
   let cache = initial;
   const tree = (): ParentNode => modalTree(modal);
+  bindArtifactTips(modal.shadowRoot ?? modal);
 
   const paint = (
     data: Awaited<ReturnType<typeof gatherData>>,
@@ -178,6 +185,7 @@ function bindModalEvents(
     if (!body) {
       return;
     }
+    hideArtifactTip();
     body.innerHTML = renderResultBody(
       cache.result,
       cache.snapshot,
@@ -456,13 +464,15 @@ function mountInlinePanelShadow(
     <div class="ao-panel">
       ${bodyHtml}
     </div>
-  `;
+    `;
+  bindArtifactTips(shadow);
   return shadow;
 }
 
 function replaceInlinePanelBody(panel: HTMLElement, bodyHtml: string): void {
   const box = panelTree(panel).querySelector(".ao-panel");
   if (box) {
+    hideArtifactTip();
     box.innerHTML = bodyHtml;
     return;
   }
@@ -511,7 +521,7 @@ function renderShowroomPanelBody(
     <div class="ao-heading">Artifact Optimizer</div>
     ${renderCredits({ compact: true })}
     ${hydrateBanner}
-    <div class="ao-row"><strong>${summary.label}:</strong> ${comboLabel(summary.combo)}</div>
+    <div class="ao-row"><strong>${summary.label}:</strong> ${wrapArtifactNames(comboLabel(summary.combo))}</div>
     ${renderBreakdown(summary.combo)}
     ${renderVaultDiscountBlock(data.result)}
     ${renderShowroomEquipActions(data.result, {
@@ -550,9 +560,7 @@ function renderControlCenterPanelBody(
     areActionsEnabled && !summary.hideRecommendedEquip
       ? '<button type="button" id="ao-cc-equip">Equip Recommended</button>'
       : "";
-  const claimBpButton = areActionsEnabled
-    ? compactClaimAllBpButton(data)
-    : "";
+  const claimBpButton = areActionsEnabled ? compactClaimAllBpButton(data) : "";
   const actionsOffNote = areActionsEnabled
     ? ""
     : '<div class="ao-muted">Account actions are off — enable in Open Full Panel.</div>';
@@ -562,12 +570,12 @@ function renderControlCenterPanelBody(
     ${hydrateBanner}
     ${renderActionPlan(summary.todos, { allowAccountActions: areActionsEnabled })}
     ${renderSectionDivider()}
-    <div class="ao-row"><strong>${summary.label}:</strong> ${comboLabel(summary.combo)}</div>
+    <div class="ao-row"><strong>${summary.label}:</strong> ${wrapArtifactNames(comboLabel(summary.combo))}</div>
     ${renderBreakdown(summary.combo)}
     ${renderCooldownBlock(data.settings, data.snapshot?.slotLocks)}
     ${renderVaultDiscountBlock(data.result)}
     ${supplementalNotes(data.result.notes)
-      .map((note) => `<div class="ao-note">${escapeHtml(note)}</div>`)
+      .map((note) => `<div class="ao-note">${wrapArtifactNames(note)}</div>`)
       .join("")}
     ${actionsOffNote}
     <div class="ao-actions">
@@ -714,11 +722,10 @@ function renderShowroomLoadoutButton(options: {
   }
   const names = comboLabel(options.combo);
   if (options.allowAccountActions) {
-    const className =
-      options.isPrimary === true ? "" : ' class="ao-secondary"';
+    const className = options.isPrimary === true ? "" : ' class="ao-secondary"';
     return `<button type="button" id="${options.id}"${className} title="${escapeHtml(names)}">Equip ${escapeHtml(options.role)}</button>`;
   }
-  return `<button type="button" id="${options.id}" class="ao-secondary ao-loadout-preview">${escapeHtml(options.role)}: ${escapeHtml(names)}</button>`;
+  return `<button type="button" id="${options.id}" class="ao-secondary ao-loadout-preview">${escapeHtml(options.role)}: ${wrapArtifactNames(names)}</button>`;
 }
 
 function renderShowroomEquipActions(

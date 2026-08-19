@@ -12,6 +12,7 @@ import {
 } from '../remoteScrape';
 import { applySnapshotUpgrade, isArtifactsShowroomPage } from '../scraper';
 import {
+  clampUtcDailyEndBufferHours,
   getArtifactSettings,
   NOTIFICATION_TYPE_KEYS,
   parsePreferredTwitchStreamers,
@@ -86,6 +87,15 @@ export async function persistFormSettings(root: ParentNode): Promise<void> {
     patch.preferredTwitchStreamers = parsePreferredTwitchStreamers(
       twitchInput.value,
     );
+  }
+  const cutoffInput = root.querySelector<HTMLInputElement>(
+    '#ao-utc-daily-cutoff',
+  );
+  if (cutoffInput) {
+    const cutoff = Number(cutoffInput.value);
+    patch.utcDailyEndBufferHours = Number.isNaN(cutoff)
+      ? settings.utcDailyEndBufferHours
+      : clampUtcDailyEndBufferHours(cutoff);
   }
   await saveArtifactSettings(patch);
 }

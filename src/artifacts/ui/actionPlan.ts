@@ -8,16 +8,19 @@ import {
 import {
   type ActivityLoadoutStats,
   activityStatsForArtifacts,
+  canCompleteInWearWindow,
   isResetInWearWindow,
   msUntilNextSteamQuestWeek,
   type OptimizerResult,
+  type ScoredCombo,
   type UpgradeSuggestion,
 } from "../optimizer";
 import { isArtifactsShowroomPage, type OwnedArtifact } from "../scraper";
 import {
+  type ArtifactOptimizerSettings,
   COOLDOWN_MS,
   showroomCooldownRemainingMs,
-  type ArtifactOptimizerSettings,
+  utcDailyEndBufferMs,
 } from "../settings";
 import {
   type ActivityKey,
@@ -30,11 +33,12 @@ import {
   estimateNextCommunityUnlock,
   formatCommunityEta,
   formatCommunityEventArp,
-  nextLockedCommunityArpMilestone,
   hasVotedCurrentDiscordPoll,
   isActivityAvailable,
   isActivityPending,
+  nextLockedCommunityArpMilestone,
   remainingDailyQuestRows,
+  remainingSteamQuestRewards,
   remainingSteamQuestRows,
   type SiteState,
   twitchWatchRemainingMs,
@@ -45,9 +49,9 @@ import {
 } from "../siteState/battlePass";
 import { describeWaitingCommunityArpLine } from "../siteState/communityEvent";
 import { STEAM_LIBRARY_PENDING_HINT } from "../steamApp";
+import { wrapArtifactNames } from "./artifactTip";
 import {
   artifactsAfterImmediateEquip,
-  escapeHtml,
   formatMs,
   hasAnySlotOnCooldown,
   isSameLoadout,
@@ -65,9 +69,9 @@ export type ActionTone = "default" | "muted" | "warn";
  * How a step competes in the final "What to do" order.
  *
  * Sort: kind → readyAt → chain → duration → deadline slack → ARP.
- * Instant ready actions (Discord) beat long ready actions (Twitch). Among
- * scheduled steps, sooner readyAt wins (community unlock before a later
- * All-ARP% equip).
+ * Ready-now actions beat scheduled waits. Dailies delayed until a later
+ * All-ARP% equip use kind "schedule" so they sit after that equip (chain)
+ * instead of jumping to #1 when 00:00 UTC refreshes Watch Twitch.
  */
 export type ActionTodoUrgencyKind = "action" | "schedule" | "info";
 
@@ -75,6 +79,8 @@ export type ActionTodoUrgencyKind = "action" | "schedule" | "info";
  * Soft dependency relative to an equip/swap step.
  */
 export type ActionTodoChain = "before" | "equip" | "after";
+
+type LoadoutLike = ActivityLoadoutStats | ScoredCombo | undefined;
 
 export interface ActionTodoUrgency {
   kind: ActionTodoUrgencyKind;
@@ -264,6 +270,92 @@ const ACTIVITY_TODO_RULES: readonly ActivityTodoRule[] = [
     isDue: (caps) => isActivityAvailable(caps, "timeOnSite"),
   },
 ];
+
+const UTC_DAILY_KEYS: ReadonlySet<ActivityKey> = new Set([
+  "watchTwitch",
+  "dailyQuests",
+  "timeOnSite",
+]);
+const TIME_ON_SITE_DURATION_MS = BASE_ACTIVITY.timeOnSiteBasePerDay * 60_000;
+const STEAM_WEEK_MS = 7 * 86_400_000;
+
+function isUtcDailyActivity(key: ActivityKey): boolean {
+  return UTC_DAILY_KEYS.has(key);
+}
+
+function activityDurationMs(
+  key: ActivityKey,
+  watchRemainingMs: number,
+): number {
+  if (key === "watchTwitch") {
+    return Math.max(0, watchRemainingMs);
+  }
+  if (key === "timeOnSite") {
+    return TIME_ON_SITE_DURATION_MS;
+  }
+  return 0;
+}
+
+function twitchFullDayMs(
+  stats: LoadoutLike | undefined,
+  siteState: SiteState,
+): number {
+  const cap =
+    siteState.watchTwitch?.capArp ?? BASE_ACTIVITY.watchTwitchBasePerDay;
+  const flat = comboBonusForActivity(stats, "watchTwitch");
+  return (cap + flat) * 60_000;
+}
+
+function loadoutStats(combo: LoadoutLike): ActivityLoadoutStats | undefined {
+  if (!combo) {
+    return undefined;
+  }
+  if ("artifacts" in combo && combo.artifacts.length > 0) {
+    return activityStatsForArtifacts(combo.artifacts);
+  }
+  if ("timeOnSiteFlat" in combo) {
+    return combo;
+  }
+  return undefined;
+}
+
+type PlannedWear = {
+  stats: ActivityLoadoutStats;
+  waitMs: number;
+};
+
+function plannedWearForResets(
+  result: OptimizerResult,
+  swapWaitMs: number,
+): PlannedWear | undefined {
+  const deferred = result.deferredAllArp;
+  if (deferred && deferred.waitMs > 0 && deferred.artifacts.length > 0) {
+    return {
+      stats: activityStatsForArtifacts(deferred.artifacts),
+      waitMs: deferred.waitMs,
+    };
+  }
+  const steam = result.deferredSteam;
+  if (steam && steam.artifacts.length > 0) {
+    return {
+      stats: activityStatsForArtifacts(steam.artifacts),
+      waitMs: steam.waitMs,
+    };
+  }
+  const best = result.best;
+  const current = result.current;
+  if (
+    best &&
+    (best.allArpPct ?? 0) > (current?.allArpPct ?? 0) &&
+    swapWaitMs > 0
+  ) {
+    return {
+      stats: activityStatsForArtifacts(best.artifacts),
+      waitMs: swapWaitMs,
+    };
+  }
+  return undefined;
+}
 
 function isActivityEnabled(
   settings: ArtifactOptimizerSettings,
@@ -532,11 +624,7 @@ function pushBattlePassTodo(
   });
 }
 
-function comboBonusForActivity(
-  combo:
-    ActivityLoadoutStats | OptimizerResult["best"] | OptimizerResult["current"],
-  key: ActivityKey,
-): number {
+function comboBonusForActivity(combo: LoadoutLike, key: ActivityKey): number {
   if (!combo) {
     return 0;
   }
@@ -550,6 +638,9 @@ function comboBonusForActivity(
     case "discordPoll": {
       return combo.discordPollFlat;
     }
+    case "timeOnSite": {
+      return loadoutStats(combo)?.timeOnSiteFlat ?? 0;
+    }
     default: {
       return 0;
     }
@@ -562,6 +653,7 @@ function twitchActivityLabel(options: {
   phase: ActivityPhase;
   waitMs: number;
   watchRemainingMs: number;
+  utcDailyEndBufferMs: number;
 }): string {
   if (options.phase === "after" || options.phase === "afterNow") {
     return "Watch Twitch";
@@ -569,7 +661,11 @@ function twitchActivityLabel(options: {
   if (
     options.phase === "before" &&
     options.waitMs > 0 &&
-    !canFinishTwitchAfterUnlock(options.waitMs, options.watchRemainingMs)
+    !canFinishTwitchAfterUnlock(
+      options.waitMs,
+      options.watchRemainingMs,
+      options.utcDailyEndBufferMs,
+    )
   ) {
     return "Watch Twitch now";
   }
@@ -584,6 +680,7 @@ function twitchArpReason(options: {
   waitMs: number;
   watchRemainingMs: number;
   allArpPct: number;
+  upcomingReset?: "utc" | "steam";
 }): ActionTodoReason | undefined {
   const arp = Math.round(
     (options.watchRemainingMs / 60_000) * (1 + options.allArpPct),
@@ -591,9 +688,14 @@ function twitchArpReason(options: {
   if (arp <= 0) {
     return undefined;
   }
+  if (options.upcomingReset === "utc") {
+    return { text: `+${arp} ARP after 00:00 UTC` };
+  }
   if (options.phase === "after" && options.waitMs > 0) {
-    const left = formatMs(msAfterUnlockBeforeReset(options.waitMs));
-    return { text: `+${arp} ARP (fits in ${left} before reset)` };
+    const left = msAfterUnlockBeforeReset(options.waitMs);
+    if (left > 0) {
+      return { text: `+${arp} ARP (fits in ${formatMs(left)} before reset)` };
+    }
   }
   return { text: `+${arp} ARP` };
 }
@@ -683,6 +785,7 @@ function activityLabel(
     phase: ActivityPhase;
     waitMs: number;
     watchRemainingMs: number;
+    utcDailyEndBufferMs: number;
     steamQuestCount?: number;
     dailyQuestPending?: ReadonlyArray<{ kind: "daily" | "weekend" }>;
   },
@@ -723,9 +826,6 @@ function activityLabel(
   }
 }
 
-// Don't treat a razor-thin post-unlock window as enough for Twitch quests
-const TWITCH_UNLOCK_BUFFER_MS = 5 * 60 * 1000;
-
 function msAfterUnlockBeforeReset(waitMs: number, now = new Date()): number {
   return Math.max(0, msUntilUtcMidnight(now) - waitMs);
 }
@@ -733,11 +833,11 @@ function msAfterUnlockBeforeReset(waitMs: number, now = new Date()): number {
 function canFinishTwitchAfterUnlock(
   waitMs: number,
   watchRemainingMs: number,
+  bufferMs: number,
   now = new Date(),
 ): boolean {
   return (
-    msAfterUnlockBeforeReset(waitMs, now) >=
-    watchRemainingMs + TWITCH_UNLOCK_BUFFER_MS
+    Math.max(0, msUntilUtcMidnight(now) - waitMs - bufferMs) >= watchRemainingMs
   );
 }
 
@@ -746,19 +846,48 @@ function canFinishTwitchAfterUnlock(
  * Used to decide whether waiting for a swap is actually better for that task.
  */
 function activityWindowArp(
-  combo:
-    ActivityLoadoutStats | OptimizerResult["best"] | OptimizerResult["current"],
+  combo: LoadoutLike,
   key: ActivityKey,
+  siteState?: SiteState,
+  options?: { fullDay?: boolean },
 ): number {
+  const stats = loadoutStats(combo);
+  const allArpPct = stats?.allArpPct ?? combo?.allArpPct ?? 0;
   let base = 0;
   switch (key) {
     case "watchTwitch": {
-      base = BASE_ACTIVITY.watchTwitchBasePerDay;
+      base =
+        siteState === undefined || options?.fullDay === true
+          ? (siteState?.watchTwitch?.capArp ??
+              BASE_ACTIVITY.watchTwitchBasePerDay) +
+            (stats?.watchTwitchFlat ?? comboBonusForActivity(combo, key))
+          : twitchWatchRemainingMs(
+              siteState,
+              stats?.watchTwitchFlat ?? comboBonusForActivity(combo, key),
+            ) / 60_000;
       break;
     }
     case "dailyQuests": {
       base = BASE_ACTIVITY.dailyQuestBase;
       break;
+    }
+    case "timeOnSite": {
+      base = BASE_ACTIVITY.timeOnSiteBasePerDay + (stats?.timeOnSiteFlat ?? 0);
+      break;
+    }
+    case "steamQuests": {
+      const remaining = siteState
+        ? remainingSteamQuestRewards(siteState)
+        : [...BASE_ACTIVITY.steamQuestBases];
+      const bases =
+        options?.fullDay === true
+          ? [...BASE_ACTIVITY.steamQuestBases]
+          : remaining;
+      const flat = stats?.steamQuestsFlat ?? comboBonusForActivity(combo, key);
+      return (
+        (bases.reduce((sum, value) => sum + value, 0) + flat * bases.length) *
+        (1 + allArpPct)
+      );
     }
     case "discordPoll": {
       base = BASE_ACTIVITY.discordPollBase;
@@ -768,53 +897,65 @@ function activityWindowArp(
       break;
     }
   }
-  const flat = comboBonusForActivity(combo, key);
-  return (base + flat) * (1 + (combo?.allArpPct ?? 0));
+  const flat =
+    key === "watchTwitch" || key === "timeOnSite"
+      ? 0
+      : comboBonusForActivity(combo, key);
+  return (base + flat) * (1 + allArpPct);
 }
 
 function resolveUtcDailyPhase(options: {
   key: ActivityKey;
   needsSwap: boolean;
   waitMs: number;
-  canEquipBeforeReset: boolean;
   current: OptimizerResult["current"];
   best: OptimizerResult["best"];
   afterNow: ActivityLoadoutStats | undefined;
   hasImmediateEquip: boolean;
   watchRemainingMs: number;
+  siteState: SiteState;
+  plannedWear: PlannedWear | undefined;
+  utcDailyEndBufferMs: number;
 }): ActivityPhase {
   const {
     key,
     needsSwap,
     waitMs,
-    canEquipBeforeReset,
     current,
     best,
     afterNow,
     hasImmediateEquip,
     watchRemainingMs,
+    siteState,
+    plannedWear,
+    utcDailyEndBufferMs: cutoffMs,
   } = options;
-  const currentArp = activityWindowArp(current, key);
-  const afterNowArp = activityWindowArp(afterNow ?? current, key);
+  const currentArp = activityWindowArp(current, key, siteState);
+  const afterNowArp = activityWindowArp(afterNow ?? current, key, siteState);
   // Filling a free slot (or replacing a piece that doesn't help this activity)
   // doesn't cost ARP — start the 24h cooldown first, then do the daily.
   if (needsSwap && hasImmediateEquip && afterNowArp >= currentArp) {
     return "afterNow";
   }
-  const bestArp = activityWindowArp(best, key);
-  // Quests are quick: wait if the better set unlocks before midnight.
-  // Twitch waits only if the recommended set's sit (base cap + Twitch flat,
-  // 1 ARP/min) still fits before 00:00 UTC.
-  if (!needsSwap || !canEquipBeforeReset || bestArp <= currentArp) {
-    return "before";
+  const futureWaitMs = plannedWear?.waitMs ?? waitMs;
+  const futureStats = plannedWear?.stats ?? best;
+  const futureArp = activityWindowArp(futureStats, key, siteState);
+  const durationMs = activityDurationMs(key, watchRemainingMs);
+  const isFitsAfterFuture =
+    key === "watchTwitch"
+      ? canFinishTwitchAfterUnlock(futureWaitMs, watchRemainingMs, cutoffMs)
+      : canCompleteInWearWindow(
+          0,
+          msUntilUtcMidnight(),
+          futureWaitMs,
+          durationMs,
+        );
+  // Wait for All-ARP% (deferred or recommended) when that lock still covers
+  // this UTC day — repeating dailies must not beat a later one-shot multiplier.
+  if (isFitsAfterFuture && futureArp > currentArp) {
+    return "after";
   }
-  if (
-    key === "watchTwitch" &&
-    !canFinishTwitchAfterUnlock(waitMs, watchRemainingMs)
-  ) {
-    return "before";
-  }
-  return "after";
+  return "before";
 }
 
 function resolveActivityPhase(options: {
@@ -832,6 +973,9 @@ function resolveActivityPhase(options: {
   afterNow: ActivityLoadoutStats | undefined;
   hasImmediateEquip: boolean;
   watchRemainingMs: number;
+  siteState: SiteState;
+  plannedWear: PlannedWear | undefined;
+  utcDailyEndBufferMs: number;
 }): ActivityPhase {
   const {
     key,
@@ -848,6 +992,9 @@ function resolveActivityPhase(options: {
     afterNow,
     hasImmediateEquip,
     watchRemainingMs,
+    siteState,
+    plannedWear,
+    utcDailyEndBufferMs: cutoffMs,
   } = options;
 
   if (isUtcDaily) {
@@ -855,13 +1002,30 @@ function resolveActivityPhase(options: {
       key,
       needsSwap,
       waitMs,
-      canEquipBeforeReset,
       current,
       best,
       afterNow,
       hasImmediateEquip,
       watchRemainingMs,
+      siteState,
+      plannedWear,
+      utcDailyEndBufferMs: cutoffMs,
     });
+  }
+
+  if (
+    key === "steamQuests" &&
+    plannedWear &&
+    activityWindowArp(plannedWear.stats, key, siteState) >
+      activityWindowArp(current, key, siteState) &&
+    canCompleteInWearWindow(
+      0,
+      msUntilNextSteamQuestWeek(),
+      plannedWear.waitMs,
+      0,
+    )
+  ) {
+    return "after";
   }
 
   if (!needsSwap) {
@@ -897,9 +1061,10 @@ function allArpPctForPhase(
   current: OptimizerResult["current"],
   best: OptimizerResult["best"],
   afterNow: ActivityLoadoutStats | undefined,
+  plannedWear?: PlannedWear,
 ): number {
   if (phase === "after") {
-    return best?.allArpPct ?? 0;
+    return plannedWear?.stats.allArpPct ?? best?.allArpPct ?? 0;
   }
   if (phase === "afterNow") {
     return afterNow?.allArpPct ?? current?.allArpPct ?? 0;
@@ -925,6 +1090,24 @@ function bonusForActivityPhase(
   return 0;
 }
 
+function activityTodoArp(options: {
+  key: ActivityKey;
+  bonusForText: number;
+  allArpPct: number;
+  twitchArp: number;
+}): number {
+  const { key, bonusForText, allArpPct, twitchArp } = options;
+  if (key === "watchTwitch") {
+    return twitchArp;
+  }
+  if (key === "timeOnSite") {
+    return Math.round(
+      (BASE_ACTIVITY.timeOnSiteBasePerDay + bonusForText) * (1 + allArpPct),
+    );
+  }
+  return bonusForText;
+}
+
 function activityTodoUrgency(options: {
   key: ActivityKey;
   phase: ActivityPhase;
@@ -943,16 +1126,22 @@ function activityTodoUrgency(options: {
     bonusForText,
     allArpPct,
   } = options;
+  const readyAtMs = phase === "after" ? waitMs : 0;
   const twitchArp =
     key === "watchTwitch"
       ? Math.round((Math.max(0, watchRemainingMs) / 60_000) * (1 + allArpPct))
       : 0;
   return actionUrgency({
-    kind: "action",
-    readyAtMs: phase === "after" ? waitMs : 0,
-    durationMs: key === "watchTwitch" ? Math.max(0, watchRemainingMs) : 0,
+    kind: readyAtMs > 0 ? "schedule" : "action",
+    readyAtMs,
+    durationMs: activityDurationMs(key, watchRemainingMs),
     ...(isUtcDaily && { deadlineMs: msUntilUtcMidnight() }),
-    arp: key === "watchTwitch" ? twitchArp : bonusForText,
+    arp: activityTodoArp({
+      key,
+      bonusForText,
+      allArpPct,
+      twitchArp,
+    }),
     chain: phaseChain(phase),
   });
 }
@@ -989,6 +1178,51 @@ function dailyQuestsTodoExtras(siteState: SiteState): {
   return { pending };
 }
 
+function activityTodoReasons(options: {
+  key: ActivityKey;
+  phase: ActivityPhase;
+  waitMs: number;
+  watchRemainingMs: number;
+  allArpPct: number;
+  upcomingReset?: "utc" | "steam";
+  steamQuests?: { reasons?: ActionTodoReason[] };
+  dailyQuests?: { reasons?: ActionTodoReason[] };
+}): ActionTodoReason[] | undefined {
+  const {
+    key,
+    phase,
+    waitMs,
+    watchRemainingMs,
+    allArpPct,
+    upcomingReset,
+    steamQuests,
+    dailyQuests,
+  } = options;
+  const reasons: ActionTodoReason[] = [];
+  if (key === "watchTwitch") {
+    const twitchReason = twitchArpReason({
+      phase,
+      waitMs,
+      watchRemainingMs,
+      allArpPct,
+      ...(upcomingReset && { upcomingReset }),
+    });
+    if (twitchReason) {
+      reasons.push(twitchReason);
+    }
+  } else if (steamQuests?.reasons) {
+    reasons.push(...steamQuests.reasons);
+  } else if (dailyQuests?.reasons) {
+    reasons.push(...dailyQuests.reasons);
+  }
+  if (upcomingReset === "steam") {
+    reasons.push({ text: "after Monday 00:00 UTC reset" });
+  } else if (upcomingReset === "utc" && key !== "watchTwitch") {
+    reasons.push({ text: "after 00:00 UTC reset" });
+  }
+  return reasons.length > 0 ? reasons : undefined;
+}
+
 function buildActivityTodo(options: {
   key: ActivityKey;
   phase: ActivityPhase;
@@ -1001,6 +1235,8 @@ function buildActivityTodo(options: {
   watchRemainingMs: number;
   allArpPct: number;
   siteState: SiteState;
+  utcDailyEndBufferMs: number;
+  upcomingReset?: "utc" | "steam";
 }): ActionTodo {
   const {
     key,
@@ -1014,6 +1250,8 @@ function buildActivityTodo(options: {
     watchRemainingMs,
     allArpPct,
     siteState,
+    utcDailyEndBufferMs: cutoffMs,
+    upcomingReset,
   } = options;
   const bonusForText = bonusForActivityPhase(
     phase,
@@ -1030,10 +1268,11 @@ function buildActivityTodo(options: {
   const todo: ActionTodo = {
     text: activityLabel(key, bonusForText, {
       beforeSwap: phase === "before" && needsSwap && currentBonus > 0,
-      utcDeadline: isUtcDaily,
+      utcDeadline: isUtcDaily && upcomingReset === undefined,
       phase,
       waitMs,
       watchRemainingMs,
+      utcDailyEndBufferMs: cutoffMs,
       ...(steamQuests && { steamQuestCount: steamQuests.count }),
       ...(dailyQuests && { dailyQuestPending: dailyQuests.pending }),
     }),
@@ -1042,30 +1281,33 @@ function buildActivityTodo(options: {
       phase,
       waitMs,
       watchRemainingMs,
-      isUtcDaily,
+      isUtcDaily: isUtcDaily && upcomingReset === undefined,
       bonusForText,
       allArpPct,
     }),
   };
 
-  if (key === "watchTwitch") {
+  const reasons = activityTodoReasons({
+    key,
+    phase,
+    waitMs,
+    watchRemainingMs,
+    allArpPct,
+    ...(upcomingReset && { upcomingReset }),
+    ...(steamQuests && { steamQuests }),
+    ...(dailyQuests && { dailyQuests }),
+  });
+  if (reasons) {
+    todo.reasons = reasons;
+  }
+  if (key === "watchTwitch" && upcomingReset === undefined) {
     todo.openTwitchStream = true;
-    const twitchReason = twitchArpReason({
-      phase,
-      waitMs,
-      watchRemainingMs,
-      allArpPct,
-    });
-    if (twitchReason) {
-      todo.reasons = [twitchReason];
-    }
-  } else if (steamQuests?.reasons) {
-    todo.reasons = steamQuests.reasons;
-  } else if (dailyQuests?.reasons) {
-    todo.reasons = dailyQuests.reasons;
   }
 
-  const isUtcUrgent = isUtcDaily && msUntilUtcMidnight() <= 2 * 3_600_000;
+  const isUtcUrgent =
+    isUtcDaily &&
+    upcomingReset === undefined &&
+    msUntilUtcMidnight() <= 2 * 3_600_000;
   if (isUtcUrgent) {
     todo.tone = "warn";
   }
@@ -1127,6 +1369,216 @@ function sortTodosByUtcDeadline(items: ActionTodo[]): ActionTodo[] {
  * set is better for. UTC-deadline dailies that expire before slots unlock
  * must be done now even if the bonus isn't optimal.
  */
+function upcomingResetAtMs(
+  key: ActivityKey,
+  siteState: SiteState,
+  plannedWear: PlannedWear | undefined,
+  isTodayDue: boolean,
+): number | undefined {
+  if (!plannedWear || isTodayDue) {
+    return undefined;
+  }
+  if (key === "steamQuests") {
+    if (isActivityPending(siteState.caps, "steamQuests")) {
+      return undefined;
+    }
+    const monday = msUntilNextSteamQuestWeek();
+    if (
+      !canCompleteInWearWindow(
+        monday,
+        monday + STEAM_WEEK_MS,
+        plannedWear.waitMs,
+        0,
+      )
+    ) {
+      return undefined;
+    }
+    return monday;
+  }
+  if (!isUtcDailyActivity(key)) {
+    return undefined;
+  }
+  const midnight = msUntilUtcMidnight();
+  const duration =
+    key === "watchTwitch"
+      ? twitchFullDayMs(plannedWear.stats, siteState)
+      : activityDurationMs(key, 0);
+  if (
+    !canCompleteInWearWindow(
+      midnight,
+      midnight + 86_400_000,
+      plannedWear.waitMs,
+      duration,
+    )
+  ) {
+    return undefined;
+  }
+  return midnight;
+}
+
+function waitMsForActivityPhase(
+  phase: ActivityPhase,
+  delayWaitMs: number,
+  waitMs: number,
+): number {
+  if (phase === "afterNow") {
+    return 0;
+  }
+  if (phase === "after") {
+    return delayWaitMs;
+  }
+  return waitMs;
+}
+
+function appendDueActivityTodo(options: {
+  buckets: {
+    beforeSwap: ActionTodo[];
+    afterNow: ActionTodo[];
+    afterSwap: ActionTodo[];
+    other: ActionTodo[];
+  };
+  rule: ActivityTodoRule;
+  needsSwap: boolean;
+  current: OptimizerResult["current"];
+  best: OptimizerResult["best"];
+  afterNow: ActivityLoadoutStats | undefined;
+  hasImmediateEquip: boolean;
+  watchAfterMs: number;
+  siteState: SiteState;
+  plannedWear: PlannedWear | undefined;
+  currentBonus: number;
+  bestBonus: number;
+  afterNowBonus: number;
+  isUtcDaily: boolean;
+  delayWaitMs: number;
+  waitMs: number;
+  isExpiresBeforeUnlock: boolean;
+  utcDailyEndBufferMs: number;
+}): void {
+  const {
+    buckets,
+    rule,
+    needsSwap,
+    current,
+    best,
+    afterNow,
+    hasImmediateEquip,
+    watchAfterMs,
+    siteState,
+    plannedWear,
+    currentBonus,
+    bestBonus,
+    afterNowBonus,
+    isUtcDaily,
+    delayWaitMs,
+    waitMs,
+    isExpiresBeforeUnlock,
+    utcDailyEndBufferMs: cutoffMs,
+  } = options;
+  const phase = resolveActivityPhase({
+    key: rule.key,
+    needsSwap,
+    expiresBeforeUnlock: isExpiresBeforeUnlock,
+    currentBonus,
+    bestBonus,
+    afterNowBonus,
+    waitMs: delayWaitMs,
+    canEquipBeforeReset: delayWaitMs <= msUntilUtcMidnight(),
+    isUtcDaily,
+    current,
+    best,
+    afterNow,
+    hasImmediateEquip,
+    watchRemainingMs: watchAfterMs,
+    siteState,
+    plannedWear,
+    utcDailyEndBufferMs: cutoffMs,
+  });
+  const watchRemainingMs =
+    rule.key === "watchTwitch"
+      ? twitchWatchRemainingMs(
+          siteState,
+          bonusForActivityPhase(phase, currentBonus, bestBonus, afterNowBonus),
+        )
+      : watchAfterMs;
+  pushTodoByPhase(
+    buckets,
+    phase,
+    buildActivityTodo({
+      key: rule.key,
+      phase,
+      needsSwap,
+      currentBonus,
+      bestBonus,
+      afterNowBonus,
+      isUtcDaily,
+      waitMs: waitMsForActivityPhase(phase, delayWaitMs, waitMs),
+      watchRemainingMs,
+      allArpPct: allArpPctForPhase(phase, current, best, afterNow, plannedWear),
+      siteState,
+      utcDailyEndBufferMs: cutoffMs,
+    }),
+  );
+}
+
+function appendUpcomingActivityTodo(options: {
+  buckets: {
+    beforeSwap: ActionTodo[];
+    afterNow: ActionTodo[];
+    afterSwap: ActionTodo[];
+    other: ActionTodo[];
+  };
+  rule: ActivityTodoRule;
+  needsSwap: boolean;
+  plannedWear: PlannedWear;
+  upcomingAt: number;
+  currentBonus: number;
+  bestBonus: number;
+  afterNowBonus: number;
+  isUtcDaily: boolean;
+  watchAfterMs: number;
+  siteState: SiteState;
+  utcDailyEndBufferMs: number;
+}): void {
+  const {
+    buckets,
+    rule,
+    needsSwap,
+    plannedWear,
+    upcomingAt,
+    currentBonus,
+    bestBonus,
+    afterNowBonus,
+    isUtcDaily,
+    watchAfterMs,
+    siteState,
+    utcDailyEndBufferMs: cutoffMs,
+  } = options;
+  const upcomingWatchMs =
+    rule.key === "watchTwitch"
+      ? twitchFullDayMs(plannedWear.stats, siteState)
+      : watchAfterMs;
+  pushTodoByPhase(
+    buckets,
+    "after",
+    buildActivityTodo({
+      key: rule.key,
+      phase: "after",
+      needsSwap,
+      currentBonus,
+      bestBonus,
+      afterNowBonus,
+      isUtcDaily,
+      waitMs: Math.max(upcomingAt, plannedWear.waitMs),
+      watchRemainingMs: upcomingWatchMs,
+      allArpPct: plannedWear.stats.allArpPct,
+      siteState,
+      utcDailyEndBufferMs: cutoffMs,
+      upcomingReset: rule.key === "steamQuests" ? "steam" : "utc",
+    }),
+  );
+}
+
 function isSequencedActivityDue(
   rule: ActivityTodoRule,
   settings: ArtifactOptimizerSettings,
@@ -1171,7 +1623,8 @@ function buildSequencedActivityTodos(
     ? planLoadoutChanges(best.artifacts, current, settings, result.slotLocks)
     : undefined;
   const waitMs = plan?.waitMs ?? fallbackWaitMs;
-  const canEquipBeforeReset = waitMs <= msUntilUtcMidnight();
+  const cutoffMs = utcDailyEndBufferMs(settings);
+  const plannedWear = plannedWearForResets(result, waitMs);
   const hasImmediateEquip = (plan?.now.length ?? 0) > 0;
   const afterNow =
     best && plan
@@ -1183,66 +1636,80 @@ function buildSequencedActivityTodos(
     comboBonusForActivity(current, "watchTwitch"),
     comboBonusForActivity(afterNow ?? current, "watchTwitch"),
     comboBonusForActivity(best, "watchTwitch"),
+    comboBonusForActivity(plannedWear?.stats, "watchTwitch"),
   );
   const watchAfterMs = twitchWatchRemainingMs(siteState, twitchFlatForDue);
 
   for (const rule of ACTIVITY_TODO_RULES) {
-    if (!isSequencedActivityDue(rule, settings, siteState, watchAfterMs)) {
+    if (!isActivityEnabled(settings, rule.key)) {
+      continue;
+    }
+    const isTodayDue = isSequencedActivityDue(
+      rule,
+      settings,
+      siteState,
+      watchAfterMs,
+    );
+    const upcomingAt = upcomingResetAtMs(
+      rule.key,
+      siteState,
+      plannedWear,
+      isTodayDue,
+    );
+    if (!isTodayDue && upcomingAt === undefined) {
       continue;
     }
 
     const currentBonus = comboBonusForActivity(current, rule.key);
-    const bestBonus = comboBonusForActivity(best, rule.key);
+    const bestBonus = comboBonusForActivity(
+      plannedWear?.stats ?? best,
+      rule.key,
+    );
     const afterNowBonus = comboBonusForActivity(afterNow ?? current, rule.key);
-    const isUtcDaily = ["watchTwitch", "dailyQuests"].includes(rule.key);
+    const isUtcDaily = isUtcDailyActivity(rule.key);
+    const delayWaitMs = plannedWear?.waitMs ?? waitMs;
     const isExpiresBeforeUnlock =
-      isUtcDaily && !canEquipBeforeReset && waitMs > 0;
-    const phase = resolveActivityPhase({
-      key: rule.key,
-      needsSwap,
-      expiresBeforeUnlock: isExpiresBeforeUnlock,
-      currentBonus,
-      bestBonus,
-      afterNowBonus,
-      waitMs,
-      canEquipBeforeReset,
-      isUtcDaily,
-      current,
-      best,
-      afterNow,
-      hasImmediateEquip,
-      watchRemainingMs: watchAfterMs,
-    });
-    const watchRemainingMs =
-      rule.key === "watchTwitch"
-        ? twitchWatchRemainingMs(
-            siteState,
-            bonusForActivityPhase(
-              phase,
-              currentBonus,
-              bestBonus,
-              afterNowBonus,
-            ),
-          )
-        : watchAfterMs;
+      isUtcDaily && delayWaitMs > msUntilUtcMidnight() && delayWaitMs > 0;
 
-    pushTodoByPhase(
-      buckets,
-      phase,
-      buildActivityTodo({
-        key: rule.key,
-        phase,
+    if (isTodayDue) {
+      appendDueActivityTodo({
+        buckets,
+        rule,
         needsSwap,
+        current,
+        best,
+        afterNow,
+        hasImmediateEquip,
+        watchAfterMs,
+        siteState,
+        plannedWear,
         currentBonus,
         bestBonus,
         afterNowBonus,
         isUtcDaily,
-        waitMs: phase === "afterNow" ? 0 : waitMs,
-        watchRemainingMs,
-        allArpPct: allArpPctForPhase(phase, current, best, afterNow),
+        delayWaitMs,
+        waitMs,
+        isExpiresBeforeUnlock,
+        utcDailyEndBufferMs: cutoffMs,
+      });
+    }
+
+    if (upcomingAt !== undefined && plannedWear) {
+      appendUpcomingActivityTodo({
+        buckets,
+        rule,
+        needsSwap,
+        plannedWear,
+        upcomingAt,
+        currentBonus,
+        bestBonus,
+        afterNowBonus,
+        isUtcDaily,
+        watchAfterMs,
         siteState,
-      }),
-    );
+        utcDailyEndBufferMs: cutoffMs,
+      });
+    }
   }
 
   pushCommunityEventTodo(
@@ -1405,6 +1872,29 @@ function buildEquipTodo(options: {
   return todo;
 }
 
+function deferredSteamTodo(
+  deferred: NonNullable<OptimizerResult["deferredSteam"]>,
+  siteState: SiteState,
+): ActionTodo {
+  const { waitMs, artifacts } = deferred;
+  const headline =
+    waitMs > 0
+      ? `Equip Steam Quests set in ${formatMs(waitMs)}`
+      : "Equip Steam Quests set now";
+  return buildEquipTodo({
+    headline,
+    loadout: loadoutLabel(artifacts),
+    reasons: collectEquipReasons(siteState, waitMs, artifacts),
+    urgency: actionUrgency({
+      kind: waitMs > 0 ? "schedule" : "action",
+      readyAtMs: waitMs,
+      durationMs: 0,
+      deadlineMs: msUntilNextSteamQuestWeek(),
+      chain: "equip",
+    }),
+  });
+}
+
 function deferredAllArpTodo(
   deferred: NonNullable<OptimizerResult["deferredAllArp"]>,
 ): ActionTodo {
@@ -1543,9 +2033,7 @@ function battlePassAllArpSchedule(options: {
     deferred === undefined &&
     (artifacts !== undefined || options.result.hasAllArpOwned === true);
   const hasScheduledAllArp =
-    options.hasPlannedAllArp ||
-    deferred !== undefined ||
-    shouldAddEquipTodo;
+    options.hasPlannedAllArp || deferred !== undefined || shouldAddEquipTodo;
 
   if (options.hasPlannedAllArp) {
     return {
@@ -1578,8 +2066,7 @@ function battlePassAllArpSchedule(options: {
     return {
       hasScheduledAllArp,
       readyAtMs:
-        (options.plan?.waitMs ?? 0) +
-        (options.isNeedsSwap ? COOLDOWN_MS : 0),
+        (options.plan?.waitMs ?? 0) + (options.isNeedsSwap ? COOLDOWN_MS : 0),
       shouldAddEquipTodo,
     };
   }
@@ -1674,6 +2161,38 @@ function pushAllArpGuardTodos(
     isLocked,
     options.hasDeferredAllArp === true,
   );
+}
+
+function pushScheduledAllArpTodos(
+  todos: ActionTodo[],
+  result: OptimizerResult,
+  settings: ArtifactOptimizerSettings,
+  siteState: SiteState,
+  plan: LoadoutChangePlan | undefined,
+  isNeedsSwap: boolean,
+  shouldAddBattlePassEquip: boolean,
+): void {
+  const deferredAllArp = result.deferredAllArp;
+  if (
+    deferredAllArp &&
+    !isSameLoadout(result.best?.artifacts ?? [], deferredAllArp.artifacts)
+  ) {
+    todos.push(deferredAllArpTodo(deferredAllArp));
+    return;
+  }
+  if (deferredAllArp || !shouldAddBattlePassEquip) {
+    return;
+  }
+  const allArpTodo = battlePassAllArpEquipTodo({
+    result,
+    settings,
+    siteState,
+    plan,
+    isNeedsSwap,
+  });
+  if (allArpTodo) {
+    todos.push(allArpTodo);
+  }
 }
 
 function nowEquipHeadline(plan: LoadoutChangePlan): string {
@@ -2275,6 +2794,10 @@ export function buildActionPlan(
     hasScheduledAllArp,
   });
 
+  if (result.deferredSteam) {
+    todos.push(deferredSteamTodo(result.deferredSteam, siteState));
+  }
+
   // Claim BP when All-ARP% is already on, or after a swap that was planned
   // for something else (community / recommended All-ARP%). Don't swap onto
   // All-ARP% just for a boost unless that lock strictly nets more ARP.
@@ -2297,20 +2820,15 @@ export function buildActionPlan(
   // 3) Activities that prefer the recommended set (after swap / unlock).
   pushAfterSwapTodos(todos, sequenced, discord, isNeedsSwap);
 
-  if (deferredAllArp) {
-    todos.push(deferredAllArpTodo(deferredAllArp));
-  } else if (allArpSchedule.shouldAddEquipTodo) {
-    const allArpTodo = battlePassAllArpEquipTodo({
-      result,
-      settings,
-      siteState,
-      plan,
-      isNeedsSwap,
-    });
-    if (allArpTodo) {
-      todos.push(allArpTodo);
-    }
-  }
+  pushScheduledAllArpTodos(
+    todos,
+    result,
+    settings,
+    siteState,
+    plan,
+    isNeedsSwap,
+    allArpSchedule.shouldAddEquipTodo,
+  );
 
   if (todos.length === 0) {
     return [
@@ -2341,20 +2859,20 @@ function actionTodoToneClass(tone: ActionTodo["tone"]): string {
 
 function renderActionTodoBody(todo: ActionTodo): string {
   const parts = [
-    `<span class="ao-todo-headline">${escapeHtml(todo.text)}</span>`,
+    `<span class="ao-todo-headline">${wrapArtifactNames(todo.text)}</span>`,
   ];
   if (todo.loadout) {
     parts.push(
-      `<span class="ao-todo-loadout">${escapeHtml(todo.loadout)}</span>`,
+      `<span class="ao-todo-loadout">${wrapArtifactNames(todo.loadout)}</span>`,
     );
   }
   if (todo.reasons && todo.reasons.length > 0) {
     const items = todo.reasons
       .map((reason) => {
         const detail = reason.detail
-          ? `<div class="ao-todo-reason-detail">${escapeHtml(reason.detail)}</div>`
+          ? `<div class="ao-todo-reason-detail">${wrapArtifactNames(reason.detail)}</div>`
           : "";
-        return `<li><div class="ao-todo-reason-text">${escapeHtml(reason.text)}</div>${detail}</li>`;
+        return `<li><div class="ao-todo-reason-text">${wrapArtifactNames(reason.text)}</div>${detail}</li>`;
       })
       .join("");
     parts.push(`<ul class="ao-todo-reasons">${items}</ul>`);

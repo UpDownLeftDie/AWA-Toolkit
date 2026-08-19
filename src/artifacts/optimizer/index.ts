@@ -15,6 +15,7 @@ import {
   hasAllArpEffect,
   hasInventoryAllArp,
   resolveDeferredAllArp,
+  resolveDeferredSteam,
   shouldDeferBattlePassForContext,
   suggestDailySwap,
   suggestUpgrades,
@@ -87,6 +88,7 @@ export function optimize(context: OptimizerContext): OptimizerResult {
   }
 
   const deferredAllArp = resolveDeferredAllArp(owned, context);
+  const deferredSteam = resolveDeferredSteam(owned, context, best);
   const shouldDeferBattlePassClaims = shouldDeferBattlePassForContext(context);
   const isDedicatedLockWorthIt = isAllArpLockWorthBattlePassBoost(
     best,
@@ -119,6 +121,9 @@ export function optimize(context: OptimizerContext): OptimizerResult {
   if (deferredAllArp) {
     result.deferredAllArp = deferredAllArp;
   }
+  if (deferredSteam) {
+    result.deferredSteam = deferredSteam;
+  }
   if (marketDiscountLoadout) {
     result.marketDiscountLoadout = marketDiscountLoadout;
   }
@@ -135,8 +140,12 @@ export type { ActivityLoadoutStats } from './bonuses';
 export { activityStatsForArtifacts } from './bonuses';
 export {
   buildContext,
+  canCompleteInWearWindow,
+  canCompleteOutsideWearWindow,
+  completableUtcDayStarts,
   isResetInWearWindow,
   msUntilNextSteamQuestWeek,
+  UTC_DAILY_END_BUFFER_MS,
 } from './context';
 export { describeArtifact } from './notes';
 export { scoreCombo } from './scoring';

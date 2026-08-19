@@ -2,6 +2,7 @@ import {
   ARTIFACT_SETS,
   ArtifactEffectType,
   ArtifactTier,
+  BASE_ACTIVITY,
   displayNameFor,
   fragmentCostToUpgradeFrom,
   getArtifactById,
@@ -13,7 +14,8 @@ import {
 } from '../data';
 import type { OwnedArtifact } from '../scraper';
 import {
-  showroomCooldownRemainingMs,
+  COOLDOWN_MS,
+  utcDailyEndBufferMs,
   type ArtifactOptimizerSettings,
   type ArtifactSlotPosition,
 } from '../settings';
@@ -22,19 +24,29 @@ import {
   battlePassRemainingMs,
   canEarnCommunityEventArp,
   estimateCommunityUnlockAt,
+  isActivityAvailable,
+  isActivityPending,
+  scrapedRemainingSteamQuestRewards,
+  twitchWatchRemainingMs,
   waitingCommunityMilestones,
   type SiteState,
 } from '../siteState';
-import { collectBonuses } from './bonuses';
+import { collectBonuses, type BonusBuckets } from './bonuses';
 import {
+  canCompleteInWearWindow,
+  canCompleteOutsideWearWindow,
   combinations,
   combinationsWithPinned,
+  comboEquipWaitMs,
   currentLoadout,
   isSameLoadout,
+  isWeeklyForcedIntoLock,
+  msUntilNextSteamQuestWeek,
+  msUntilNextUtcMidnight,
   pinnedEquippedArtifacts,
   resolveOwnedList,
 } from './context';
-import { scoreCombo } from './scoring';
+import { communityEventArpInSwapWindow, scoreCombo } from './scoring';
 import type {
   OptimizerContext,
   OptimizerResult,
@@ -215,12 +227,262 @@ export function findBestCombo(
       return frozen;
     }
   }
-  return findBestComboBy(
+  const best = findBestComboBy(
     owned,
     context,
     (combo) => combo.weeklyArp,
     () => true,
   );
+  const equipped = currentLoadout(owned);
+  if (
+    best &&
+    best.allArpPct > 0 &&
+    !isSameLoadout(best.artifacts, equipped)
+  ) {
+    const waitMs = comboEquipWaitMs(
+      best.artifacts,
+      owned,
+      context.settings,
+      context.snapshot.slotLocks,
+    );
+    if (
+      waitMs > 0 &&
+      !isAllArpWorthTheLock(best.artifacts, owned, context, waitMs)
+    ) {
+      return findBestComboBy(
+        owned,
+        context,
+        (combo) => combo.weeklyArp,
+        (combo) =>
+          combo.allArpPct <= 0 || isSameLoadout(combo.artifacts, equipped),
+      );
+    }
+  }
+  return best;
+}
+
+/**
+ * True when an All-ARP% lock starting at `waitMs` nets more lifetime ARP than
+ * keeping the best flat set.
+ *
+ * Twitch/ToS/dailies that still fit outside the lock (before equip or after
+ * the 24h cooldown, by the user's UTC cutoff) are not a cost — do those on
+ * the flat set. Calendar auto-claims at 00:00 UTC on whatever is equipped, so
+ * a midnight inside the lock is forced. Community extra is lump × All-ARP%.
+ */
+export function isAllArpWorthTheLock(
+  allArpArtifacts: OwnedArtifact[],
+  owned: OwnedArtifact[],
+  context: OptimizerContext,
+  waitMs: number,
+): boolean {
+  const allArpBonuses = collectBonuses(allArpArtifacts);
+  const alternative = bestFlatBonusesForLock(owned, context, waitMs);
+  if (!alternative) {
+    return true;
+  }
+  const lump = communityEventArpInSwapWindow(context.siteState, waitMs);
+  const lumpExtra = lump * allArpBonuses.allArpPct;
+  const forcedDelta = forcedDailyArpDelta(
+    context.siteState,
+    waitMs,
+    allArpBonuses,
+    alternative,
+    utcDailyEndBufferMs(context.settings),
+  );
+  return lumpExtra + forcedDelta > 0;
+}
+
+function bestFlatBonusesForLock(
+  owned: OwnedArtifact[],
+  context: OptimizerContext,
+  waitMs: number,
+): BonusBuckets | undefined {
+  const size = Math.min(3, owned.length);
+  const pinned = pinnedEquippedArtifacts(
+    owned,
+    context.settings,
+    context.siteState,
+    context.snapshot.slotLocks,
+  );
+  let best: BonusBuckets | undefined;
+  let bestArp = Number.NEGATIVE_INFINITY;
+  const consider = (combo: OwnedArtifact[]): void => {
+    const bonuses = collectBonuses(combo);
+    if (bonuses.allArpPct > 0) {
+      return;
+    }
+    const scored = scoreCombo(combo, context, waitMs).weeklyArp;
+    if (!best || scored > bestArp) {
+      best = bonuses;
+      bestArp = scored;
+    }
+  };
+  for (const combo of combinationsWithPinned(owned, size, pinned)) {
+    consider(combo);
+  }
+  const equipped = currentLoadout(owned);
+  if (equipped.length > 0) {
+    consider(equipped);
+  }
+  return best;
+}
+
+const MS_PER_DAY = 86_400_000;
+const TWITCH_MS_PER_ARP = 60_000;
+const TIME_ON_SITE_DURATION_MS = BASE_ACTIVITY.timeOnSiteBasePerDay * 60_000;
+
+function utcDayBounds(
+  dayStartMs: number,
+  midnight: number,
+): { fromMs: number; untilMs: number } {
+  if (dayStartMs <= 0) {
+    return { fromMs: 0, untilMs: midnight };
+  }
+  return { fromMs: dayStartMs, untilMs: dayStartMs + MS_PER_DAY };
+}
+
+function isAutoClaimForcedIntoLock(dayStartMs: number, waitMs: number): boolean {
+  return dayStartMs > waitMs && dayStartMs <= waitMs + COOLDOWN_MS;
+}
+
+function isTimedDailyForcedIntoLock(
+  dayStartMs: number,
+  waitMs: number,
+  durationMs: number,
+  midnight: number,
+  deadlineBufferMs: number,
+): boolean {
+  const { fromMs, untilMs } = utcDayBounds(dayStartMs, midnight);
+  return (
+    canCompleteInWearWindow(fromMs, untilMs, waitMs, durationMs) &&
+    !canCompleteOutsideWearWindow(
+      fromMs,
+      untilMs,
+      waitMs,
+      durationMs,
+      COOLDOWN_MS,
+      deadlineBufferMs,
+    )
+  );
+}
+
+function twitchDayArp(bonuses: BonusBuckets, siteState: SiteState, isToday: boolean): number {
+  const cap =
+    (siteState.watchTwitch?.capArp ?? BASE_ACTIVITY.watchTwitchBasePerDay) +
+    bonuses.watchTwitch;
+  const remaining = twitchWatchRemainingMs(siteState, bonuses.watchTwitch) / 60_000;
+  const base = isToday ? remaining : cap;
+  return base * (1 + bonuses.allArpPct);
+}
+
+function twitchDayDurationMs(
+  bonuses: BonusBuckets,
+  siteState: SiteState,
+  isToday: boolean,
+): number {
+  const cap =
+    (siteState.watchTwitch?.capArp ?? BASE_ACTIVITY.watchTwitchBasePerDay) +
+    bonuses.watchTwitch;
+  const remaining = twitchWatchRemainingMs(siteState, bonuses.watchTwitch) / 60_000;
+  return (isToday ? remaining : cap) * TWITCH_MS_PER_ARP;
+}
+
+function forcedDailyArpDelta(
+  siteState: SiteState,
+  waitMs: number,
+  allArp: BonusBuckets,
+  flat: BonusBuckets,
+  deadlineBufferMs: number,
+): number {
+  const midnight = msUntilNextUtcMidnight();
+  let delta = 0;
+  const twitchDays: number[] = [];
+  if (twitchWatchRemainingMs(siteState, flat.watchTwitch) > 0) {
+    twitchDays.push(0);
+  }
+  twitchDays.push(midnight, midnight + MS_PER_DAY);
+  for (const dayStart of twitchDays) {
+    if (dayStart > waitMs + COOLDOWN_MS) {
+      continue;
+    }
+    const isToday = dayStart === 0;
+    const duration = twitchDayDurationMs(flat, siteState, isToday);
+    if (
+      !isTimedDailyForcedIntoLock(
+        dayStart,
+        waitMs,
+        duration,
+        midnight,
+        deadlineBufferMs,
+      )
+    ) {
+      continue;
+    }
+    delta +=
+      twitchDayArp(allArp, siteState, isToday) -
+      twitchDayArp(flat, siteState, isToday);
+  }
+
+  const tosDays = [0, midnight, midnight + MS_PER_DAY].filter(
+    (dayStart) =>
+      (dayStart > 0 || isActivityAvailable(siteState.caps, 'timeOnSite')) &&
+      isTimedDailyForcedIntoLock(
+        dayStart,
+        waitMs,
+        TIME_ON_SITE_DURATION_MS,
+        midnight,
+        deadlineBufferMs,
+      ),
+  );
+  if (tosDays.length > 0) {
+    const allArpTos =
+      (BASE_ACTIVITY.timeOnSiteBasePerDay + allArp.timeOnSite) *
+      (1 + allArp.allArpPct);
+    const flatTos =
+      (BASE_ACTIVITY.timeOnSiteBasePerDay + flat.timeOnSite) *
+      (1 + flat.allArpPct);
+    delta += tosDays.length * (allArpTos - flatTos);
+  }
+
+  const calendarDays = [midnight, midnight + MS_PER_DAY].filter((dayStart) =>
+    isAutoClaimForcedIntoLock(dayStart, waitMs),
+  );
+  if (calendarDays.length > 0) {
+    const allArpCal =
+      (BASE_ACTIVITY.dailyCalendarBasePerDay + allArp.dailyCalendar) *
+      (1 + allArp.allArpPct);
+    const flatCal =
+      (BASE_ACTIVITY.dailyCalendarBasePerDay + flat.dailyCalendar) *
+      (1 + flat.allArpPct);
+    delta += calendarDays.length * (allArpCal - flatCal);
+  }
+
+  const questDays = [0, midnight, midnight + MS_PER_DAY].filter((dayStart) => {
+    const isTodayDue =
+      dayStart === 0 && isActivityAvailable(siteState.caps, 'dailyQuests');
+    if (dayStart === 0 && !isTodayDue) {
+      return false;
+    }
+    return isTimedDailyForcedIntoLock(
+      dayStart,
+      waitMs,
+      0,
+      midnight,
+      deadlineBufferMs,
+    );
+  });
+  for (const dayStart of questDays) {
+    const onDay = new Date(Date.now() + dayStart);
+    const weekend =
+      onDay.getUTCDay() === 0 || onDay.getUTCDay() === 6
+        ? BASE_ACTIVITY.weekendQuestBase
+        : 0;
+    const base = BASE_ACTIVITY.dailyQuestBase + weekend;
+    delta += base * (1 + allArp.allArpPct) - base * (1 + flat.allArpPct);
+  }
+
+  return delta;
 }
 
 /**
@@ -285,7 +547,55 @@ export function resolveDeferredAllArp(
   if (laterEta !== undefined) {
     unlock.etaMs = laterEta.etaMs;
   }
+  if (!isAllArpWorthTheLock(artifacts, owned, context, waitMs)) {
+    return undefined;
+  }
   return { waitMs, artifacts, unlock };
+}
+
+/**
+ * Steam Quests last until Monday. If Recycler is not the 24h pick (this lock
+ * is not the last chance this week), still offer it as a side swap so the
+ * +15/quest is not left on the table.
+ */
+export function resolveDeferredSteam(
+  owned: OwnedArtifact[],
+  context: OptimizerContext,
+  best: ScoredCombo | undefined,
+): OptimizerResult['deferredSteam'] | undefined {
+  if (!isActivityPending(context.siteState.caps, 'steamQuests')) {
+    return undefined;
+  }
+  const remaining = scrapedRemainingSteamQuestRewards(context.siteState);
+  if (!remaining || remaining.length === 0) {
+    return undefined;
+  }
+  const steam = findBestSteamCombo(owned, context);
+  if (!steam || steam.steamQuestsFlat <= 0) {
+    return undefined;
+  }
+  const equipped = currentLoadout(owned);
+  if (isSameLoadout(steam.artifacts, equipped)) {
+    return undefined;
+  }
+  if (best && isSameLoadout(steam.artifacts, best.artifacts)) {
+    return undefined;
+  }
+  if (
+    collectBonuses(equipped).steamQuests >= steam.steamQuestsFlat
+  ) {
+    return undefined;
+  }
+  const waitMs = comboEquipWaitMs(
+    steam.artifacts,
+    owned,
+    context.settings,
+    context.snapshot.slotLocks,
+  );
+  if (isWeeklyForcedIntoLock(msUntilNextSteamQuestWeek(), waitMs)) {
+    return undefined;
+  }
+  return { waitMs, artifacts: steam.artifacts };
 }
 
 /**
@@ -361,6 +671,18 @@ export function findBestAllArpCombo(
     context,
     (combo) => combo.allArpPct,
     (combo) => combo.allArpPct > 0,
+  );
+}
+
+export function findBestSteamCombo(
+  owned: OwnedArtifact[],
+  context: OptimizerContext,
+): ScoredCombo | undefined {
+  return findBestComboBy(
+    owned,
+    context,
+    (combo) => combo.steamQuestsFlat,
+    (combo) => combo.steamQuestsFlat > 0,
   );
 }
 
@@ -529,27 +851,7 @@ export function allArpEquipWaitMs(
   if (!combo) {
     return undefined;
   }
-  const comboIds = new Set(combo.map((artifact) => artifact.instanceId));
-  const slots: ArtifactSlotPosition[] = [1, 2, 3];
-  let waitMs = 0;
-  for (const position of slots) {
-    const equipped = owned.find(
-      (artifact) => artifact.equippedPosition === position,
-    );
-    if (equipped && comboIds.has(equipped.instanceId)) {
-      continue;
-    }
-    waitMs = Math.max(
-      waitMs,
-      showroomCooldownRemainingMs(settings, position, {
-        ...(slotLocks && { slotLocks }),
-        ...(typeof equipped?.slotLocked === 'boolean' && {
-          equippedSlotLocked: equipped.slotLocked,
-        }),
-      }),
-    );
-  }
-  return waitMs;
+  return comboEquipWaitMs(combo, owned, settings, slotLocks);
 }
 
 /**

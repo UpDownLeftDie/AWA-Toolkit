@@ -281,9 +281,23 @@ export function remainingSteamQuestRows(siteState: SiteState): SteamQuestRow[] {
  * unknown until posted — monthly META still uses the typical week.
  */
 export function remainingSteamQuestRewards(siteState: SiteState): number[] {
+  const scraped = scrapedRemainingSteamQuestRewards(siteState);
+  if (scraped !== undefined) {
+    return scraped;
+  }
+  return [...BASE_ACTIVITY.steamQuestBases];
+}
+
+/**
+ * Remaining Steam Quest bases from Control Center rows. `undefined` when
+ * rows have not been scraped — do not invent a 15+25+25 week for 24h scoring.
+ */
+export function scrapedRemainingSteamQuestRewards(
+  siteState: SiteState,
+): number[] | undefined {
   const quests = siteState.steamQuests?.quests;
   if (!quests || quests.length === 0) {
-    return [...BASE_ACTIVITY.steamQuestBases];
+    return undefined;
   }
   return remainingSteamQuestRowsFromList(quests).map(
     (quest) => quest.rewardArp,
