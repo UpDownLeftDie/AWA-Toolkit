@@ -1,0 +1,29 @@
+---
+description: Primary goal is maximizing total lifetime ARP; never trade long-term ARP for short-term gains without approval
+alwaysApply: true
+---
+
+# Maximize Total Lifetime ARP
+
+The primary purpose of this project is to **maximize total lifetime ARP** a user can earn.
+
+## Decision filter
+
+Before proposing or making a change, ask: does this increase, preserve, or reduce the user's **total lifetime ARP**?
+
+- Prefer the path with the **highest lifetime total**, even if it earns less ARP right now.
+- Giving up some points is expected when another path yields **greater total ARP**.
+- Do **not** prioritize short-term or immediate gains if they reduce total lifetime ARP.
+
+## Approval required
+
+Do **not** implement changes that might reduce total lifetime ARP without explicit user approval.
+
+Treat as needing scrutiny and approval if a change could:
+
+- Skip, delay, or deprioritize a higher-value long-term source for a quicker, smaller payout
+- Cap, throttle, or "leave on the table" ARP that could still be earned later
+- Optimize for convenience, UX, speed, or fairness at the expense of lifetime ARP
+- Change scheduling, claim order, or feature eligibility in a way that lowers the long-run total
+
+When in doubt, flag the ARP tradeoff, estimate the lifetime impact if possible, and wait for approval.
