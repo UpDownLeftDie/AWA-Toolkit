@@ -164,4 +164,8 @@ export interface OptimizerContext {
   snapshot: ArtifactSnapshot;
   settings: ArtifactOptimizerSettings;
   siteState: SiteState;
+  /**
+   * Fixed clock for tests and simulations. Defaults to `Date.now()` when omitted.
+   */
+  nowMs?: number;
 }

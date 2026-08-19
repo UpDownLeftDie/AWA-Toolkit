@@ -69,6 +69,12 @@ export default [
     },
   },
   {
+    files: ['tests/**/*.ts'],
+    rules: {
+      'unicorn/filename-case': 'off',
+    },
+  },
+  {
     ignores: [
       'dist/',
       '**/*.js',

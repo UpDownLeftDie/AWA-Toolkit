@@ -44,6 +44,7 @@ import {
   msUntilNextSteamQuestWeek,
   msUntilNextUtcMidnight,
   pinnedEquippedArtifacts,
+  resolveNow,
   resolveOwnedList,
 } from './context';
 import { communityEventArpInSwapWindow, scoreCombo } from './scoring';
@@ -244,6 +245,7 @@ export function findBestCombo(
       owned,
       context.settings,
       context.snapshot.slotLocks,
+      resolveNow(context),
     );
     if (
       waitMs > 0 &&
@@ -289,6 +291,7 @@ export function isAllArpWorthTheLock(
     allArpBonuses,
     alternative,
     utcDailyEndBufferMs(context.settings),
+    resolveNow(context),
   );
   return lumpExtra + forcedDelta > 0;
 }
@@ -394,8 +397,9 @@ function forcedDailyArpDelta(
   allArp: BonusBuckets,
   flat: BonusBuckets,
   deadlineBufferMs: number,
+  now: number,
 ): number {
-  const midnight = msUntilNextUtcMidnight();
+  const midnight = msUntilNextUtcMidnight(now);
   let delta = 0;
   const twitchDays: number[] = [];
   if (twitchWatchRemainingMs(siteState, flat.watchTwitch) > 0) {
@@ -473,7 +477,7 @@ function forcedDailyArpDelta(
     );
   });
   for (const dayStart of questDays) {
-    const onDay = new Date(Date.now() + dayStart);
+    const onDay = new Date(now + dayStart);
     const weekend =
       onDay.getUTCDay() === 0 || onDay.getUTCDay() === 6
         ? BASE_ACTIVITY.weekendQuestBase
@@ -509,6 +513,7 @@ export function resolveDeferredAllArp(
     owned,
     context.settings,
     context.snapshot.slotLocks,
+    resolveNow(context),
   );
   if (waitMs === undefined || waitMs <= 0) {
     return undefined;
@@ -586,13 +591,15 @@ export function resolveDeferredSteam(
   ) {
     return undefined;
   }
+  const now = resolveNow(context);
   const waitMs = comboEquipWaitMs(
     steam.artifacts,
     owned,
     context.settings,
     context.snapshot.slotLocks,
+    now,
   );
-  if (isWeeklyForcedIntoLock(msUntilNextSteamQuestWeek(), waitMs)) {
+  if (isWeeklyForcedIntoLock(msUntilNextSteamQuestWeek(now), waitMs)) {
     return undefined;
   }
   return { waitMs, artifacts: steam.artifacts };
@@ -843,6 +850,7 @@ export function allArpEquipWaitMs(
   owned: OwnedArtifact[],
   settings: ArtifactOptimizerSettings,
   slotLocks?: Partial<Record<ArtifactSlotPosition, boolean>>,
+  now = Date.now(),
 ): number | undefined {
   if (hasAllArpEffect(currentLoadout(owned))) {
     return 0;
@@ -851,7 +859,7 @@ export function allArpEquipWaitMs(
   if (!combo) {
     return undefined;
   }
-  return comboEquipWaitMs(combo, owned, settings, slotLocks);
+  return comboEquipWaitMs(combo, owned, settings, slotLocks, now);
 }
 
 /**

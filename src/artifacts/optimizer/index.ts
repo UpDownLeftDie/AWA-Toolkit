@@ -145,6 +145,7 @@ export {
   completableUtcDayStarts,
   isResetInWearWindow,
   msUntilNextSteamQuestWeek,
+  resolveNow,
   UTC_DAILY_END_BUFFER_MS,
 } from './context';
 export { describeArtifact } from './notes';

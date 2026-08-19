@@ -34,6 +34,7 @@ import {
   isWeeklyForcedIntoLock,
   msUntilNextSteamQuestWeek,
   msUntilNextUtcMidnight,
+  resolveNow,
   resolveOwnedList,
 } from './context';
 import { hasAllArpEffect, shouldDeferBattlePassForContext } from './search';
@@ -120,6 +121,7 @@ function scoreSecondaryActivities(
   isEnabled: (key: keyof OptimizerContext['settings']['activities']) => boolean,
   freq: (key: keyof OptimizerContext['settings']['activities']) => number,
   waitMs: number,
+  now: number,
 ): number {
   const { siteState } = context;
   const caps = siteState.caps;
@@ -139,8 +141,14 @@ function scoreSecondaryActivities(
   if (isEnabled('dailyQuests')) {
     const questDays = completableUtcDayStarts(waitMs, 0, {
       todayAvailable: isActivityPending(caps, 'dailyQuests'),
+      now,
     });
-    flatSum += scoreDailyQuests(breakdown, freq('dailyQuests'), questDays);
+    flatSum += scoreDailyQuests(
+      breakdown,
+      freq('dailyQuests'),
+      questDays,
+      now,
+    );
   }
 
   if (isEnabled('steamCommunityEvent')) {
@@ -223,8 +231,9 @@ function twitchArpInWearWindow(
   siteState: SiteState,
   twitchFlat: number,
   waitMs: number,
+  now: number,
 ): number {
-  const midnight = msUntilNextUtcMidnight();
+  const midnight = msUntilNextUtcMidnight(now);
   const todayRemaining = twitchWatchRemainingMs(siteState, twitchFlat) / 60_000;
   const fullDay =
     (siteState.watchTwitch?.capArp ?? BASE_ACTIVITY.watchTwitchBasePerDay) +
@@ -244,7 +253,7 @@ function twitchArpInWearWindow(
   const laterDays = completableUtcDayStarts(
     waitMs,
     fullDay * TWITCH_MS_PER_ARP,
-    { todayAvailable: false },
+    { todayAvailable: false, now },
   );
   for (const dayStart of laterDays) {
     if (dayStart > 0) {
@@ -257,8 +266,9 @@ function twitchArpInWearWindow(
 function steamBasesInWearWindow(
   siteState: SiteState,
   waitMs: number,
+  now: number,
 ): number[] {
-  const mondayResetMs = msUntilNextSteamQuestWeek();
+  const mondayResetMs = msUntilNextSteamQuestWeek(now);
   const steamBases: number[] = [];
   const remaining = scrapedRemainingSteamQuestRewards(siteState);
   // This week's quests last until Monday. Credit them to this 24h lock only
@@ -285,6 +295,7 @@ function scoreWindowActivities(
   waitMs: number,
 ): { flatSum: number; breakdown: Record<string, RawBreakdownParts> } {
   const { settings, siteState } = context;
+  const now = resolveNow(context);
   const acts = settings.activities;
   const caps = siteState.caps;
   const B = BASE_ACTIVITY;
@@ -299,6 +310,7 @@ function scoreWindowActivities(
   if (isEnabled('timeOnSite')) {
     const tosDays = completableUtcDayStarts(waitMs, TIME_ON_SITE_DURATION_MS, {
       todayAvailable: isActivityAvailable(caps, 'timeOnSite'),
+      now,
     });
     if (tosDays.length > 0) {
       flatSum += addDailyCategory(
@@ -317,6 +329,7 @@ function scoreWindowActivities(
       siteState,
       bonuses.watchTwitch,
       waitMs,
+      now,
     );
     if (twitchArp > 0) {
       flatSum += setBreakdownParts(breakdown, 'watchTwitch', twitchArp);
@@ -324,7 +337,7 @@ function scoreWindowActivities(
   }
 
   if (isEnabled('steamQuests')) {
-    const steamBases = steamBasesInWearWindow(siteState, waitMs);
+    const steamBases = steamBasesInWearWindow(siteState, waitMs, now);
     if (steamBases.length > 0) {
       flatSum += scoreSteamQuestBases(
         breakdown,
@@ -339,6 +352,7 @@ function scoreWindowActivities(
   if (isEnabled('dailyCalendar')) {
     const calendarDays = completableUtcDayStarts(waitMs, 0, {
       todayAvailable: false,
+      now,
     });
     if (calendarDays.length > 0) {
       flatSum += addDailyCategory(
@@ -359,6 +373,7 @@ function scoreWindowActivities(
     isEnabled,
     freq,
     waitMs,
+    now,
   );
 
   return { flatSum, breakdown };
@@ -444,6 +459,7 @@ export function scoreCombo(
 ): ScoredCombo {
   const bonuses = collectBonuses(three);
   const owned = resolveOwnedList(context);
+  const now = resolveNow(context);
   const waitMs =
     waitMsOverride ??
     comboEquipWaitMs(
@@ -451,6 +467,7 @@ export function scoreCombo(
       owned,
       context.settings,
       context.snapshot.slotLocks,
+      now,
     );
   const { flatSum, breakdown: rawBreakdown } = scoreWindowActivities(
     bonuses,

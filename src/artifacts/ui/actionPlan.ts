@@ -1856,6 +1856,7 @@ function buildEquipTodo(options: {
   const { headline, loadout, reasons, tone, urgency } = options;
   const todo: ActionTodo = {
     text: `${headline} - ${loadout}`,
+    loadout,
     urgency: urgency ?? {
       kind: "action",
       readyAtMs: 0,

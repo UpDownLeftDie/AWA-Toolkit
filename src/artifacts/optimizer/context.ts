@@ -22,6 +22,10 @@ import {
 } from '../siteState';
 import type { OptimizerContext } from './types';
 
+export function resolveNow(context: Pick<OptimizerContext, 'nowMs'>): number {
+  return context.nowMs ?? Date.now();
+}
+
 export function combinations<T>(items: T[], k: number): T[][] {
   if (k === 0) {
     return [[]];
@@ -217,6 +221,7 @@ export function comboEquipWaitMs(
   owned: OwnedArtifact[],
   settings: ArtifactOptimizerSettings,
   slotLocks?: Partial<Record<1 | 2 | 3, boolean>>,
+  now = Date.now(),
 ): number {
   if (isSameLoadout(combo, currentLoadout(owned))) {
     return 0;
@@ -237,6 +242,7 @@ export function comboEquipWaitMs(
         ...(typeof equipped?.slotLocked === 'boolean' && {
           equippedSlotLocked: equipped.slotLocked,
         }),
+        now,
       }),
     );
   }
@@ -384,10 +390,15 @@ export function buildContext(
   snapshot: ArtifactSnapshot,
   settings: ArtifactOptimizerSettings,
   siteState: SiteState | undefined,
+  nowMs?: number,
 ): OptimizerContext {
-  return {
+  const context: OptimizerContext = {
     snapshot,
     settings,
     siteState: siteState ?? emptySiteState(),
   };
+  if (nowMs !== undefined) {
+    context.nowMs = nowMs;
+  }
+  return context;
 }

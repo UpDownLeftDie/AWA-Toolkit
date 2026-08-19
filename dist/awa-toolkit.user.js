@@ -4252,6 +4252,9 @@
 			"steamCommunityEvent"
 		].includes(key);
 	}
+	function resolveNow(context) {
+		return context.nowMs ?? Date.now();
+	}
 	function combinations(items, k) {
 		if (k === 0) return [[]];
 		if (items.length < k) return [];
@@ -4305,7 +4308,7 @@
 	function isWeeklyForcedIntoLock(weekendMs, waitMs, horizonMs = COOLDOWN_MS) {
 		return waitMs + horizonMs >= weekendMs;
 	}
-	function comboEquipWaitMs(combo, owned, settings, slotLocks) {
+	function comboEquipWaitMs(combo, owned, settings, slotLocks, now = Date.now()) {
 		if (isSameLoadout$1(combo, currentLoadout(owned))) return 0;
 		const comboIds = new Set(combo.map((artifact) => artifact.instanceId));
 		let waitMs = 0;
@@ -4318,7 +4321,8 @@
 			if (equipped && comboIds.has(equipped.instanceId)) continue;
 			waitMs = Math.max(waitMs, showroomCooldownRemainingMs(settings, position, {
 				...slotLocks && { slotLocks },
-				...typeof equipped?.slotLocked === "boolean" && { equippedSlotLocked: equipped.slotLocked }
+				...typeof equipped?.slotLocked === "boolean" && { equippedSlotLocked: equipped.slotLocked },
+				now
 			}));
 		}
 		return waitMs;
@@ -4385,12 +4389,14 @@
 		const rightIds = new Set(right.map((artifact) => artifact.instanceId));
 		return left.every((artifact) => rightIds.has(artifact.instanceId));
 	}
-	function buildContext(snapshot, settings, siteState) {
-		return {
+	function buildContext(snapshot, settings, siteState, nowMs) {
+		const context = {
 			snapshot,
 			settings,
 			siteState: siteState ?? emptySiteState()
 		};
+		if (nowMs !== void 0) context.nowMs = nowMs;
+		return context;
 	}
 	function emptyBonuses() {
 		return {
@@ -4493,7 +4499,7 @@
 		if (weekendBase > 0) flatSum += setBreakdownParts(breakdown, "weekendQuests", weekendBase);
 		return flatSum;
 	}
-	function scoreSecondaryActivities(breakdown, bonuses, context, isEnabled, freq, waitMs) {
+	function scoreSecondaryActivities(breakdown, bonuses, context, isEnabled, freq, waitMs, now) {
 		const { siteState } = context;
 		const caps = siteState.caps;
 		const B = BASE_ACTIVITY;
@@ -4503,8 +4509,11 @@
 			flatSum += setBreakdownParts(breakdown, "discordPoll", B.discordPollBase * polls, bonuses.discordPoll * polls);
 		}
 		if (isEnabled("dailyQuests")) {
-			const questDays = completableUtcDayStarts(waitMs, 0, { todayAvailable: isActivityPending(caps, "dailyQuests") });
-			flatSum += scoreDailyQuests(breakdown, freq("dailyQuests"), questDays);
+			const questDays = completableUtcDayStarts(waitMs, 0, {
+				todayAvailable: isActivityPending(caps, "dailyQuests"),
+				now
+			});
+			flatSum += scoreDailyQuests(breakdown, freq("dailyQuests"), questDays, now);
 		}
 		if (isEnabled("steamCommunityEvent")) {
 			const eventArp = communityEventArpInSwapWindow(siteState, waitMs);
@@ -4531,18 +4540,21 @@
 	}
 	var TWITCH_MS_PER_ARP$1 = 6e4;
 	var TIME_ON_SITE_DURATION_MS$2 = BASE_ACTIVITY.timeOnSiteBasePerDay * 6e4;
-	function twitchArpInWearWindow(siteState, twitchFlat, waitMs) {
-		const midnight = msUntilNextUtcMidnight();
+	function twitchArpInWearWindow(siteState, twitchFlat, waitMs, now) {
+		const midnight = msUntilNextUtcMidnight(now);
 		const todayRemaining = twitchWatchRemainingMs(siteState, twitchFlat) / 6e4;
 		const fullDay = (siteState.watchTwitch?.capArp ?? BASE_ACTIVITY.watchTwitchBasePerDay) + twitchFlat;
 		let twitchArp = 0;
 		if (todayRemaining > 0 && canCompleteInWearWindow(0, midnight, waitMs, todayRemaining * TWITCH_MS_PER_ARP$1)) twitchArp += todayRemaining;
-		const laterDays = completableUtcDayStarts(waitMs, fullDay * TWITCH_MS_PER_ARP$1, { todayAvailable: false });
+		const laterDays = completableUtcDayStarts(waitMs, fullDay * TWITCH_MS_PER_ARP$1, {
+			todayAvailable: false,
+			now
+		});
 		for (const dayStart of laterDays) if (dayStart > 0) twitchArp += fullDay;
 		return twitchArp;
 	}
-	function steamBasesInWearWindow(siteState, waitMs) {
-		const mondayResetMs = msUntilNextSteamQuestWeek();
+	function steamBasesInWearWindow(siteState, waitMs, now) {
+		const mondayResetMs = msUntilNextSteamQuestWeek(now);
 		const steamBases = [];
 		const remaining = scrapedRemainingSteamQuestRewards(siteState);
 		if (remaining && remaining.length > 0 && isActivityPending(siteState.caps, "steamQuests") && isWeeklyForcedIntoLock(mondayResetMs, waitMs)) steamBases.push(...remaining);
@@ -4551,6 +4563,7 @@
 	}
 	function scoreWindowActivities(bonuses, context, waitMs) {
 		const { settings, siteState } = context;
+		const now = resolveNow(context);
 		const acts = settings.activities;
 		const caps = siteState.caps;
 		const B = BASE_ACTIVITY;
@@ -4559,22 +4572,28 @@
 		const isEnabled = (key) => (acts[key]?.enabled ?? false) && (acts[key]?.frequency ?? 0) > 0;
 		const freq = (key) => isEnabled(key) ? acts[key]?.frequency ?? 0 : 0;
 		if (isEnabled("timeOnSite")) {
-			const tosDays = completableUtcDayStarts(waitMs, TIME_ON_SITE_DURATION_MS$2, { todayAvailable: isActivityAvailable(caps, "timeOnSite") });
+			const tosDays = completableUtcDayStarts(waitMs, TIME_ON_SITE_DURATION_MS$2, {
+				todayAvailable: isActivityAvailable(caps, "timeOnSite"),
+				now
+			});
 			if (tosDays.length > 0) flatSum += addDailyCategory(breakdown, "timeOnSite", B.timeOnSiteBasePerDay, bonuses.timeOnSite, tosDays.length, freq("timeOnSite"));
 		}
 		if (isEnabled("watchTwitch")) {
-			const twitchArp = twitchArpInWearWindow(siteState, bonuses.watchTwitch, waitMs);
+			const twitchArp = twitchArpInWearWindow(siteState, bonuses.watchTwitch, waitMs, now);
 			if (twitchArp > 0) flatSum += setBreakdownParts(breakdown, "watchTwitch", twitchArp);
 		}
 		if (isEnabled("steamQuests")) {
-			const steamBases = steamBasesInWearWindow(siteState, waitMs);
+			const steamBases = steamBasesInWearWindow(siteState, waitMs, now);
 			if (steamBases.length > 0) flatSum += scoreSteamQuestBases(breakdown, bonuses, freq("steamQuests"), steamBases);
 		}
 		if (isEnabled("dailyCalendar")) {
-			const calendarDays = completableUtcDayStarts(waitMs, 0, { todayAvailable: false });
+			const calendarDays = completableUtcDayStarts(waitMs, 0, {
+				todayAvailable: false,
+				now
+			});
 			if (calendarDays.length > 0) flatSum += addDailyCategory(breakdown, "dailyCalendar", B.dailyCalendarBasePerDay, bonuses.dailyCalendar, calendarDays.length, freq("dailyCalendar"));
 		}
-		flatSum += scoreSecondaryActivities(breakdown, bonuses, context, isEnabled, freq, waitMs);
+		flatSum += scoreSecondaryActivities(breakdown, bonuses, context, isEnabled, freq, waitMs, now);
 		return {
 			flatSum,
 			breakdown
@@ -4602,7 +4621,8 @@
 	function scoreCombo(three, context, waitMsOverride) {
 		const bonuses = collectBonuses(three);
 		const owned = resolveOwnedList(context);
-		const { flatSum, breakdown: rawBreakdown } = scoreWindowActivities(bonuses, context, waitMsOverride ?? comboEquipWaitMs(three, owned, context.settings, context.snapshot.slotLocks));
+		const now = resolveNow(context);
+		const { flatSum, breakdown: rawBreakdown } = scoreWindowActivities(bonuses, context, waitMsOverride ?? comboEquipWaitMs(three, owned, context.settings, context.snapshot.slotLocks, now));
 		const multiplier = 1 + bonuses.allArpPct;
 		const windowArp = flatSum * multiplier;
 		const breakdown = {};
@@ -4728,7 +4748,7 @@
 		const best = findBestComboBy(owned, context, (combo) => combo.weeklyArp, () => true);
 		const equipped = currentLoadout(owned);
 		if (best && best.allArpPct > 0 && !isSameLoadout$1(best.artifacts, equipped)) {
-			const waitMs = comboEquipWaitMs(best.artifacts, owned, context.settings, context.snapshot.slotLocks);
+			const waitMs = comboEquipWaitMs(best.artifacts, owned, context.settings, context.snapshot.slotLocks, resolveNow(context));
 			if (waitMs > 0 && !isAllArpWorthTheLock(best.artifacts, owned, context, waitMs)) return findBestComboBy(owned, context, (combo) => combo.weeklyArp, (combo) => combo.allArpPct <= 0 || isSameLoadout$1(combo.artifacts, equipped));
 		}
 		return best;
@@ -4737,7 +4757,7 @@
 		const allArpBonuses = collectBonuses(allArpArtifacts);
 		const alternative = bestFlatBonusesForLock(owned, context, waitMs);
 		if (!alternative) return true;
-		return communityEventArpInSwapWindow(context.siteState, waitMs) * allArpBonuses.allArpPct + forcedDailyArpDelta(context.siteState, waitMs, allArpBonuses, alternative, utcDailyEndBufferMs(context.settings)) > 0;
+		return communityEventArpInSwapWindow(context.siteState, waitMs) * allArpBonuses.allArpPct + forcedDailyArpDelta(context.siteState, waitMs, allArpBonuses, alternative, utcDailyEndBufferMs(context.settings), resolveNow(context)) > 0;
 	}
 	function bestFlatBonusesForLock(owned, context, waitMs) {
 		const size = Math.min(3, owned.length);
@@ -4788,8 +4808,8 @@
 		const remaining = twitchWatchRemainingMs(siteState, bonuses.watchTwitch) / 6e4;
 		return (isToday ? remaining : cap) * TWITCH_MS_PER_ARP;
 	}
-	function forcedDailyArpDelta(siteState, waitMs, allArp, flat, deadlineBufferMs) {
-		const midnight = msUntilNextUtcMidnight();
+	function forcedDailyArpDelta(siteState, waitMs, allArp, flat, deadlineBufferMs, now) {
+		const midnight = msUntilNextUtcMidnight(now);
 		let delta = 0;
 		const twitchDays = [];
 		if (twitchWatchRemainingMs(siteState, flat.watchTwitch) > 0) twitchDays.push(0);
@@ -4826,7 +4846,7 @@
 			return isTimedDailyForcedIntoLock(dayStart, waitMs, 0, midnight, deadlineBufferMs);
 		});
 		for (const dayStart of questDays) {
-			const onDay = new Date(Date.now() + dayStart);
+			const onDay = new Date(now + dayStart);
 			const weekend = onDay.getUTCDay() === 0 || onDay.getUTCDay() === 6 ? BASE_ACTIVITY.weekendQuestBase : 0;
 			const base = BASE_ACTIVITY.dailyQuestBase + weekend;
 			delta += base * (1 + allArp.allArpPct) - base * (1 + flat.allArpPct);
@@ -4839,7 +4859,7 @@
 		if (hasAllArpEffect(currentLoadout(owned))) return;
 		const artifacts = unconstrainedAllArpCombo(owned);
 		if (!artifacts) return;
-		const waitMs = allArpEquipWaitMs(owned, context.settings, context.snapshot.slotLocks);
+		const waitMs = allArpEquipWaitMs(owned, context.settings, context.snapshot.slotLocks, resolveNow(context));
 		if (waitMs === void 0 || waitMs <= 0) return;
 		const waiting = waitingCommunityMilestones(event);
 		const next = waiting[0];
@@ -4871,8 +4891,9 @@
 		if (isSameLoadout$1(steam.artifacts, equipped)) return;
 		if (best && isSameLoadout$1(steam.artifacts, best.artifacts)) return;
 		if (collectBonuses(equipped).steamQuests >= steam.steamQuestsFlat) return;
-		const waitMs = comboEquipWaitMs(steam.artifacts, owned, context.settings, context.snapshot.slotLocks);
-		if (isWeeklyForcedIntoLock(msUntilNextSteamQuestWeek(), waitMs)) return;
+		const now = resolveNow(context);
+		const waitMs = comboEquipWaitMs(steam.artifacts, owned, context.settings, context.snapshot.slotLocks, now);
+		if (isWeeklyForcedIntoLock(msUntilNextSteamQuestWeek(now), waitMs)) return;
 		return {
 			waitMs,
 			artifacts: steam.artifacts
@@ -4979,11 +5000,11 @@
 		}
 		return bestPct > 0 ? best : void 0;
 	}
-	function allArpEquipWaitMs(owned, settings, slotLocks) {
+	function allArpEquipWaitMs(owned, settings, slotLocks, now = Date.now()) {
 		if (hasAllArpEffect(currentLoadout(owned))) return 0;
 		const combo = unconstrainedAllArpCombo(owned);
 		if (!combo) return;
-		return comboEquipWaitMs(combo, owned, settings, slotLocks);
+		return comboEquipWaitMs(combo, owned, settings, slotLocks, now);
 	}
 	function shouldWaitForAllArpBeforeBattlePass(owned, settings, siteState, slotLocks) {
 		if (!hasInventoryAllArp(owned)) return false;
@@ -7014,6 +7035,7 @@
 		const { headline, loadout, reasons, tone, urgency } = options;
 		const todo = {
 			text: `${headline} - ${loadout}`,
+			loadout,
 			urgency: urgency ?? {
 				kind: "action",
 				readyAtMs: 0,
