@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         AWA Toolkit
 // @namespace    https://github.com/UpDownLeftDie/AWA-Toolkit
-// @version      2.2.0
+// @version      2.2.2
 // @author       jaredcat
 // @description  Artifact Optimizer, Control Center tasks, giveaway/vault filters, and UCF reading mode
 // @license      AGPL-3.0-or-later
@@ -264,7 +264,7 @@
 		if (!header) return;
 		return header.closest(".user-profile__profile-card, .aa-card, [class*=\"profile-card\"]") ?? header.parentElement?.parentElement ?? void 0;
 	}
-	function utcDateString(date = new Date()) {
+	function utcDateString$1(date = new Date()) {
 		return date.toISOString().slice(0, 10);
 	}
 	function parseTimestamp$1(value) {
@@ -2294,7 +2294,7 @@
 		if (typeof value !== "object" || !value) return;
 		const row = value;
 		const id = row.giveaway_id ?? row.giveawayId ?? row.id;
-		if (id === void 0 || id === null) return;
+		if (typeof id !== "string" && typeof id !== "number") return;
 		const status = typeof row.status === "string" ? row.status : "";
 		const entry = {
 			giveawayId: String(id),
@@ -2322,7 +2322,7 @@
 	function giveawayKeyStatus(giveawayId) {
 		return readPageGiveawayKeys().find((entry) => entry.giveawayId === giveawayId);
 	}
-	var SETTINGS_KEY = "artifactOptimizerSettings";
+	var SETTINGS_KEY$1 = "artifactOptimizerSettings";
 	var HOURS_PER_DAY = 24;
 	var MS_PER_HOUR$1 = 36e5;
 	var COOLDOWN_MS = HOURS_PER_DAY * MS_PER_HOUR$1;
@@ -2396,9 +2396,10 @@
 		utcDailyEndBufferHours: 1,
 		browserNotifications: false,
 		notificationTypes: { ...DEFAULT_NOTIFICATION_TYPES },
-		allowAccountActions: false
+		allowAccountActions: false,
+		achievementsEnabled: false
 	};
-	function isPartialSettings(value) {
+	function isPartialSettings$1(value) {
 		return typeof value === "object" && !!value;
 	}
 	function mergeActivities(base, incoming) {
@@ -2434,6 +2435,7 @@
 		if (typeof parsed.utcDailyEndBufferHours === "number") settings.utcDailyEndBufferHours = clampUtcDailyEndBufferHours(parsed.utcDailyEndBufferHours);
 		if (typeof parsed.browserNotifications === "boolean") settings.browserNotifications = parsed.browserNotifications;
 		if (typeof parsed.allowAccountActions === "boolean") settings.allowAccountActions = parsed.allowAccountActions;
+		if (typeof parsed.achievementsEnabled === "boolean") settings.achievementsEnabled = parsed.achievementsEnabled;
 		settings.notificationTypes = mergeNotificationTypes(settings.notificationTypes, parsed.notificationTypes);
 	}
 	function mergeNotificationTypes(base, incoming) {
@@ -2469,7 +2471,7 @@
 		return clampUtcDailyEndBufferHours(settings.utcDailyEndBufferHours) * MS_PER_HOUR$1;
 	}
 	async function getArtifactSettings() {
-		const raw = await _GM.getValue(SETTINGS_KEY);
+		const raw = await _GM.getValue(SETTINGS_KEY$1);
 		const settings = {
 			...defaultArtifactSettings,
 			activities: { ...DEFAULT_ACTIVITIES },
@@ -2481,7 +2483,7 @@
 		if (!raw) return settings;
 		try {
 			const parsedUnknown = typeof raw === "string" ? JSON.parse(raw) : raw;
-			if (!isPartialSettings(parsedUnknown)) return settings;
+			if (!isPartialSettings$1(parsedUnknown)) return settings;
 			applyParsedSettings(settings, parsedUnknown);
 		} catch (error) {
 			console.error("[Artifact Optimizer] Error parsing settings:", error);
@@ -2503,7 +2505,7 @@
 			} : previous.notificationTypes,
 			utcDailyEndBufferHours: clampUtcDailyEndBufferHours(patch.utcDailyEndBufferHours ?? previous.utcDailyEndBufferHours)
 		};
-		await _GM.setValue(SETTINGS_KEY, JSON.stringify(next));
+		await _GM.setValue(SETTINGS_KEY$1, JSON.stringify(next));
 		return next;
 	}
 	function findCooldownEntry(settings, position) {
@@ -2570,14 +2572,17 @@
 	function areAccountActionsEnabled(settings) {
 		return settings.allowAccountActions;
 	}
-	var SNAPSHOT_KEY = "artifactSnapshot";
+	function areAchievementsEnabled(settings) {
+		return false;
+	}
+	var SNAPSHOT_KEY$1 = "artifactSnapshot";
 	function isArtifactSnapshot(value) {
 		if (typeof value !== "object" || !value) return false;
 		const v = value;
 		return Array.isArray(v.artifacts) && typeof v.fragments === "number";
 	}
 	async function loadSnapshot() {
-		const raw = await _GM.getValue(SNAPSHOT_KEY);
+		const raw = await _GM.getValue(SNAPSHOT_KEY$1);
 		if (!raw) return;
 		try {
 			const parsed = typeof raw === "string" ? JSON.parse(raw) : raw;
@@ -2587,7 +2592,7 @@
 		}
 	}
 	async function saveSnapshot(snapshot) {
-		await _GM.setValue(SNAPSHOT_KEY, JSON.stringify(snapshot));
+		await _GM.setValue(SNAPSHOT_KEY$1, JSON.stringify(snapshot));
 	}
 	async function applySnapshotUpgrade(instanceId) {
 		const snapshot = await loadSnapshot();
@@ -3238,7 +3243,7 @@
 		}
 		return items;
 	}
-	function delay$2(ms) {
+	function delay$3(ms) {
 		return new Promise((resolve) => {
 			setTimeout(resolve, ms);
 		});
@@ -3246,7 +3251,7 @@
 	var CLAIM_QUEUE_GAP_MS = 1500;
 	async function waitWhile(isWaiting, timeoutMs, intervalMs = 100) {
 		const startedAt = Date.now();
-		while (isWaiting() && Date.now() - startedAt < timeoutMs) await delay$2(intervalMs);
+		while (isWaiting() && Date.now() - startedAt < timeoutMs) await delay$3(intervalMs);
 	}
 	var claimEndpointCache = {};
 	function jsonishId(value) {
@@ -3438,7 +3443,7 @@
 			const key = claimKey(claim);
 			if (!path || seen.has(key)) continue;
 			seen.add(key);
-			if (hasPosted) await delay$2(CLAIM_QUEUE_GAP_MS);
+			if (hasPosted) await delay$3(CLAIM_QUEUE_GAP_MS);
 			hasPosted = true;
 			const result = await claimBattlePassReward(path, resolveClaimBody(endpoint, claim));
 			postedPaths.add(path);
@@ -3469,11 +3474,11 @@
 			const { button, popup } = next;
 			const path = claimButtonIdentity(button, popup);
 			if (path) skipPaths.add(path);
-			if (hasClicked) await delay$2(CLAIM_QUEUE_GAP_MS);
+			if (hasClicked) await delay$3(CLAIM_QUEUE_GAP_MS);
 			hasClicked = true;
 			if (button.offsetParent === null) {
 				popup.click();
-				await delay$2(250);
+				await delay$3(250);
 			}
 			button.click();
 			await waitWhile(() => button.isConnected && popup.contains(button), 4e3);
@@ -3486,7 +3491,7 @@
 		while (Date.now() - startedAt < timeoutMs) {
 			const count = listBattlePassClaimButtons(document_, options).length;
 			if (count > 0) return count;
-			await delay$2(250);
+			await delay$3(250);
 		}
 		return listBattlePassClaimButtons(document_, options).length;
 	}
@@ -3781,7 +3786,7 @@
 	function twitchWatchRemainingMs(state, twitchFlat = 0, now = new Date()) {
 		const progress = state?.watchTwitch;
 		const baseCap = progress?.capArp ?? BASE_ACTIVITY.watchTwitchBasePerDay;
-		const isFreshProgress = progress !== void 0 && utcDateString(new Date(progress.scrapedAt)) === utcDateString(now);
+		const isFreshProgress = progress !== void 0 && utcDateString$1(new Date(progress.scrapedAt)) === utcDateString$1(now);
 		if (state?.caps.watchTwitch === "capped" || isFreshProgress && progress && !progress.isUnderCap) return 0;
 		const earned = isFreshProgress && progress ? progress.baseArp : 0;
 		return Math.max(0, baseCap + twitchFlat - earned) * TWITCH_MS_PER_ARP$2;
@@ -3841,14 +3846,43 @@
 		if (claimControl.getAttribute("aria-disabled") === "true") return "capped";
 		return "available";
 	}
+	function isDiscordPollEntry(entry) {
+		return /Discord Poll/i.test(entry.action);
+	}
+	function isLatePreviousPollStamp(recent, index, pollStartDate) {
+		const entry = recent[index];
+		if (!entry || entry.date !== pollStartDate) return false;
+		const older = recent[index + 1];
+		if (!older?.date || older.date >= pollStartDate) return false;
+		for (let cursor = index + 1; cursor < recent.length; cursor += 1) {
+			const row = recent[cursor];
+			if (!row?.date) continue;
+			if (row.date < pollStartDate) break;
+			if (row.date === pollStartDate) return false;
+		}
+		return true;
+	}
+	function previousDiscordPollStartDate(pollStart) {
+		return utcDateString$1(lastDiscordPollPostAt(new Date(pollStart.getTime() - 1)));
+	}
 	function hasVotedCurrentDiscordPoll(arpLog, now = new Date()) {
 		if (!arpLog || arpLog.recent.length === 0) return false;
-		const pollStartDate = utcDateString(lastDiscordPollPostAt(now));
-		return arpLog.recent.some((entry) => /Discord Poll/i.test(entry.action) && entry.date !== void 0 && entry.date >= pollStartDate);
+		const pollStart = lastDiscordPollPostAt(now);
+		const pollStartDate = utcDateString$1(pollStart);
+		const previousPollStartDate = previousDiscordPollStartDate(pollStart);
+		const recent = arpLog.recent;
+		const hasVotedPreviousCycle = recent.some((entry) => isDiscordPollEntry(entry) && entry.date !== void 0 && entry.date >= previousPollStartDate && entry.date < pollStartDate);
+		return recent.some((entry, index) => {
+			if (!isDiscordPollEntry(entry) || entry.date === void 0) return false;
+			if (entry.date < pollStartDate) return false;
+			if (entry.date > pollStartDate) return true;
+			if (hasVotedPreviousCycle) return true;
+			return !isLatePreviousPollStamp(recent, index, pollStartDate);
+		});
 	}
 	function applyArpLogActivityCaps(caps, arpLog, now = new Date()) {
 		if (!arpLog || arpLog.recent.length === 0) return caps;
-		const today = utcDateString(now);
+		const today = utcDateString$1(now);
 		const next = { ...caps };
 		if (arpLog.recent.filter((entry) => entry.date === today).some((entry) => /Daily Login Calendar/i.test(entry.action))) next.dailyCalendar = "capped";
 		next.discordPoll = hasVotedCurrentDiscordPoll(arpLog, now) ? "capped" : "available";
@@ -3952,17 +3986,29 @@
 	function canAffordAnyVaultOffer(state, discountPct = 0, availableArp = state.arpLog?.redeemableArp) {
 		return state.gameVault.some((game) => isAffordableVaultOffer(game, state, discountPct, availableArp));
 	}
-	function isClaimableVaultGame(game, state, discountPct = 0) {
-		return game.purchasable === true && isAffordableVaultOffer(game, state, discountPct);
+	function isVaultItemPurchasable(game, state, now = Date.now()) {
+		if (!isListPriceVaultClaim(game) || !game.inStock) return false;
+		if (game.purchasable === true) return true;
+		const opensAt = gameVaultOpensAtMs(state);
+		return opensAt !== void 0 && opensAt <= now;
 	}
-	function isVaultStockForUser(game, userTier) {
-		return game.purchasable === true && isListPriceVaultClaim(game) && isVaultTierMet(game, userTier);
+	function isClaimableVaultGame(game, state, discountPct = 0, now = Date.now()) {
+		return isVaultItemPurchasable(game, state, now) && isAffordableVaultOffer(game, state, discountPct);
 	}
-	function isGameVaultStockOpen(state) {
-		return state.gameVault.some((game) => isVaultStockForUser(game, state.userArpTier));
+	function isVaultStockForUser(game, state, now = Date.now()) {
+		return isVaultItemPurchasable(game, state, now) && isVaultTierMet(game, state.userArpTier);
 	}
-	function isGameVaultCurrentlyOpen(state, discountPct = 0) {
-		return state.gameVault.some((game) => isClaimableVaultGame(game, state, discountPct));
+	function isGameVaultStockOpen(state, now = Date.now()) {
+		return state.gameVault.some((game) => isVaultStockForUser(game, state, now));
+	}
+	function isGameVaultDiscountWindow(state, now = Date.now()) {
+		if (isGameVaultStockOpen(state, now)) return true;
+		const opensAt = gameVaultOpensAtMs(state);
+		if (opensAt !== void 0 && opensAt > now) return false;
+		return state.gameVault.some((game) => isPostedListPriceVaultGame(game) && isVaultTierMet(game, state.userArpTier));
+	}
+	function isGameVaultCurrentlyOpen(state, discountPct = 0, now = Date.now()) {
+		return state.gameVault.some((game) => isClaimableVaultGame(game, state, discountPct, now));
 	}
 	var GAME_VAULT_EQUIP_BUFFER_MS = 18e5;
 	function gameVaultCycleId(state) {
@@ -3978,8 +4024,8 @@
 		if (opensAt === void 0 || opensAt <= now) return false;
 		return lockUntilMs + GAME_VAULT_EQUIP_BUFFER_MS > opensAt;
 	}
-	function gameVaultCatalogPrice(state, discountPct = 0) {
-		return state.gameVault.find((game) => isClaimableVaultGame(game, state, discountPct))?.price ?? 0;
+	function gameVaultCatalogPrice(state, discountPct = 0, now = Date.now()) {
+		return state.gameVault.find((game) => isClaimableVaultGame(game, state, discountPct, now))?.price ?? 0;
 	}
 	function scrapeGameVaultTimerMsFromDocument(document_) {
 		const timer = document_.querySelector("#game-vault-timer");
@@ -4028,6 +4074,11 @@
 			next.gameVaultOpensAt = new Date(timerMs).toISOString();
 			return;
 		}
+		if (next.gameVault.some((game) => isPostedListPriceVaultGame(game))) {
+			const existingOpen = parseTimestamp$1(next.gameVaultOpensAt);
+			if (!Number.isFinite(existingOpen) || existingOpen > now) next.gameVaultOpensAt = new Date(now).toISOString();
+			return;
+		}
 		delete next.gameVaultOpensAt;
 	}
 	function applyGameVaultDocument(next, document_) {
@@ -4038,7 +4089,7 @@
 		const timerMs = scrapeGameVaultTimerMsFromDocument(document_);
 		if (timerMs === void 0 && vault.length === 0) return;
 		if (vault.length > 0) next.gameVault = vault;
-		applyGameVaultSchedule(next, timerMs, vault.some((game) => isVaultStockForUser(game, next.userArpTier)), Date.now());
+		applyGameVaultSchedule(next, timerMs, vault.some((game) => isVaultStockForUser(game, next)), Date.now());
 	}
 	var SITE_STATE_KEY = "artifactSiteState";
 	var DEFAULT_CAPS = {
@@ -4460,7 +4511,8 @@
 			watchTwitchFlat: bonuses.watchTwitch,
 			dailyCalendarFlat: bonuses.dailyCalendar,
 			discordPollFlat: bonuses.discordPoll,
-			timeOnSiteFlat: bonuses.timeOnSite
+			timeOnSiteFlat: bonuses.timeOnSite,
+			marketDiscountPct: bonuses.marketDiscountPct
 		};
 	}
 	function setBreakdownParts(breakdown, key, base, categoryBonus = 0) {
@@ -4609,10 +4661,11 @@
 	}
 	function vaultListPrice(context, discountPct = 0) {
 		if (context.settings.pendingVaultPurchaseArp > 0) return context.settings.pendingVaultPurchaseArp;
-		return gameVaultCatalogPrice(context.siteState, discountPct);
+		return gameVaultCatalogPrice(context.siteState, discountPct, resolveNow(context));
 	}
 	function vaultPurchasePriceNow(context, discountPct = 0) {
-		if (!isGameVaultCurrentlyOpen(context.siteState, discountPct)) return 0;
+		const now = resolveNow(context);
+		if (!isGameVaultCurrentlyOpen(context.siteState, discountPct, now)) return 0;
 		const price = vaultListPrice(context, discountPct);
 		if (price <= 0) return 0;
 		if (!canAffordVaultPrice(context.siteState.arpLog?.redeemableArp, vaultPayArp(price, discountPct))) return 0;
@@ -4929,12 +4982,13 @@
 	function findBestSteamCombo(owned, context) {
 		return findBestComboBy(owned, context, (combo) => combo.steamQuestsFlat, (combo) => combo.steamQuestsFlat > 0);
 	}
+	var VAULT_PRIORITY_DISCOUNT_PCT = .1;
 	function findBestMarketDiscountCombo(owned, context) {
 		return findBestComboBy(owned, context, (combo) => combo.marketDiscountPct, (combo) => combo.marketDiscountPct > 0);
 	}
 	function hasMarketDiscount(combo) {
 		if (!combo || combo.artifacts.length === 0) return false;
-		return combo.marketDiscountPct > 0;
+		return combo.marketDiscountPct >= VAULT_PRIORITY_DISCOUNT_PCT;
 	}
 	function isMonthlyMetaEligible(artifact) {
 		const family = getArtifactById(artifact.familyId);
@@ -5155,38 +5209,19 @@
 		return { best: arpBest };
 	}
 	function resolveOpenVaultDiscount(arpBest, current, discountCombo, context, cycleId, now) {
-		if (current !== void 0 && isSameLoadout$1(arpBest.artifacts, current.artifacts)) {
-			if (!discountCombo) return { best: arpBest };
-			return {
-				best: arpBest,
-				marketDiscountLoadout: discountCombo,
-				vaultDiscount: {
-					cycleId,
-					dismissed: false,
-					note: "Game Vault has eligible claims — equip market-discount before buying (logout/relogin after)."
-				}
-			};
-		}
 		if (current && hasMarketDiscount(current)) return suggestVaultDiscount(current, discountCombo, "Keep market-discount equipped — Game Vault stock can run out, and a 24h swap would miss the discount.", cycleId);
-		const canEquipNow = earliestSlotUnlockMs(context, now) <= now;
-		if (discountCombo && canEquipNow) return suggestVaultDiscount(discountCombo, discountCombo, "Equip market-discount before claiming Game Vault (eligible stock can run out). Logout/relogin after.", cycleId);
-		return {
-			best: arpBest,
-			vaultDiscount: {
-				cycleId,
-				dismissed: false,
-				note: "Slots locked — Game Vault stock may run out before you can equip market-discount."
-			}
-		};
+		if (!discountCombo) return { best: arpBest };
+		return suggestVaultDiscount(discountCombo, discountCombo, earliestSlotUnlockMs(context, now) <= now ? "Equip market-discount before claiming Game Vault (eligible stock can run out). Logout/relogin after." : "Slots locked — Game Vault stock may run out before you can equip market-discount.", cycleId);
 	}
 	function resolveVaultDiscountBest(arpBest, current, discountCombo, context, now = Date.now()) {
 		const cycleId = gameVaultCycleId(context.siteState);
 		if (cycleId && context.settings.vaultDiscountDismissedCycle === cycleId) return dismissedVaultGuard(arpBest, cycleId);
 		if (!arpBest || hasMarketDiscount(arpBest)) return { best: arpBest };
 		const discountPct = comboMarketDiscountPct(discountCombo);
+		if (discountPct < .1) return { best: arpBest };
 		const projectedArp = projectedRedeemableArp(context, arpBest, current, discountCombo);
 		if (hasPostedListPriceVaultGames(context.siteState) && !canAffordAnyVaultOffer(context.siteState, discountPct, projectedArp)) return { best: arpBest };
-		if (isGameVaultStockOpen(context.siteState)) return resolveOpenVaultDiscount(arpBest, current, discountCombo, context, cycleId ?? "open", now);
+		if (isGameVaultDiscountWindow(context.siteState, now)) return resolveOpenVaultDiscount(arpBest, current, discountCombo, context, cycleId ?? "open", now);
 		const opensAt = gameVaultOpensAtMs(context.siteState);
 		if (opensAt !== void 0 && opensAt > now) return resolvePreOpenVaultDiscount(arpBest, current, discountCombo, context, cycleId ?? context.siteState.gameVaultOpensAt ?? "upcoming", now);
 		return { best: arpBest };
@@ -5208,7 +5243,7 @@
 		const equipped = currentLoadout(owned);
 		const current = equipped.length > 0 ? scoreCombo(equipped, context) : void 0;
 		const allArpLoadout = findBestAllArpCombo(owned, context);
-		const guarded = resolveVaultDiscountBest(arpBest, current, findBestMarketDiscountCombo(owned, context), context);
+		const guarded = resolveVaultDiscountBest(arpBest, current, findBestMarketDiscountCombo(owned, context), context, resolveNow(context));
 		const best = guarded.best;
 		const monthlyMetaLoadout = findMonthlyMetaCombo(owned, context);
 		const alternatives = [];
@@ -5448,6 +5483,7 @@
 	var MODAL_ID = "alienware-artifact-optimizer";
 	var INLINE_ID = "alienware-artifact-optimizer-inline";
 	var CC_PANEL_ID = "alienware-artifact-optimizer-cc";
+	var ACH_PANEL_ID = "alienware-artifact-optimizer-ach";
 	var BP_CLAIM_BAR_ID = "alienware-artifact-optimizer-bp-claim";
 	var STYLE_ID$1 = "alienware-artifact-optimizer-styles";
 	var BACKDROP_ID = "alienware-artifact-optimizer-backdrop";
@@ -5486,7 +5522,8 @@
         background: transparent;
       }
       #${INLINE_ID},
-      #${CC_PANEL_ID} {
+      #${CC_PANEL_ID},
+      #${ACH_PANEL_ID} {
         display: block;
         margin: 16px 0;
         width: 100%;
@@ -5495,8 +5532,10 @@
       }
       body > #${INLINE_ID},
       body > #${CC_PANEL_ID},
+      body > #${ACH_PANEL_ID},
       html > #${INLINE_ID},
-      html > #${CC_PANEL_ID} {
+      html > #${CC_PANEL_ID},
+      html > #${ACH_PANEL_ID} {
         margin: 88px auto 16px;
         padding: 0 16px;
         max-width: 1100px;
@@ -5773,6 +5812,14 @@
       list-style: none;
       width: 100%;
     }
+    #ao-achievements {
+      display: block;
+      margin: 12px 0 4px;
+      width: 100%;
+    }
+    .ao-notify > .ao-switch + .ao-switch {
+      margin-top: 10px;
+    }
     .ao-divider {
       display: block;
       border: 0;
@@ -6010,6 +6057,32 @@
       border-top: 1px solid #333;
     }
     .ao-notify-types[data-off] {
+      opacity: 0.45;
+      pointer-events: none;
+    }
+    .ao-body {
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+      margin-top: 10px;
+      padding: 12px 12px 12px 14px;
+      border-left: 2px solid #00bc8c55;
+      border-top: 1px solid #333;
+    }
+    .ao-body--off {
+      opacity: 0.45;
+      pointer-events: none;
+    }
+    .ao-ach-sub {
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      margin-top: 6px;
+      padding: 10px 10px 2px 14px;
+      border-left: 2px solid #00bc8c44;
+      border-top: 1px solid #333;
+    }
+    .ao-ach-sub--off {
       opacity: 0.45;
       pointer-events: none;
     }
@@ -7019,6 +7092,7 @@
 		const caps = siteState.caps;
 		const stats = activityStatsForArtifacts(stepArtifacts);
 		pushAllArpEquipReasons(reasons, stats.allArpPct, siteState);
+		if (stats.marketDiscountPct >= .1) reasons.push({ text: `${Math.round(stats.marketDiscountPct * 100)}% Game Vault / marketplace discount before buying` });
 		const isNextUtcResetInLock = isResetInWearWindow(msUntilUtcMidnight(), waitMs);
 		const isSteamDueNow = isActivityPending(caps, "steamQuests");
 		pushFlatEquipReason(reasons, stats.steamQuestsFlat, waitMs, isSteamDueNow, isResetInWearWindow(msUntilNextSteamQuestWeek(), waitMs), "Steam Quests", "Steam Quests after Monday reset");
@@ -7034,7 +7108,7 @@
 	function buildEquipTodo(options) {
 		const { headline, loadout, reasons, tone, urgency } = options;
 		const todo = {
-			text: `${headline} - ${loadout}`,
+			text: headline,
 			loadout,
 			urgency: urgency ?? {
 				kind: "action",
@@ -7599,6 +7673,11 @@
 			return `<button type="button" class="ao-claim-btn"${todo.claimBattlePassSkipArp === true ? " data-skip-arp=\"1\"" : ""}>${battlePassClaimButtonLabel(todo.claimBattlePassSkipArp === true)}</button>`;
 		}
 		if (todo.openTwitchStream === true) return "<button type=\"button\" class=\"ao-twitch-btn\">Open stream</button>";
+		if (todo.openHref) {
+			const visit = todo.visitInBackground === true ? " data-visit=\"1\"" : "";
+			const label = todo.openHrefLabel ?? "Open";
+			return `<button type="button" class="ao-ach-open-btn" data-href="${escapeHtml(todo.openHref)}"${visit}>${escapeHtml(label)}</button>`;
+		}
 		return "";
 	}
 	function isCautionTodo(todo) {
@@ -7616,10 +7695,11 @@
 		const items = steps.map((todo, index) => {
 			return `<li class="ao-todo-item${actionTodoToneClass(todo.tone)}"><span class="ao-todo-index">${index + 1}.</span><div class="ao-todo-text">${renderActionTodoBody(todo)}</div>${renderTodoActionButton(todo, options)}</li>`;
 		}).join("");
+		const listHtml = steps.length > 0 ? `<ul class="ao-todo-list">${items}</ul>` : "";
 		return `
-    <div class="ao-heading">What to do</div>
+    <div class="ao-heading">${escapeHtml(options.heading ?? "What to do")}</div>
     ${cautionHtml}
-    ${steps.length > 0 ? `<ul class="ao-todo-list">${items}</ul>` : ""}
+    ${listHtml}
   `;
 	}
 	function renderActionPlan(todos, options = {}) {
@@ -7631,8 +7711,8 @@
 	var SHOW_GIVEAWAY_HREF = /\/ucf\/show\/(\d+)\/(?:[\w.-]+\/)*Giveaway\/([\w.-]+)/i;
 	var LISTING_PATH = /\/ucf\/Giveaway\/?$/i;
 	var IFRAME_WAIT_MS = 15e3;
-	var IFRAME_SETTLE_MS = 600;
-	function delay$1(ms) {
+	var IFRAME_SETTLE_MS$1 = 600;
+	function delay$2(ms) {
 		return new Promise((resolve) => {
 			setTimeout(resolve, ms);
 		});
@@ -7778,7 +7858,7 @@
 			}, IFRAME_WAIT_MS);
 			iframe.addEventListener("load", () => {
 				clearTimeout(timer);
-				delay$1(IFRAME_SETTLE_MS).then(() => {
+				delay$2(IFRAME_SETTLE_MS$1).then(() => {
 					const document_ = iframe.contentDocument ?? void 0;
 					cleanup();
 					resolve(document_);
@@ -8320,16 +8400,16 @@
 		};
 		scheduleBrowserNotifications(notifyRuntime.lastSource);
 	}
-	var STALE_MS = 216e5;
+	var STALE_MS$1 = 216e5;
 	var SLOT_LOCK_STALE_MS = 3e5;
 	var ARP_LOG_STALE_MS = 216e5;
-	var FORCE_REFRESH_COOLDOWN_MS = 5e3;
+	var FORCE_REFRESH_COOLDOWN_MS$1 = 5e3;
 	var EQUIP_CONFIRM_RETRY_MS = 750;
 	var BATTLE_PASS_STALE_MS = 36e5;
-	var COMMUNITY_EVENT_PENDING_STALE_MS = STALE_MS;
+	var COMMUNITY_EVENT_PENDING_STALE_MS = STALE_MS$1;
 	var CONTROL_CENTER_PATH = "/control-center";
 	var BATTLE_PASS_PATH = "/control-center/battle-pass/1";
-	var GAME_VAULT_PATH = "/marketplace/game-vault";
+	var GAME_VAULT_PATH$1 = "/marketplace/game-vault";
 	var ARP_LOG_PATH = "/account/arp-log";
 	var QUEST_SETUP_PATH = "/steam/questsetup";
 	var ARP_LOG_MAX_ROWS = 300;
@@ -8340,7 +8420,7 @@
 		const now = new Date();
 		const from = new Date(now.getTime() - days * 24 * 60 * 60 * 1e3);
 		const toExclusive = new Date(now.getTime() + 864e5);
-		return `${ARP_LOG_PATH}?from=${utcDateString(from)}&to=${utcDateString(toExclusive)}&max=${ARP_LOG_MAX_ROWS}`;
+		return `${ARP_LOG_PATH}?from=${utcDateString$1(from)}&to=${utcDateString$1(toExclusive)}&max=${ARP_LOG_MAX_ROWS}`;
 	}
 	function pathnameFromUrl(url, fallback) {
 		try {
@@ -8349,7 +8429,7 @@
 			return fallback;
 		}
 	}
-	async function fetchDocument(path) {
+	async function fetchDocument$1(path) {
 		try {
 			const response = await fetch(path, { headers: { Accept: "text/html" } });
 			if (!response.ok) {
@@ -8366,7 +8446,7 @@
 			return;
 		}
 	}
-	function delay(ms) {
+	function delay$1(ms) {
 		return new Promise((resolve) => {
 			setTimeout(resolve, ms);
 		});
@@ -8375,7 +8455,7 @@
 		const started = Date.now();
 		while (Date.now() - started < 4e3) {
 			if (document_.querySelector("#personal-hours")?.textContent?.trim()) break;
-			await delay(250);
+			await delay$1(250);
 		}
 	}
 	async function settleIframePage(iframe, path) {
@@ -8383,13 +8463,13 @@
 		if (!document_) return;
 		if (path.includes("/steam/community-event")) await waitForCommunityEventHours(document_);
 		else if (path.includes("/battle-pass")) await waitForBattlePassUi(document_);
-		else await delay(400);
+		else await delay$1(400);
 		return {
 			document: document_,
 			url: iframe.contentWindow?.location.href ?? path
 		};
 	}
-	async function openPageDocument(path) {
+	async function openPageDocument$1(path) {
 		return new Promise((resolve) => {
 			const iframe = document.createElement("iframe");
 			iframe.setAttribute("aria-hidden", "true");
@@ -8421,7 +8501,7 @@
 		const started = Date.now();
 		while (Date.now() - started < 5e3) {
 			if (isBattlePassDocumentReady(document_)) return;
-			await delay(250);
+			await delay$1(250);
 		}
 	}
 	function hasPersonalHours(document_) {
@@ -8445,22 +8525,22 @@
 		return /completed this quest/i.test(document_.body?.textContent ?? "");
 	}
 	async function loadRemotePage(path) {
-		const fetched = await fetchDocument(path);
+		const fetched = await fetchDocument$1(path);
 		if (fetched?.document.querySelector("a.artifact-list-item, body")) {
-			if (requiresIframeFallback(path, fetched.document)) return openPageDocument(path);
+			if (requiresIframeFallback(path, fetched.document)) return openPageDocument$1(path);
 			return fetched;
 		}
-		return openPageDocument(path);
+		return openPageDocument$1(path);
 	}
 	async function loadRemoteDocument(path) {
 		return (await loadRemotePage(path))?.document;
 	}
-	function isSnapshotFresh(snapshot) {
+	function isSnapshotFresh$1(snapshot) {
 		if (!snapshot || snapshot.artifacts.length === 0) return false;
 		if (!snapshot.slotLocks) return false;
 		const scrapedAt = Date.parse(snapshot.scrapedAt);
 		if (Number.isNaN(scrapedAt)) return false;
-		return Date.now() - scrapedAt < STALE_MS;
+		return Date.now() - scrapedAt < STALE_MS$1;
 	}
 	function areSlotLocksFresh(snapshot) {
 		if (!snapshot?.slotLocks) return false;
@@ -8468,7 +8548,7 @@
 	}
 	function isCapsFresh(state, now = new Date()) {
 		if (!state) return false;
-		if (!isScrapedWithin(state.updatedAt, STALE_MS)) return false;
+		if (!isScrapedWithin(state.updatedAt, STALE_MS$1)) return false;
 		if (!isScrapedSinceUtcMidnight(state.updatedAt, now)) return false;
 		if (Object.values(state.caps).every((status) => status === "unknown")) return false;
 		if (state.caps.steamQuests === "available" && (state.steamQuests?.quests.length ?? 0) === 0) return false;
@@ -8517,7 +8597,7 @@
 			return isCapsFresh(state, now);
 		}
 		if (event.milestones.length === 0) return false;
-		const ttl = event.pendingArp > 0 ? COMMUNITY_EVENT_PENDING_STALE_MS : STALE_MS;
+		const ttl = event.pendingArp > 0 ? COMMUNITY_EVENT_PENDING_STALE_MS : STALE_MS$1;
 		if (!isScrapedWithin(event.scrapedAt, ttl)) return false;
 		return isScrapedSinceUtcMidnight(event.scrapedAt, now);
 	}
@@ -8587,7 +8667,7 @@
 		const previousSig = previous ? equippedSignature(previous) : "";
 		let snapshot = await fetchShowroomSnapshot();
 		if (snapshot && equippedSignature(snapshot) === previousSig) {
-			await delay(EQUIP_CONFIRM_RETRY_MS);
+			await delay$1(EQUIP_CONFIRM_RETRY_MS);
 			snapshot = await fetchShowroomSnapshot() ?? snapshot;
 		}
 		if (!snapshot) {
@@ -8615,14 +8695,14 @@
 			return true;
 		};
 		if (await didConfirm()) return;
-		await delay(EQUIP_CONFIRM_RETRY_MS);
+		await delay$1(EQUIP_CONFIRM_RETRY_MS);
 		if (await didConfirm()) return;
 		await invalidateSnapshotFreshness();
 	}
 	async function ensureArtifactSnapshot(options = {}) {
 		const existing = await loadSnapshot();
 		const isWantsForce = options.force === true;
-		if (!isWantsForce && isSnapshotFresh(existing) && areSlotLocksFresh(existing)) return existing;
+		if (!isWantsForce && isSnapshotFresh$1(existing) && areSlotLocksFresh(existing)) return existing;
 		const showroomPath = resolveShowroomUrl(existing?.username);
 		if (isWantsForce) return scrapeShowroomAfterLockNudge(showroomPath, existing);
 		const loaded = await loadRemotePage(showroomPath);
@@ -8736,7 +8816,7 @@
 			loadControlCenterDocument(),
 			loadRemoteDocument(QUEST_SETUP_PATH),
 			loadRemoteDocument(BATTLE_PASS_PATH),
-			loadRemoteDocument(GAME_VAULT_PATH)
+			loadRemoteDocument(GAME_VAULT_PATH$1)
 		]);
 		if (controlDocument) applyControlCenterDocument(next, controlDocument);
 		if (questDocument) applyWatchTwitchProgress(next, questDocument);
@@ -8777,7 +8857,7 @@
 		}
 	}
 	function requiresRemoteSnapshotHydrate(snapshot) {
-		return !isSnapshotFresh(snapshot) || !areSlotLocksFresh(snapshot);
+		return !isSnapshotFresh$1(snapshot) || !areSlotLocksFresh(snapshot);
 	}
 	function requiresRemoteSiteHydrate(state, options = {}) {
 		if (!state || options.force) return true;
@@ -8793,9 +8873,9 @@
 	async function ensureSiteState(options = {}) {
 		const existing = await loadSiteState() ?? emptySiteState();
 		const isForce = options.force === true;
-		const isForceCaps = isForce && !isScrapedWithin(existing.updatedAt, FORCE_REFRESH_COOLDOWN_MS);
+		const isForceCaps = isForce && !isScrapedWithin(existing.updatedAt, FORCE_REFRESH_COOLDOWN_MS$1);
 		const isForceArpLog = isForce;
-		const isForceEvent = isForce && !isScrapedWithin(existing.communityEvent?.scrapedAt, FORCE_REFRESH_COOLDOWN_MS);
+		const isForceEvent = isForce && !isScrapedWithin(existing.communityEvent?.scrapedAt, FORCE_REFRESH_COOLDOWN_MS$1);
 		const requiresCapsRefresh = isForceCaps || !isCapsFresh(existing);
 		const requiresBattlePassRefresh = isForce || requiresCapsRefresh || shouldRescrapeBattlePass(existing);
 		const requiresArpLogRefresh = isForceArpLog || !isArpLogFresh(existing) || shouldRefreshCommunityEventArpLog(existing);
@@ -8928,6 +9008,1078 @@
 		await showAoAlert(ACCOUNT_ACTIONS_OFF_MESSAGE, "Account actions off");
 		return false;
 	}
+	var ACHIEVEMENT_AUTOMATION_KEYS = [
+		"visitPages",
+		"profileCosmetics",
+		"watchVideos",
+		"readArticles",
+		"gameVault"
+	];
+	var FAQ_PATH = "/faq-contact";
+	var HIVE_PATH = "/information";
+	var NEWS_PATH = "/news";
+	var VIDEOS_PATH = "/videos";
+	var RELAY_PATH = "/ucf";
+	var GAME_VAULT_PATH = "/marketplace/game-vault";
+	var PROFILE_PATH = "/member/{username}";
+	function slug(title) {
+		return title.toLowerCase().replaceAll(/[^a-z0-9]+/g, "-").replaceAll(/^-|-$/g, "");
+	}
+	function define(title, category, options) {
+		const definition = {
+			id: slug(title),
+			title,
+			category,
+			group: options.group ?? slug(title),
+			rank: options.rank ?? 1,
+			hint: options.hint,
+			kind: options.kind ?? "action"
+		};
+		if (options.aliases) definition.aliases = options.aliases;
+		if (options.href) definition.href = options.href;
+		if (options.hrefLabel) definition.hrefLabel = options.hrefLabel;
+		if (options.automation) definition.automation = options.automation;
+		if (options.coveredByActionPlan === true) definition.coveredByActionPlan = true;
+		return definition;
+	}
+	var ACHIEVEMENTS = [
+		define("Verified Member", "verified", {
+			hint: "Finish email / account verification if AWA still asks for it.",
+			kind: "inform"
+		}),
+		define("Add about me", "profile", {
+			hint: "Add a short About Me on your profile.",
+			href: PROFILE_PATH,
+			hrefLabel: "Open profile",
+			aliases: ["Add about me"],
+			automation: "profileCosmetics"
+		}),
+		define("Try it on", "avatar", {
+			group: "border-use",
+			rank: 1,
+			hint: "Change your profile border once.",
+			href: PROFILE_PATH,
+			hrefLabel: "Open profile",
+			automation: "profileCosmetics"
+		}),
+		define("Use 5 different borders", "avatar", {
+			group: "border-use",
+			rank: 2,
+			hint: "Equip 5 different borders over time.",
+			href: PROFILE_PATH,
+			hrefLabel: "Open profile",
+			automation: "profileCosmetics"
+		}),
+		define("Use 10 different borders", "avatar", {
+			group: "border-use",
+			rank: 3,
+			hint: "Keep rotating borders you have not used yet.",
+			href: PROFILE_PATH,
+			hrefLabel: "Open profile",
+			automation: "profileCosmetics"
+		}),
+		define("Use 25 different borders", "avatar", {
+			group: "border-use",
+			rank: 4,
+			hint: "Calendar and marketplace borders count toward this.",
+			href: PROFILE_PATH,
+			hrefLabel: "Open profile",
+			automation: "profileCosmetics"
+		}),
+		define("Change your border once a day for a week", "avatar", {
+			group: "border-daily",
+			rank: 1,
+			hint: "Change your border each UTC day for 7 days.",
+			href: PROFILE_PATH,
+			hrefLabel: "Open profile",
+			automation: "profileCosmetics"
+		}),
+		define("Change your border once a month for a year", "avatar", {
+			group: "border-monthly",
+			rank: 1,
+			hint: "Change your border at least once each calendar month for 12 months.",
+			href: PROFILE_PATH,
+			hrefLabel: "Open profile",
+			automation: "profileCosmetics"
+		}),
+		define("Change your avatar items every day for a week", "avatar", {
+			group: "avatar-daily",
+			rank: 1,
+			hint: "Change an avatar item each day for 7 days.",
+			href: PROFILE_PATH,
+			hrefLabel: "Open profile",
+			automation: "profileCosmetics"
+		}),
+		define("Change your avatar once a month for 3 months", "avatar", {
+			group: "avatar-monthly",
+			rank: 1,
+			hint: "Change your avatar at least once a month for 3 months.",
+			href: PROFILE_PATH,
+			hrefLabel: "Open profile",
+			automation: "profileCosmetics"
+		}),
+		define("Change your avatar once a month for 6 months", "avatar", {
+			group: "avatar-monthly",
+			rank: 2,
+			hint: "Keep a monthly avatar change going for 6 months.",
+			href: PROFILE_PATH,
+			hrefLabel: "Open profile",
+			automation: "profileCosmetics"
+		}),
+		define("Change your avatar once a month for 1 year", "avatar", {
+			group: "avatar-monthly",
+			rank: 3,
+			hint: "Keep a monthly avatar change going for 12 months.",
+			href: PROFILE_PATH,
+			hrefLabel: "Open profile",
+			automation: "profileCosmetics"
+		}),
+		define("Visit the FAQ page", "visitPages", {
+			hint: "Open the FAQ / support page once.",
+			href: FAQ_PATH,
+			hrefLabel: "Visit FAQ",
+			automation: "visitPages"
+		}),
+		define("Visit the Hive page", "visitPages", {
+			hint: "Open the Hive / information page once.",
+			href: HIVE_PATH,
+			hrefLabel: "Visit Hive",
+			automation: "visitPages"
+		}),
+		define("Watch 10 Videos", "watchVideos", {
+			group: "watch-videos",
+			rank: 1,
+			hint: "Watch 10 videos on Alienware Arena.",
+			href: VIDEOS_PATH,
+			hrefLabel: "Open videos",
+			automation: "watchVideos"
+		}),
+		define("Watch 100 Videos", "watchVideos", {
+			group: "watch-videos",
+			rank: 2,
+			hint: "Keep watching Arena videos toward 100.",
+			href: VIDEOS_PATH,
+			hrefLabel: "Open videos",
+			automation: "watchVideos"
+		}),
+		define("Watch 1000 Videos", "watchVideos", {
+			group: "watch-videos",
+			rank: 3,
+			hint: "Long-run video-watch achievement.",
+			href: VIDEOS_PATH,
+			hrefLabel: "Open videos",
+			kind: "inform"
+		}),
+		define("Read 10 News Articles", "readArticles", {
+			group: "read-articles",
+			rank: 1,
+			hint: "Open 10 Pulse / news articles.",
+			href: NEWS_PATH,
+			hrefLabel: "Open news",
+			automation: "readArticles"
+		}),
+		define("Read 100 News Articles", "readArticles", {
+			group: "read-articles",
+			rank: 2,
+			hint: "Keep reading Arena news toward 100.",
+			href: NEWS_PATH,
+			hrefLabel: "Open news",
+			automation: "readArticles"
+		}),
+		define("Read 1000 News Articles", "readArticles", {
+			group: "read-articles",
+			rank: 3,
+			hint: "Long-run article-read achievement.",
+			href: NEWS_PATH,
+			hrefLabel: "Open news",
+			kind: "inform"
+		}),
+		define("Enter Game-Vault", "gameVault", {
+			group: "vault-enter",
+			rank: 1,
+			hint: "Open the Game Vault page once.",
+			href: GAME_VAULT_PATH,
+			hrefLabel: "Open vault",
+			automation: "gameVault"
+		}),
+		define("Enter Game-Vault 5 times", "gameVault", {
+			group: "vault-enter",
+			rank: 2,
+			hint: "Visit Game Vault on 5 different days / entries.",
+			href: GAME_VAULT_PATH,
+			hrefLabel: "Open vault",
+			automation: "gameVault"
+		}),
+		define("Enter Game-Vault 12 times", "gameVault", {
+			group: "vault-enter",
+			rank: 3,
+			hint: "Keep entering Game Vault toward 12 visits.",
+			href: GAME_VAULT_PATH,
+			hrefLabel: "Open vault",
+			automation: "gameVault"
+		}),
+		define("Enter Game-Vault 24 times", "gameVault", {
+			group: "vault-enter",
+			rank: 4,
+			hint: "Keep entering Game Vault toward 24 visits.",
+			href: GAME_VAULT_PATH,
+			hrefLabel: "Open vault",
+			automation: "gameVault"
+		}),
+		define("Get 1 game from game vault", "gameVault", {
+			group: "vault-claim",
+			rank: 1,
+			hint: "Claim one Game Vault title when you have enough ARP.",
+			href: GAME_VAULT_PATH,
+			hrefLabel: "Open vault",
+			kind: "inform"
+		}),
+		define("Get 5 games from game vault", "gameVault", {
+			group: "vault-claim",
+			rank: 2,
+			hint: "Claim 5 Game Vault titles over time.",
+			href: GAME_VAULT_PATH,
+			hrefLabel: "Open vault",
+			kind: "inform"
+		}),
+		define("Get 10 games from game vault", "gameVault", {
+			group: "vault-claim",
+			rank: 3,
+			hint: "Claim 10 Game Vault titles over time.",
+			href: GAME_VAULT_PATH,
+			hrefLabel: "Open vault",
+			kind: "inform"
+		}),
+		define("Post a relay", "relay", {
+			group: "relay-post",
+			rank: 1,
+			hint: "Post one Relay (community post).",
+			href: RELAY_PATH,
+			hrefLabel: "Open Relay",
+			aliases: ["Post a Relay"]
+		}),
+		define("Post 10 Relays", "relay", {
+			group: "relay-post",
+			rank: 2,
+			hint: "Post 10 Relays.",
+			href: RELAY_PATH,
+			hrefLabel: "Open Relay"
+		}),
+		define("Post 50 relays", "relay", {
+			group: "relay-post",
+			rank: 3,
+			hint: "Post 50 Relays.",
+			href: RELAY_PATH,
+			hrefLabel: "Open Relay"
+		}),
+		define("Comment on a relay", "relay", {
+			group: "relay-comment",
+			rank: 1,
+			hint: "Leave a comment on someone else's Relay.",
+			href: RELAY_PATH,
+			hrefLabel: "Open Relay"
+		}),
+		define("React to a relay", "relay", {
+			group: "relay-react",
+			rank: 1,
+			hint: "React to one Relay.",
+			href: RELAY_PATH,
+			hrefLabel: "Open Relay"
+		}),
+		define("React to 10 relays", "relay", {
+			group: "relay-react",
+			rank: 2,
+			hint: "React to 10 Relays.",
+			href: RELAY_PATH,
+			hrefLabel: "Open Relay"
+		}),
+		define("React to 50 relays", "relay", {
+			group: "relay-react",
+			rank: 3,
+			hint: "React to 50 Relays.",
+			href: RELAY_PATH,
+			hrefLabel: "Open Relay"
+		}),
+		define("React to 100 relays", "relay", {
+			group: "relay-react",
+			rank: 4,
+			hint: "React to 100 Relays.",
+			href: RELAY_PATH,
+			hrefLabel: "Open Relay"
+		}),
+		define("Vote on your first Arena Connect Poll", "discord", {
+			group: "discord-poll",
+			rank: 1,
+			hint: "Vote on the current Discord / Arena Connect poll (also in What to do).",
+			coveredByActionPlan: true
+		}),
+		define("Vote on 10 Arena Connect polls", "discord", {
+			group: "discord-poll",
+			rank: 2,
+			hint: "Keep voting on weekday Discord polls.",
+			coveredByActionPlan: true
+		}),
+		define("Vote on 50 Arena Connect polls", "discord", {
+			group: "discord-poll",
+			rank: 3,
+			hint: "Long-run Discord poll votes.",
+			coveredByActionPlan: true,
+			kind: "inform"
+		}),
+		define("Vote on 100 Arena Connect polls", "discord", {
+			group: "discord-poll",
+			rank: 4,
+			hint: "Long-run Discord poll votes.",
+			coveredByActionPlan: true,
+			kind: "inform"
+		}),
+		define("Vote on 500 Arena Connect polls", "discord", {
+			group: "discord-poll",
+			rank: 5,
+			hint: "Long-run Discord poll votes.",
+			coveredByActionPlan: true,
+			kind: "inform"
+		}),
+		define("Play all 3 Steam quests", "steamQuests", {
+			group: "steam-all-three",
+			rank: 1,
+			hint: "Finish all three weekly Steam quests (also in What to do).",
+			coveredByActionPlan: true
+		}),
+		define("Play all 3 Steam quests 5 times", "steamQuests", {
+			group: "steam-all-three",
+			rank: 2,
+			hint: "Clear all three Steam quests for 5 weeks.",
+			coveredByActionPlan: true,
+			kind: "inform"
+		}),
+		define("Play all 3 Steam quests 10 times", "steamQuests", {
+			group: "steam-all-three",
+			rank: 3,
+			hint: "Clear all three Steam quests for 10 weeks.",
+			coveredByActionPlan: true,
+			kind: "inform"
+		}),
+		define("Play all 3 Steam quests 20 times", "steamQuests", {
+			group: "steam-all-three",
+			rank: 4,
+			hint: "Clear all three Steam quests for 20 weeks.",
+			coveredByActionPlan: true,
+			kind: "inform"
+		}),
+		define("Play all 3 Steam quests 50 times", "steamQuests", {
+			group: "steam-all-three",
+			rank: 5,
+			hint: "Clear all three Steam quests for 50 weeks.",
+			coveredByActionPlan: true,
+			kind: "inform"
+		}),
+		define("Steam: Play 10 Steam Quests", "steamQuests", {
+			group: "steam-quest-count",
+			rank: 1,
+			hint: "Complete 10 Steam quests over time.",
+			coveredByActionPlan: true
+		}),
+		define("Steam: Play 25 Steam Quests", "steamQuests", {
+			group: "steam-quest-count",
+			rank: 2,
+			hint: "Complete 25 Steam quests over time.",
+			coveredByActionPlan: true,
+			kind: "inform"
+		}),
+		define("Steam: Play 50 Steam Quests", "steamQuests", {
+			group: "steam-quest-count",
+			rank: 3,
+			hint: "Complete 50 Steam quests over time.",
+			coveredByActionPlan: true,
+			kind: "inform"
+		}),
+		define("Steam: Play 100 Steam Quests", "steamQuests", {
+			group: "steam-quest-count",
+			rank: 4,
+			hint: "Complete 100 Steam quests over time.",
+			coveredByActionPlan: true,
+			kind: "inform"
+		}),
+		define("Steam: Play 365 Steam Quests", "steamQuests", {
+			group: "steam-quest-count",
+			rank: 5,
+			hint: "Complete 365 Steam quests over time.",
+			coveredByActionPlan: true,
+			kind: "inform"
+		}),
+		define("Steam: Play 10 hours", "steamHours", {
+			group: "steam-hours",
+			rank: 1,
+			hint: "Play tracked Steam hours through Arena quests.",
+			coveredByActionPlan: true
+		}),
+		define("Steam: Play 50 hours", "steamHours", {
+			group: "steam-hours",
+			rank: 2,
+			hint: "Keep playing Steam quests toward 50 hours.",
+			coveredByActionPlan: true,
+			kind: "inform"
+		}),
+		define("Steam: Play 125 hours", "steamHours", {
+			group: "steam-hours",
+			rank: 3,
+			hint: "Keep playing Steam quests toward 125 hours.",
+			coveredByActionPlan: true,
+			kind: "inform"
+		}),
+		define("Steam: Play 500 hours", "steamHours", {
+			group: "steam-hours",
+			rank: 4,
+			hint: "Long-run Steam hours.",
+			coveredByActionPlan: true,
+			kind: "inform"
+		}),
+		define("Steam: Play 1000 hours", "steamHours", {
+			group: "steam-hours",
+			rank: 5,
+			hint: "Long-run Steam hours.",
+			coveredByActionPlan: true,
+			kind: "inform"
+		}),
+		define("Steam: Play 2500 hours", "steamHours", {
+			group: "steam-hours",
+			rank: 6,
+			hint: "Long-run Steam hours.",
+			coveredByActionPlan: true,
+			kind: "inform"
+		}),
+		define("Steam: Play 10000 hours", "steamHours", {
+			group: "steam-hours",
+			rank: 7,
+			hint: "Long-run Steam hours.",
+			coveredByActionPlan: true,
+			kind: "inform"
+		}),
+		define("Watch 10 hours of Twitch on Nexus channels", "twitchNexus", {
+			group: "twitch-nexus",
+			rank: 1,
+			hint: "Watch Twitch via Arena on Nexus channels (also in What to do).",
+			coveredByActionPlan: true
+		}),
+		define("Watch 100 hours of Twitch on Nexus channels", "twitchNexus", {
+			group: "twitch-nexus",
+			rank: 2,
+			hint: "Long-run Nexus Twitch hours.",
+			coveredByActionPlan: true,
+			kind: "inform"
+		}),
+		define("Watch 1000 Hours of Twitch.tv on Nexus channels", "twitchNexus", {
+			group: "twitch-nexus",
+			rank: 3,
+			hint: "Long-run Nexus Twitch hours.",
+			coveredByActionPlan: true,
+			kind: "inform"
+		}),
+		define("Watch 10 hours of Twitch.tv on Hive channels", "twitchHive", {
+			group: "twitch-hive",
+			rank: 1,
+			hint: "Watch Twitch via Arena on Hive channels.",
+			coveredByActionPlan: true
+		}),
+		define("Watch 100 Hours of Twitch.tv on Hive channels", "twitchHive", {
+			group: "twitch-hive",
+			rank: 2,
+			hint: "Long-run Hive Twitch hours.",
+			coveredByActionPlan: true,
+			kind: "inform"
+		}),
+		define("Watch 1000 Hours of Twitch.tv on Hive channels", "twitchHive", {
+			group: "twitch-hive",
+			rank: 3,
+			hint: "Long-run Hive Twitch hours.",
+			coveredByActionPlan: true,
+			kind: "inform"
+		}),
+		define("Get your first border from Calendar rewards", "calendarBorders", {
+			group: "calendar-borders",
+			rank: 1,
+			hint: "Claim Daily Calendar until a border drops (also in What to do).",
+			coveredByActionPlan: true
+		}),
+		define("Get all the borders from a monthly calendar", "calendarBorders", {
+			group: "calendar-borders",
+			rank: 2,
+			hint: "Do not miss Daily Calendar days this month.",
+			coveredByActionPlan: true
+		}),
+		define("Get all borders from calendar for 3 months", "calendarBorders", {
+			group: "calendar-borders",
+			rank: 3,
+			hint: "Perfect calendar months stack.",
+			coveredByActionPlan: true,
+			kind: "inform"
+		}),
+		define("Get all borders from calendar for 6 months", "calendarBorders", {
+			group: "calendar-borders",
+			rank: 4,
+			hint: "Perfect calendar months stack.",
+			coveredByActionPlan: true,
+			kind: "inform"
+		}),
+		define("Get all borders from calendar for 1 year", "calendarBorders", {
+			group: "calendar-borders",
+			rank: 5,
+			hint: "Perfect calendar months stack.",
+			coveredByActionPlan: true,
+			kind: "inform"
+		}),
+		define("Receive all 28-day rewards in a single month", "streaks", {
+			group: "streaks-28",
+			rank: 1,
+			hint: "Claim every Daily Calendar day in the 28-day track.",
+			coveredByActionPlan: true
+		}),
+		define("Receive all 28-day rewards for 3 months", "streaks", {
+			group: "streaks-28",
+			rank: 2,
+			hint: "Keep a perfect 28-day calendar streak for 3 months.",
+			coveredByActionPlan: true,
+			kind: "inform"
+		}),
+		define("Receive all 28-day rewards for 6 months", "streaks", {
+			group: "streaks-28",
+			rank: 3,
+			hint: "Keep a perfect 28-day calendar streak for 6 months.",
+			coveredByActionPlan: true,
+			kind: "inform"
+		}),
+		define("Receive all 28-day rewards for 1 year", "streaks", {
+			group: "streaks-28",
+			rank: 4,
+			hint: "Keep a perfect 28-day calendar streak for 12 months.",
+			coveredByActionPlan: true,
+			kind: "inform"
+		}),
+		define("Be a member for 1 year", "years", {
+			group: "years",
+			rank: 1,
+			hint: "Passive — wait for the anniversary.",
+			kind: "inform"
+		}),
+		define("Be a member for 2 years", "years", {
+			group: "years",
+			rank: 2,
+			hint: "Passive — wait for the anniversary.",
+			kind: "inform"
+		}),
+		define("Be a member for 3 years", "years", {
+			group: "years",
+			rank: 3,
+			hint: "Passive — wait for the anniversary.",
+			kind: "inform"
+		}),
+		define("Be a member for 4 years", "years", {
+			group: "years",
+			rank: 4,
+			hint: "Passive — wait for the anniversary.",
+			kind: "inform"
+		}),
+		define("Be a member for 5 years", "years", {
+			group: "years",
+			rank: 5,
+			hint: "Passive — wait for the anniversary.",
+			kind: "inform"
+		}),
+		define("Be a member for 6 years", "years", {
+			group: "years",
+			rank: 6,
+			hint: "Passive — wait for the anniversary.",
+			kind: "inform"
+		}),
+		define("Be a member for 7 years", "years", {
+			group: "years",
+			rank: 7,
+			hint: "Passive — wait for the anniversary.",
+			kind: "inform"
+		}),
+		define("Be a member for 8 years", "years", {
+			group: "years",
+			rank: 8,
+			hint: "Passive — wait for the anniversary.",
+			kind: "inform"
+		}),
+		define("Be a member for 9 years", "years", {
+			group: "years",
+			rank: 9,
+			hint: "Passive — wait for the anniversary.",
+			kind: "inform"
+		}),
+		define("Be a member for 10 years", "years", {
+			group: "years",
+			rank: 10,
+			hint: "Passive — wait for the anniversary.",
+			kind: "inform"
+		}),
+		define("Reach Tier 2", "tiers", {
+			group: "tiers",
+			rank: 1,
+			hint: "Earn lifetime ARP to raise your Arena tier.",
+			kind: "inform"
+		}),
+		define("Reach Tier 3", "tiers", {
+			group: "tiers",
+			rank: 2,
+			hint: "Earn lifetime ARP to raise your Arena tier.",
+			kind: "inform"
+		}),
+		define("Reach Tier 4", "tiers", {
+			group: "tiers",
+			rank: 3,
+			hint: "Earn lifetime ARP to raise your Arena tier.",
+			kind: "inform"
+		}),
+		define("Reach Tier 5", "tiers", {
+			group: "tiers",
+			rank: 4,
+			hint: "Earn lifetime ARP to raise your Arena tier.",
+			kind: "inform"
+		}),
+		define("Participate in a Community Event", "communityEvents", {
+			group: "community-events",
+			rank: 1,
+			hint: "Play required hours in a live Community Event (also in What to do).",
+			coveredByActionPlan: true
+		}),
+		define("Participate in 2 Community Events", "communityEvents", {
+			group: "community-events",
+			rank: 2,
+			hint: "Join the next live Community Event.",
+			coveredByActionPlan: true,
+			kind: "inform"
+		}),
+		define("Participate in 5 Community Events", "communityEvents", {
+			group: "community-events",
+			rank: 3,
+			hint: "Join live Community Events as they appear.",
+			coveredByActionPlan: true,
+			kind: "inform"
+		}),
+		define("Participate in 10 Community Events", "communityEvents", {
+			group: "community-events",
+			rank: 4,
+			hint: "Join live Community Events as they appear.",
+			coveredByActionPlan: true,
+			kind: "inform"
+		}),
+		define("Participate in 20 Community Events", "communityEvents", {
+			group: "community-events",
+			rank: 5,
+			hint: "Join live Community Events as they appear.",
+			coveredByActionPlan: true,
+			kind: "inform"
+		}),
+		define("Finish all required personal hours for a community event", "communityHours", {
+			group: "community-hours",
+			rank: 1,
+			hint: "Finish the personal-hours track on a live event.",
+			coveredByActionPlan: true
+		}),
+		define("Finish 20 personal hours for community events", "communityHours", {
+			group: "community-hours",
+			rank: 2,
+			hint: "Keep playing Community Event hours.",
+			coveredByActionPlan: true,
+			kind: "inform"
+		}),
+		define("Finish 50 personal hours for community events", "communityHours", {
+			group: "community-hours",
+			rank: 3,
+			hint: "Keep playing Community Event hours.",
+			coveredByActionPlan: true,
+			kind: "inform"
+		}),
+		define("Finish 100 personal hours for community events", "communityHours", {
+			group: "community-hours",
+			rank: 4,
+			hint: "Keep playing Community Event hours.",
+			coveredByActionPlan: true,
+			kind: "inform"
+		}),
+		define("Equip an artifact", "artifacts", {
+			group: "artifact-equip",
+			rank: 1,
+			hint: "Equip any artifact in the Showroom (also in What to do).",
+			coveredByActionPlan: true
+		}),
+		define("Equip 5 artifacts", "artifacts", {
+			group: "artifact-equip",
+			rank: 2,
+			hint: "Equip 5 different artifacts over time.",
+			coveredByActionPlan: true
+		}),
+		define("Equip 15 artifacts", "artifacts", {
+			group: "artifact-equip",
+			rank: 3,
+			hint: "Equip 15 different artifacts over time.",
+			coveredByActionPlan: true,
+			kind: "inform"
+		}),
+		define("Upgrade an artifact", "artifacts", {
+			group: "artifact-upgrade",
+			rank: 1,
+			hint: "Spend fragments to upgrade any artifact.",
+			coveredByActionPlan: true
+		}),
+		define("Upgrade 3 artifacts", "artifacts", {
+			group: "artifact-upgrade",
+			rank: 2,
+			hint: "Upgrade 3 different artifacts.",
+			coveredByActionPlan: true
+		}),
+		define("Upgrade 7 Artifacts", "artifacts", {
+			group: "artifact-upgrade",
+			rank: 3,
+			hint: "Upgrade 7 different artifacts.",
+			coveredByActionPlan: true,
+			kind: "inform"
+		}),
+		define("Fully Upgrade an artifact", "artifacts", {
+			group: "artifact-max",
+			rank: 1,
+			hint: "Take one artifact to max tier.",
+			coveredByActionPlan: true
+		}),
+		define("Fully Upgrade 3 artifacts", "artifacts", {
+			group: "artifact-max",
+			rank: 2,
+			hint: "Max 3 artifacts.",
+			coveredByActionPlan: true,
+			kind: "inform"
+		}),
+		define("Fully Upgrade 5 artifacts", "artifacts", {
+			group: "artifact-max",
+			rank: 3,
+			hint: "Max 5 artifacts.",
+			coveredByActionPlan: true,
+			kind: "inform"
+		}),
+		define("Spend 100 ARP", "spendArp", {
+			group: "spend-arp",
+			rank: 1,
+			hint: "Spend ARP in Game Vault or the marketplace.",
+			href: GAME_VAULT_PATH,
+			hrefLabel: "Open vault",
+			kind: "inform"
+		}),
+		define("Spend 1000 ARP", "spendArp", {
+			group: "spend-arp",
+			rank: 2,
+			hint: "Keep claiming vault / marketplace spends.",
+			href: GAME_VAULT_PATH,
+			hrefLabel: "Open vault",
+			kind: "inform"
+		}),
+		define("Spend 5000 ARP", "spendArp", {
+			group: "spend-arp",
+			rank: 3,
+			hint: "Keep claiming vault / marketplace spends.",
+			href: GAME_VAULT_PATH,
+			hrefLabel: "Open vault",
+			kind: "inform"
+		}),
+		define("Spend 10000 ARP", "spendArp", {
+			group: "spend-arp",
+			rank: 4,
+			hint: "Keep claiming vault / marketplace spends.",
+			href: GAME_VAULT_PATH,
+			hrefLabel: "Open vault",
+			kind: "inform"
+		}),
+		define("Earn 5 fragments", "fragments", {
+			group: "fragments",
+			rank: 1,
+			hint: "Fragments drop from daily play and Battle Pass — already covered by daily ARP work.",
+			coveredByActionPlan: true,
+			kind: "inform"
+		}),
+		define("Earn 15 fragments", "fragments", {
+			group: "fragments",
+			rank: 2,
+			hint: "Keep doing daily ARP sources.",
+			coveredByActionPlan: true,
+			kind: "inform"
+		}),
+		define("Earn 30 fragments", "fragments", {
+			group: "fragments",
+			rank: 3,
+			hint: "Keep doing daily ARP sources.",
+			coveredByActionPlan: true,
+			kind: "inform"
+		}),
+		define("Earn 50 fragments", "fragments", {
+			group: "fragments",
+			rank: 4,
+			hint: "Keep doing daily ARP sources.",
+			coveredByActionPlan: true,
+			kind: "inform"
+		})
+	];
+	function normalizeAchievementTitle(value) {
+		return value.replaceAll(/\s+/g, " ").trim().toLowerCase();
+	}
+	new Map(ACHIEVEMENTS.map((achievement) => [achievement.id, achievement]));
+	var ACHIEVEMENT_BY_TITLE = new Map();
+	for (const achievement of ACHIEVEMENTS) {
+		ACHIEVEMENT_BY_TITLE.set(normalizeAchievementTitle(achievement.title), achievement);
+		const aliases = achievement.aliases ?? [];
+		for (const alias of aliases) ACHIEVEMENT_BY_TITLE.set(normalizeAchievementTitle(alias), achievement);
+	}
+	var SETTINGS_KEY = "achievementSettings";
+	var COOLDOWNS_KEY = "achievementCooldowns";
+	function utcDateString(now = new Date()) {
+		return now.toISOString().slice(0, 10);
+	}
+	async function loadAutomationCooldowns() {
+		try {
+			const raw = await _GM.getValue(COOLDOWNS_KEY);
+			if (!raw) return {};
+			const parsed = JSON.parse(raw);
+			if (typeof parsed !== "object" || !parsed) return {};
+			const p = parsed;
+			const result = {};
+			if (typeof p.borderRotatedDate === "string") result.borderRotatedDate = p.borderRotatedDate;
+			if (typeof p.avatarRotatedDate === "string") result.avatarRotatedDate = p.avatarRotatedDate;
+			if (typeof p.aboutMeSubmittedMonth === "string") result.aboutMeSubmittedMonth = p.aboutMeSubmittedMonth;
+			if (typeof p.visitPagesDate === "string") result.visitPagesDate = p.visitPagesDate;
+			if (typeof p.watchVideosDate === "string") result.watchVideosDate = p.watchVideosDate;
+			if (typeof p.readArticlesDate === "string") result.readArticlesDate = p.readArticlesDate;
+			if (typeof p.gameVaultDate === "string") result.gameVaultDate = p.gameVaultDate;
+			return result;
+		} catch {
+			return {};
+		}
+	}
+	var DEFAULT_AUTOMATIONS = {
+		visitPages: false,
+		profileCosmetics: false,
+		watchVideos: false,
+		readArticles: false,
+		gameVault: false
+	};
+	var defaultAchievementSettings = {
+		runAutomatically: false,
+		automations: { ...DEFAULT_AUTOMATIONS }
+	};
+	function isPartialSettings(value) {
+		return typeof value === "object" && !!value;
+	}
+	function mergeAutomations(base, incoming) {
+		if (!incoming) return base;
+		const next = { ...base };
+		for (const key of ACHIEVEMENT_AUTOMATION_KEYS) if (typeof incoming[key] === "boolean") next[key] = incoming[key];
+		return next;
+	}
+	async function getAchievementSettings() {
+		const raw = await _GM.getValue(SETTINGS_KEY);
+		const settings = {
+			runAutomatically: false,
+			automations: { ...DEFAULT_AUTOMATIONS }
+		};
+		if (!raw) return settings;
+		try {
+			const parsedUnknown = typeof raw === "string" ? JSON.parse(raw) : raw;
+			if (!isPartialSettings(parsedUnknown)) return settings;
+			if (typeof parsedUnknown.runAutomatically === "boolean") settings.runAutomatically = parsedUnknown.runAutomatically;
+			settings.automations = mergeAutomations(settings.automations, parsedUnknown.automations);
+		} catch (error) {
+			console.error("[Achievements] Error parsing settings:", error);
+		}
+		return settings;
+	}
+	async function saveAchievementSettings(patch) {
+		const previous = await getAchievementSettings();
+		const next = {
+			runAutomatically: patch.runAutomatically ?? previous.runAutomatically,
+			automations: patch.automations ? {
+				...previous.automations,
+				...patch.automations
+			} : previous.automations
+		};
+		await _GM.setValue(SETTINGS_KEY, JSON.stringify(next));
+		return next;
+	}
+	function isAchievementAutomationEnabled(settings, key) {
+		return settings.runAutomatically && settings.automations[key];
+	}
+	var MAX_ACTION_TODOS = 8;
+	var MAX_INFORM_TODOS = 3;
+	var BORDER_GROUPS = new Set([
+		"border-use",
+		"border-daily",
+		"border-monthly"
+	]);
+	var AVATAR_GROUPS = new Set(["avatar-daily", "avatar-monthly"]);
+	function isAchievementEarned(snapshot, id) {
+		return snapshot?.items[id]?.isEarned === true;
+	}
+	function nextUnearnedInGroup(snapshot, group) {
+		return ACHIEVEMENTS.filter((achievement) => achievement.group === group).toSorted((left, right) => left.rank - right.rank).find((achievement) => !isAchievementEarned(snapshot, achievement.id));
+	}
+	function collectNextUnearned(snapshot) {
+		const seenGroups = new Set();
+		const nexts = [];
+		for (const achievement of ACHIEVEMENTS) {
+			if (seenGroups.has(achievement.group)) continue;
+			seenGroups.add(achievement.group);
+			const next = nextUnearnedInGroup(snapshot, achievement.group);
+			if (next && next.coveredByActionPlan !== true) nexts.push(next);
+		}
+		return nexts;
+	}
+	function isSatisfiedForCurrentInterval(achievement, settings, cooldowns, today) {
+		const key = achievement.automation;
+		if (key === void 0 || !isAchievementAutomationEnabled(settings, key)) return false;
+		if (key === "profileCosmetics") {
+			if (BORDER_GROUPS.has(achievement.group)) return cooldowns.borderRotatedDate === today;
+			if (AVATAR_GROUPS.has(achievement.group)) return cooldowns.avatarRotatedDate === today;
+			if (achievement.id === "add-about-me") return cooldowns.aboutMeSubmittedMonth !== void 0;
+			return false;
+		}
+		if (key === "visitPages") return cooldowns.visitPagesDate === today;
+		if (key === "watchVideos") return cooldowns.watchVideosDate === today;
+		if (key === "readArticles") return cooldowns.readArticlesDate === today;
+		if (key === "gameVault") return cooldowns.gameVaultDate === today;
+		return false;
+	}
+	function buildTodo(achievement, settings, username) {
+		const canAutomate = achievement.automation !== void 0 && isAchievementAutomationEnabled(settings, achievement.automation);
+		const canVisitInBackground = canAutomate && achievement.automation !== "profileCosmetics";
+		const todo = {
+			text: achievement.title,
+			reasons: [{ text: achievement.hint }],
+			tone: achievement.kind === "inform" ? "muted" : "default",
+			urgency: {
+				kind: achievement.kind === "inform" ? "info" : "action",
+				readyAtMs: 0,
+				durationMs: 0
+			}
+		};
+		if (achievement.href) {
+			const href = achievement.href;
+			todo.openHref = username && href.includes("{username}") ? href.split("{username}").join(encodeURIComponent(username)) : href;
+			todo.openHrefLabel = canAutomate ? `${achievement.hrefLabel ?? "Open"} now` : achievement.hrefLabel ?? "Open";
+			if (canVisitInBackground) todo.visitInBackground = true;
+		}
+		return todo;
+	}
+	function emptyTodos(snapshot) {
+		if (!snapshot || Object.keys(snapshot.items).length === 0) return [{
+			tone: "muted",
+			text: "Achievements page not scraped yet — Refresh to load progress",
+			urgency: {
+				kind: "info",
+				readyAtMs: 0,
+				durationMs: 0
+			}
+		}];
+		return [{
+			tone: "muted",
+			text: "No extra achievement steps — daily ARP work already covers the rest",
+			urgency: {
+				kind: "info",
+				readyAtMs: 0,
+				durationMs: 0
+			}
+		}];
+	}
+	function buildAchievementTodos(snapshot, settings, cooldowns = {}) {
+		const actions = [];
+		const infos = [];
+		const today = utcDateString();
+		const collected = collectNextUnearned(snapshot).filter((next) => !isSatisfiedForCurrentInterval(next, settings, cooldowns, today));
+		for (const next of collected) {
+			const todo = buildTodo(next, settings, snapshot?.username);
+			if (next.kind === "inform") {
+				if (infos.length < MAX_INFORM_TODOS) infos.push(todo);
+				continue;
+			}
+			if (actions.length < MAX_ACTION_TODOS) actions.push(todo);
+		}
+		if (actions.length === 0 && infos.length === 0) return emptyTodos(snapshot);
+		return [...actions, ...infos];
+	}
+	function achievementProgressLabel(snapshot) {
+		if (!snapshot || snapshot.totalCount <= 0) return "progress unknown";
+		return `${snapshot.earnedCount}/${snapshot.totalCount} earned`;
+	}
+	function renderAchievementsPanel(options) {
+		if (!options.isEnabled) return "";
+		return `
+    <div id="ao-achievements">
+      ${renderActionPlanContents(buildAchievementTodos(options.snapshot, options.settings, options.cooldowns ?? {}), { heading: `Achievements · ${achievementProgressLabel(options.snapshot)}` })}
+    </div>
+  `;
+	}
+	function bindAchievementOpenButtons(root, onVisited) {
+		for (const button of root.querySelectorAll(".ao-ach-open-btn")) button.addEventListener("click", () => {
+			const href = button.dataset.href;
+			if (!href) return;
+			if (button.dataset.visit === "1") {
+				(async () => {
+					try {
+						await fetch(href, { headers: { Accept: "text/html" } });
+						showAoToast("Visited page for achievement progress.");
+						await onVisited?.();
+					} catch (error) {
+						console.warn("[Achievements] Visit failed", href, error);
+						location.assign(href);
+					}
+				})();
+				return;
+			}
+			location.assign(href);
+		});
+	}
+	function syncAchievementAutoEnabled(root, isOn) {
+		const sub = root.querySelector(".ao-ach-sub");
+		if (!sub) return;
+		sub.classList.toggle("ao-ach-sub--off", !isOn);
+	}
+	function bindAchievementAutomationSwitches(root, onChanged) {
+		root.querySelector("#ao-ach-run-automatically")?.addEventListener("change", (event) => {
+			const input = event.currentTarget;
+			if (!(input instanceof HTMLInputElement)) return;
+			(async () => {
+				if (!input.checked) {
+					await saveAchievementSettings({ runAutomatically: false });
+					syncAchievementAutoEnabled(root, false);
+					await onChanged();
+					return;
+				}
+				await saveArtifactSettings({ achievementsEnabled: true });
+				await saveAchievementSettings({
+					runAutomatically: true,
+					automations: {
+						visitPages: true,
+						profileCosmetics: true,
+						watchVideos: true,
+						readArticles: true,
+						gameVault: true
+					}
+				});
+				syncAchievementAutoEnabled(root, true);
+				for (const key of ACHIEVEMENT_AUTOMATION_KEYS) {
+					const category = root.querySelector(`#ao-ach-auto-${CSS.escape(key)}`);
+					if (category) category.checked = true;
+				}
+				await onChanged();
+			})();
+		});
+		for (const key of ACHIEVEMENT_AUTOMATION_KEYS) root.querySelector(`#ao-ach-auto-${CSS.escape(key)}`)?.addEventListener("change", (event) => {
+			const input = event.currentTarget;
+			if (!(input instanceof HTMLInputElement)) return;
+			saveAutomation(key, input.checked).then(onChanged);
+		});
+	}
+	async function saveAutomation(key, isEnabled) {
+		await saveAchievementSettings({ automations: { [key]: isEnabled } });
+	}
 	var BP_CLAIM_ALL_PENDING_KEY = "ao-bp-claim-all";
 	var BP_CLAIM_SKIP_ARP_VALUE = "skip-arp";
 	async function persistBattlePassAfterClaim(options) {
@@ -9036,6 +10188,97 @@
 			handleClaimAllBattlePass({ shouldSkipArpBoosts: button.dataset.skipArp === "1" });
 		});
 	}
+	var COUNT_MARKER = " achievements";
+	[
+		".achievement-card",
+		".achievement",
+		".achievements-item",
+		".member-achievement",
+		".achievement-item"
+	].join(", ");
+	function isAchievementsPage(path = location.pathname) {
+		return /\/member\/[^/]+\/achievements\/?$/i.test(path);
+	}
+	function trailingNumber(value) {
+		let index = value.length - 1;
+		while (index >= 0 && value.charAt(index) === " ") index -= 1;
+		const end = index;
+		while (index >= 0) {
+			const char = value.charAt(index);
+			if (char < "0" || char > "9") break;
+			index -= 1;
+		}
+		if (end === index) return;
+		const parsed = Number(value.slice(index + 1, end + 1));
+		return Number.isFinite(parsed) ? parsed : void 0;
+	}
+	function leadingNumber(value) {
+		let index = 0;
+		while (index < value.length && value.charAt(index) === " ") index += 1;
+		const start = index;
+		while (index < value.length) {
+			const char = value.charAt(index);
+			if (char < "0" || char > "9") break;
+			index += 1;
+		}
+		if (start === index) return;
+		const parsed = Number(value.slice(start, index));
+		return Number.isFinite(parsed) ? parsed : void 0;
+	}
+	function parseCountFromText(text) {
+		const collapsed = text.replaceAll(/\s+/g, " ").toLowerCase();
+		let searchFrom = 0;
+		while (searchFrom < collapsed.length) {
+			const markerIndex = collapsed.indexOf(COUNT_MARKER, searchFrom);
+			if (markerIndex === -1) return;
+			const window = collapsed.slice(Math.max(0, markerIndex - 24), markerIndex);
+			const slashIndex = window.lastIndexOf("/");
+			if (slashIndex !== -1) {
+				const earned = trailingNumber(window.slice(0, slashIndex));
+				const total = leadingNumber(window.slice(slashIndex + 1));
+				if (earned !== void 0 && total !== void 0) return {
+					earned,
+					total
+				};
+			}
+			searchFrom = markerIndex + 13;
+		}
+	}
+	function parseCount(document_) {
+		const fromBody = parseCountFromText(document_.body?.textContent ?? "");
+		if (fromBody) return fromBody;
+		for (const element of document_.querySelectorAll("h1, h2, h3, h4, h5, strong, span, div, p")) {
+			const text = element.textContent ?? "";
+			const lowered = text.replaceAll(/\s+/g, " ").toLowerCase();
+			if (!lowered.includes("achievements") || !lowered.includes("/")) continue;
+			const parsed = parseCountFromText(text);
+			if (parsed) return parsed;
+		}
+	}
+	function isAchievementsDocumentReady(document_ = document) {
+		return parseCount(document_) !== void 0;
+	}
+	async function waitForAchievementsDocument(timeoutMs = 12e3) {
+		if (isAchievementsDocumentReady(document)) return;
+		await new Promise((resolve) => {
+			let isSettled = false;
+			const observer = new MutationObserver(() => {
+				if (isAchievementsDocumentReady(document)) finish();
+			});
+			const timer = setTimeout(finish, timeoutMs);
+			function finish() {
+				if (isSettled) return;
+				isSettled = true;
+				observer.disconnect();
+				clearTimeout(timer);
+				resolve();
+			}
+			observer.observe(document.documentElement, {
+				childList: true,
+				subtree: true
+			});
+		});
+	}
 	function isControlCenterPage() {
 		let path = location.pathname;
 		while (path.endsWith("/") && path.length > 1) path = path.slice(0, -1);
@@ -9055,6 +10298,7 @@
 	function assertGmStorage() {
 		if (!hasGmStorage()) throw new TypeError("GM storage is unavailable. For pnpm run dev, install the userscript served at http://localhost:3000 (named server:AWA Toolkit). A custom stub that only @requires that file does not get @grant, so recommendations never load.");
 	}
+	async function gatherAchievements(options) {}
 	async function gatherData(options) {
 		assertGmStorage();
 		const isRemote = options?.remote ?? true;
@@ -9064,6 +10308,15 @@
 		const [snapshot, loadedState] = await Promise.all([snapshotPromise, siteStatePromise]);
 		if (snapshot?.slotLocks) await syncSlotLocksFromScrape(snapshot.slotLocks);
 		const settings = await getArtifactSettings();
+		const achievementSettings = await getAchievementSettings();
+		const achievements = await gatherAchievements({
+			isRemote,
+			shouldForceSite,
+			username: snapshot?.username,
+			settings,
+			achievementSettings
+		});
+		const achievementCooldowns = await loadAutomationCooldowns();
 		let siteState = loadedState ?? emptySiteState();
 		if (isSiteStatePage()) {
 			if (isRemote) siteState = await refreshSiteStateFromPage();
@@ -9082,7 +10335,10 @@
 			snapshot,
 			settings,
 			siteState,
-			result
+			result,
+			achievements,
+			achievementSettings,
+			achievementCooldowns
 		});
 	}
 	var gatheredCache = {};
@@ -9456,6 +10712,14 @@
 		const extras = supplementalNotes(result.notes).map((n) => `<div class="ao-note">${wrapArtifactNames(n)}</div>`).join("");
 		const vaultDiscount = renderVaultDiscountBlock(result);
 		const areActionsEnabled = areAccountActionsEnabled(settings);
+		const areAchievementsOn = areAchievementsEnabled(settings);
+		const achievementSettings = options.achievementSettings ?? defaultAchievementSettings;
+		const achievementsHtml = renderAchievementsPanel({
+			snapshot: options.achievements,
+			settings: achievementSettings,
+			isEnabled: areAchievementsOn,
+			...options.achievementCooldowns !== void 0 && { cooldowns: options.achievementCooldowns }
+		});
 		const upgrades = renderUpgradePath(result.upgrades, fragments, { shouldShowUpgradeButtons: areActionsEnabled });
 		const swap = formatSwapMessage(result);
 		const status = renderStatusSection(settings, siteState, snapshot?.slotLocks, {
@@ -9481,6 +10745,9 @@
 			hint: "Equip artifacts, upgrade, and claim Battle Pass for you. Use at your own risk.",
 			isChecked: areActionsEnabled
 		})}
+    </div>
+    
+    <div class="ao-notify">
       ${renderNotifySwitch({
 			id: "ao-browser-notifications",
 			title: "Desktop notifications",
@@ -9490,6 +10757,7 @@
       ${renderNotifyTypeSwitches(settings)}
     </div>
     ${hydrateBanner}
+    ${achievementsHtml}
     <div class="ao-muted">Inventory snapshot: ${scrapedAt} · Fragments: ${fragments}</div>
     ${vaultDiscount}
     ${extras}
@@ -9919,6 +11187,11 @@
 		}
 		types.dataset.off = "";
 	}
+	function syncAchievementsSubEnabled(root, isOn) {
+		const sub = root.querySelector(":scope .ao-body");
+		if (!sub) return;
+		sub.classList.toggle("ao-body--off", !isOn);
+	}
 	function bindNotificationTypeSwitches(root) {
 		for (const key of NOTIFICATION_TYPE_KEYS) root.querySelector(`#ao-notify-type-${CSS.escape(key)}`)?.addEventListener("change", (event) => {
 			const input = event.currentTarget;
@@ -9958,6 +11231,15 @@
 					return;
 				}
 				await saveArtifactSettings({ allowAccountActions: true });
+				await reloadOptimizerFromCache();
+			})();
+		});
+		root.querySelector("#ao-achievements-enabled")?.addEventListener("change", (event) => {
+			const input = event.currentTarget;
+			if (!(input instanceof HTMLInputElement)) return;
+			(async () => {
+				await saveArtifactSettings({ achievementsEnabled: input.checked });
+				syncAchievementsSubEnabled(root, input.checked);
 				await reloadOptimizerFromCache();
 			})();
 		});
@@ -10011,6 +11293,8 @@
 		bindClaimAllButtons(root);
 		bindOpenTwitchButtons(root);
 		bindVaultDiscountActions(root, onChanged);
+		bindAchievementOpenButtons(root, onChanged);
+		bindAchievementAutomationSwitches(root, onChanged);
 	}
 	function bindUpgradeButtons(root, onChanged) {
 		for (const button of root.querySelectorAll(".ao-upgrade-btn")) button.addEventListener("click", () => {
@@ -10077,7 +11361,12 @@
 			const body = tree().querySelector("#ao-body");
 			if (!body) return;
 			hideArtifactTip();
-			body.innerHTML = renderResultBody(cache.result, cache.snapshot, cache.settings, cache.siteState, { isHydrating: options.isHydrating === true });
+			body.innerHTML = renderResultBody(cache.result, cache.snapshot, cache.settings, cache.siteState, {
+				isHydrating: options.isHydrating === true,
+				achievements: cache.achievements,
+				achievementSettings: cache.achievementSettings,
+				achievementCooldowns: cache.achievementCooldowns
+			});
 			const equipButton = tree().querySelector("#ao-equip");
 			if (equipButton instanceof HTMLButtonElement) equipButton.hidden = !areAccountActionsEnabled(cache.settings);
 			bindDynamicBody(body, () => refreshView());
@@ -10247,6 +11536,38 @@
 			subtree: true
 		});
 	}
+	function findAchievementsMount() {
+		return document.querySelector("main.flex-shrink-0 > .container") ?? document.querySelector("main > .container") ?? void 0;
+	}
+	async function waitForAchievementsMount(timeoutMs = 12e3) {
+		if (findAchievementsMount()) return;
+		await new Promise((resolve) => {
+			let isSettled = false;
+			const observer = new MutationObserver(() => {
+				if (findAchievementsMount()) finish();
+			});
+			const timer = setTimeout(finish, timeoutMs);
+			function finish() {
+				if (isSettled) return;
+				isSettled = true;
+				observer.disconnect();
+				clearTimeout(timer);
+				resolve();
+			}
+			observer.observe(document.documentElement, {
+				childList: true,
+				subtree: true
+			});
+		});
+	}
+	function insertAchievementsHost(panel) {
+		const container = findAchievementsMount();
+		if (container) {
+			if (panel.parentElement !== container) container.prepend(panel);
+			return;
+		}
+		insertControlCenterHost(panel);
+	}
 	function mountInlinePanelShadow(host, bodyHtml) {
 		if (host.shadowRoot) host.shadowRoot.replaceChildren();
 		const shadow = host.shadowRoot ?? host.attachShadow({ mode: "open" });
@@ -10320,6 +11641,13 @@
     ${renderCredits({ compact: true })}
     ${hydrateBanner}
     ${renderActionPlan(summary.todos, { allowAccountActions: areActionsEnabled })}
+    ${renderAchievementsPanel({
+			snapshot: data.achievements,
+			settings: data.achievementSettings,
+			isEnabled: areAchievementsEnabled(data.settings),
+			compact: true,
+			cooldowns: data.achievementCooldowns
+		})}
     ${renderSectionDivider()}
     <div class="ao-row"><strong>${summary.label}:</strong> ${wrapArtifactNames(comboLabel(summary.combo))}</div>
     ${renderBreakdown(summary.combo)}
@@ -10370,6 +11698,11 @@
 			await waitForShowroomDocument();
 			if (!isPanelGenerationCurrent(panel, generation)) return;
 			insertShowroomHost(panel);
+		} else if (isAchievementsPage()) {
+			await waitForAchievementsDocument();
+			await waitForAchievementsMount();
+			if (!isPanelGenerationCurrent(panel, generation)) return;
+			insertAchievementsHost(panel);
 		} else return;
 		const live = await gatherData({ remote: false });
 		if (!isPanelGenerationCurrent(panel, generation)) return;
@@ -10486,6 +11819,9 @@
 		bindVaultDiscountActions(panelTree(panel), () => {
 			injectControlCenterPanel({ force: true });
 		});
+		bindAchievementOpenButtons(panelTree(panel), async () => {
+			injectControlCenterPanel({ force: true });
+		});
 		panelTree(panel).querySelector("#ao-cc-artifacts")?.addEventListener("click", () => {
 			location.assign("/user-artifacts-room");
 		});
@@ -10516,9 +11852,12 @@
 		if (ccPanel) delete ccPanel.dataset.aoReady;
 		const showroomPanel = document.querySelector(`#${INLINE_ID}`);
 		if (showroomPanel) delete showroomPanel.dataset.aoReady;
+		const achPanel = document.querySelector(`#${ACH_PANEL_ID}`);
+		if (achPanel) delete achPanel.dataset.aoReady;
 		await injectControlCenterPanel();
 		await injectShowroomPanel();
-		await document.querySelector(`#${MODAL_ID}`)?.__aoRefresh?.({ remote: false });
+		await injectAchievementsPanel();
+		await document.querySelector(`#${MODAL_ID}`)?.__aoRefresh?.({ remote: true });
 	}
 	var DEFAULT_INLINE_PANEL_IDS = {
 		equipId: "ao-inline-equip",
@@ -10594,6 +11933,7 @@
 		insertControlCenterHost(panel);
 		bindClaimAllButtons(panelTree(panel));
 	}
+	async function injectAchievementsPanel(options = {}) {}
 	async function initArtifactOptimizer() {
 		ensureOptimizerStyles();
 		watchOptimizerMenuButton();
@@ -10610,7 +11950,7 @@
 		} else if (isArtifactsShowroomPage()) {
 			ensureShowroomHost();
 			injectShowroomPanel();
-		} else if (isSiteStatePage()) {
+		} else if (isAchievementsPage()) {} else if (isSiteStatePage()) {
 			if (location.pathname.includes("/battle-pass")) {
 				injectBattlePassClaimBar();
 				watchBattlePassPage(async (state) => {

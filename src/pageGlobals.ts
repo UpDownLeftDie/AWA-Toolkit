@@ -8,7 +8,7 @@
  * instead. Do not copy that here: inline injects are subject to AWA's CSP.
  * `unsafeWindow` is the userscript equivalent.
  */
-import { unsafeWindow } from "$";
+import { unsafeWindow } from '$';
 
 export interface GiveawayKeyStatus {
   giveawayId: string;
@@ -38,11 +38,11 @@ function pageWindow(): PageWindow {
 }
 
 function asFiniteNumber(value: unknown): number | undefined {
-  if (typeof value === "number" && Number.isFinite(value)) {
+  if (typeof value === 'number' && Number.isFinite(value)) {
     return value;
   }
-  if (typeof value === "string" && value.trim() !== "") {
-    const parsed = Number(value.replaceAll(",", ""));
+  if (typeof value === 'string' && value.trim() !== '') {
+    const parsed = Number(value.replaceAll(',', ''));
     if (Number.isFinite(parsed)) {
       return parsed;
     }
@@ -63,10 +63,10 @@ export function parseInlineNumber(
   names: readonly string[],
 ): number | undefined {
   const pattern = new RegExp(
-    String.raw`(?:var\s+|window\.)?(?:${names.join("|")})\s*=\s*(\d+)`,
+    String.raw`(?:var\s+|window\.)?(?:${names.join('|')})\s*=\s*(\d+)`,
   );
-  for (const script of document_.querySelectorAll("script")) {
-    const match = pattern.exec(script.textContent ?? "");
+  for (const script of document_.querySelectorAll('script')) {
+    const match = pattern.exec(script.textContent ?? '');
     if (match?.[1]) {
       return Number(match[1]);
     }
@@ -78,19 +78,19 @@ export function readPageArpTier(
   document_: Document = document,
 ): number | undefined {
   if (document_ === document) {
-    const tier = readPageNumber("arp_tier");
+    const tier = readPageNumber('arp_tier');
     if (tier !== undefined && tier >= 0) {
       return tier;
     }
   }
-  const fromScript = parseInlineNumber(document_, ["arp_tier"]);
+  const fromScript = parseInlineNumber(document_, ['arp_tier']);
   if (fromScript !== undefined) {
     return fromScript;
   }
   const tierImg = document_.querySelector<HTMLImageElement>(
     'img[src*="/images/content/tier-tags/"]',
   );
-  const tierMatch = /tier-tags\/(\d+)\.png/.exec(tierImg?.src ?? "");
+  const tierMatch = /tier-tags\/(\d+)\.png/.exec(tierImg?.src ?? '');
   if (!tierMatch?.[1]) {
     return undefined;
   }
@@ -102,12 +102,12 @@ export function readPageFragmentBalance(
   document_: Document = document,
 ): number | undefined {
   if (document_ === document) {
-    const fragments = readPageNumber("fragment_balance");
+    const fragments = readPageNumber('fragment_balance');
     if (fragments !== undefined && fragments >= 0) {
       return fragments;
     }
   }
-  const fromScript = parseInlineNumber(document_, ["fragment_balance"]);
+  const fromScript = parseInlineNumber(document_, ['fragment_balance']);
   return fromScript !== undefined && fromScript >= 0 ? fromScript : undefined;
 }
 
@@ -115,10 +115,10 @@ export function readPageRedeemableArp(
   document_: Document = document,
 ): number | undefined {
   const names = [
-    "arp_balance",
-    "user_arp",
-    "arp_points",
-    "redeemable_arp",
+    'arp_balance',
+    'user_arp',
+    'arp_points',
+    'redeemable_arp',
   ] as const;
   if (document_ === document) {
     for (const name of names) {
@@ -133,15 +133,15 @@ export function readPageRedeemableArp(
 }
 
 function giveawayKeyFromUnknown(value: unknown): GiveawayKeyStatus | undefined {
-  if (typeof value !== "object" || !value) {
+  if (typeof value !== 'object' || !value) {
     return undefined;
   }
   const row = value as Record<string, unknown>;
   const id = row.giveaway_id ?? row.giveawayId ?? row.id;
-  if (id === undefined || id === null) {
+  if (typeof id !== 'string' && typeof id !== 'number') {
     return undefined;
   }
-  const status = typeof row.status === "string" ? row.status : "";
+  const status = typeof row.status === 'string' ? row.status : '';
   const entry: GiveawayKeyStatus = {
     giveawayId: String(id),
     status,
@@ -179,4 +179,16 @@ export function giveawayKeyStatus(
   return readPageGiveawayKeys().find(
     (entry) => entry.giveawayId === giveawayId,
   );
+}
+
+export function readPageUsername(): string | undefined {
+  try {
+    const value = pageWindow().user_username;
+    if (typeof value === 'string' && value.trim() !== '') {
+      return value.trim();
+    }
+  } catch {
+    // Tampermonkey throws if the page context is gone.
+  }
+  return undefined;
 }

@@ -1,9 +1,27 @@
 import { GM } from '$';
 import {
+  ensureAchievementSnapshot,
+  isAchievementsPage,
+  loadAchievementSnapshot,
+  requiresAchievementHydrate,
+  runAchievementAutomations,
+  saveAchievementSnapshot,
+  scrapeAchievementsFromDocument,
+  waitForAchievementsDocument,
+  type AchievementSnapshot,
+} from '../../achievements/scraper';
+import {
+  getAchievementSettings,
+  loadAutomationCooldowns,
+  type AchievementSettings,
+  type AutomationCooldowns,
+} from '../../achievements/settings';
+import {
   applyAsceCommunityHours,
   didRefreshAsceCommunityHours,
   hasPendingAsceRefresh,
 } from '../asce';
+import { scheduleBrowserNotifications } from '../notifications';
 import { buildContext, optimize, type OptimizerResult } from '../optimizer';
 import {
   ensureArtifactSnapshot,
@@ -17,8 +35,8 @@ import {
   scrapeAndPersist,
   type ArtifactSnapshot,
 } from '../scraper';
-import { scheduleBrowserNotifications } from '../notifications';
 import {
+  isAchievementsHelperFeatureEnabled,
   getArtifactSettings,
   syncSlotLocksFromScrape,
   type ArtifactOptimizerSettings,
@@ -75,6 +93,42 @@ function assertGmStorage(): void {
   }
 }
 
+async function gatherAchievements(options: {
+  isRemote: boolean;
+  shouldForceSite: boolean;
+  username: string | undefined;
+  settings: ArtifactOptimizerSettings;
+  achievementSettings: AchievementSettings;
+}): Promise<AchievementSnapshot | undefined> {
+  if (!isAchievementsHelperFeatureEnabled || !options.settings.achievementsEnabled) {
+    return undefined;
+  }
+  if (isAchievementsPage()) {
+    await waitForAchievementsDocument();
+    let achievements = scrapeAchievementsFromDocument(
+      document,
+      options.username === undefined ? {} : { username: options.username },
+    );
+    await saveAchievementSnapshot(achievements);
+    achievements = await runAchievementAutomations(
+      achievements,
+      options.achievementSettings,
+    );
+    await saveAchievementSnapshot(achievements);
+    return achievements;
+  }
+  if (options.isRemote) {
+    const ensureOptions: { force: boolean; username?: string } = {
+      force: options.shouldForceSite,
+    };
+    if (options.username !== undefined) {
+      ensureOptions.username = options.username;
+    }
+    return ensureAchievementSnapshot(ensureOptions);
+  }
+  return loadAchievementSnapshot();
+}
+
 export async function gatherData(options?: {
   /**
   When true, fetch/open Showroom & site pages if cached data is missing/stale.
@@ -89,6 +143,9 @@ export async function gatherData(options?: {
   settings: ArtifactOptimizerSettings;
   siteState: SiteState;
   result: OptimizerResult;
+  achievements: AchievementSnapshot | undefined;
+  achievementSettings: AchievementSettings;
+  achievementCooldowns: AutomationCooldowns;
 }> {
   assertGmStorage();
   const isRemote = options?.remote ?? true;
@@ -121,6 +178,16 @@ export async function gatherData(options?: {
     await syncSlotLocksFromScrape(snapshot.slotLocks);
   }
   const settings = await getArtifactSettings();
+  const achievementSettings = await getAchievementSettings();
+  const achievements = await gatherAchievements({
+    isRemote,
+    shouldForceSite,
+    username: snapshot?.username,
+    settings,
+    achievementSettings,
+  });
+  // Load after automations so "done today" filtering matches what just ran.
+  const achievementCooldowns = await loadAutomationCooldowns();
 
   let siteState: SiteState = loadedState ?? emptySiteState();
   if (isSiteStatePage()) {
@@ -145,7 +212,15 @@ export async function gatherData(options?: {
   const result = optimize(
     buildContext(snapshot ?? emptySnapshot, settings, siteState),
   );
-  return rememberGathered({ snapshot, settings, siteState, result });
+  return rememberGathered({
+    snapshot,
+    settings,
+    siteState,
+    result,
+    achievements,
+    achievementSettings,
+    achievementCooldowns,
+  });
 }
 
 export type GatheredData = Awaited<ReturnType<typeof gatherData>>;
@@ -216,6 +291,16 @@ export function requiresBackgroundHydrate(
     return true;
   }
   if (requiresSteamFreeHydrate(data.siteState)) {
+    return true;
+  }
+  if (
+    isAchievementsHelperFeatureEnabled &&
+    data.settings.achievementsEnabled &&
+    requiresAchievementHydrate(
+      data.achievements,
+      data.settings.achievementsEnabled,
+    )
+  ) {
     return true;
   }
   return requiresAsceHydrate(data.siteState);

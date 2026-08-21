@@ -1,4 +1,11 @@
 import { ARTIFACTS, CREDIT_SOURCES, TIER_LABELS } from "../data";
+import { renderAchievementAutoControls, renderAchievementsPanel } from "../../achievements/ui";
+import type { AchievementSnapshot } from "../../achievements/scraper";
+import {
+  defaultAchievementSettings,
+  type AchievementSettings,
+  type AutomationCooldowns,
+} from "../../achievements/settings";
 import type {
   BreakdownLine,
   OptimizerResult,
@@ -6,7 +13,9 @@ import type {
 } from "../optimizer";
 import type { ArtifactSnapshot } from "../scraper";
 import {
+  isAchievementsHelperFeatureEnabled,
   areAccountActionsEnabled,
+  areAchievementsEnabled,
   isNotificationTypeEnabled,
   MAX_UTC_DAILY_END_BUFFER_HOURS,
   NOTIFICATION_TYPE_COPY,
@@ -571,7 +580,12 @@ export function renderResultBody(
   snapshot: ArtifactSnapshot | undefined,
   settings: ArtifactOptimizerSettings,
   siteState: SiteState | undefined,
-  options: { isHydrating?: boolean } = {},
+  options: {
+    isHydrating?: boolean;
+    achievements?: AchievementSnapshot | undefined;
+    achievementSettings?: AchievementSettings;
+    achievementCooldowns?: AutomationCooldowns;
+  } = {},
 ): string {
   const scrapedAt = snapshot?.scrapedAt
     ? new Date(snapshot.scrapedAt).toLocaleString()
@@ -587,6 +601,15 @@ export function renderResultBody(
   const vaultDiscount = renderVaultDiscountBlock(result);
 
   const areActionsEnabled = areAccountActionsEnabled(settings);
+  const areAchievementsOn = areAchievementsEnabled(settings);
+  const achievementSettings =
+    options.achievementSettings ?? defaultAchievementSettings;
+  const achievementsHtml = renderAchievementsPanel({
+    snapshot: options.achievements,
+    settings: achievementSettings,
+    isEnabled: areAchievementsOn,
+    ...(options.achievementCooldowns !== undefined && { cooldowns: options.achievementCooldowns }),
+  });
   const upgrades = renderUpgradePath(result.upgrades, fragments, {
     shouldShowUpgradeButtons: areActionsEnabled,
   });
@@ -621,6 +644,21 @@ export function renderResultBody(
     })
     .join("");
 
+  const achievementsBodyClass = areAchievementsOn ? "" : " ao-body--off";
+  const achievementsSettingsHtml = isAchievementsHelperFeatureEnabled
+    ? `<div class="ao-notify">
+      ${renderNotifySwitch({
+        id: "ao-achievements-enabled",
+        title: "Achievements helper",
+        hint: "Show what to do next for unearned achievements. Turn on Run automatically below to visit pages in the background.",
+        isChecked: areAchievementsOn,
+      })}
+      <div class="ao-body${achievementsBodyClass}">
+        ${renderAchievementAutoControls(achievementSettings)}
+      </div>
+    </div>`
+    : "";
+
   return `
     <div class="ao-notify">
       ${renderNotifySwitch({
@@ -629,6 +667,9 @@ export function renderResultBody(
         hint: "Equip artifacts, upgrade, and claim Battle Pass for you. Use at your own risk.",
         isChecked: areActionsEnabled,
       })}
+    </div>
+    ${achievementsSettingsHtml}
+    <div class="ao-notify">
       ${renderNotifySwitch({
         id: "ao-browser-notifications",
         title: "Desktop notifications",
@@ -638,6 +679,7 @@ export function renderResultBody(
       ${renderNotifyTypeSwitches(settings)}
     </div>
     ${hydrateBanner}
+    ${achievementsHtml}
     <div class="ao-muted">Inventory snapshot: ${scrapedAt} · Fragments: ${fragments}</div>
     ${vaultDiscount}
     ${extras}

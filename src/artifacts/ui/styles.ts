@@ -1,6 +1,7 @@
 export const MODAL_ID = "alienware-artifact-optimizer";
 export const INLINE_ID = "alienware-artifact-optimizer-inline";
 export const CC_PANEL_ID = "alienware-artifact-optimizer-cc";
+export const ACH_PANEL_ID = "alienware-artifact-optimizer-ach";
 export const BP_CLAIM_BAR_ID = "alienware-artifact-optimizer-bp-claim";
 export const STYLE_ID = "alienware-artifact-optimizer-styles";
 export const BACKDROP_ID = "alienware-artifact-optimizer-backdrop";
@@ -53,7 +54,8 @@ function buildOptimizerCss(): string {
         background: transparent;
       }
       #${INLINE_ID},
-      #${CC_PANEL_ID} {
+      #${CC_PANEL_ID},
+      #${ACH_PANEL_ID} {
         display: block;
         margin: 16px 0;
         width: 100%;
@@ -62,8 +64,10 @@ function buildOptimizerCss(): string {
       }
       body > #${INLINE_ID},
       body > #${CC_PANEL_ID},
+      body > #${ACH_PANEL_ID},
       html > #${INLINE_ID},
-      html > #${CC_PANEL_ID} {
+      html > #${CC_PANEL_ID},
+      html > #${ACH_PANEL_ID} {
         margin: 88px auto 16px;
         padding: 0 16px;
         max-width: 1100px;
@@ -359,6 +363,14 @@ function buildPanelShadowCss(variant: PanelShadowVariant): string {
       list-style: none;
       width: 100%;
     }
+    #ao-achievements {
+      display: block;
+      margin: 12px 0 4px;
+      width: 100%;
+    }
+    .ao-notify > .ao-switch + .ao-switch {
+      margin-top: 10px;
+    }
     .ao-divider {
       display: block;
       border: 0;
@@ -596,6 +608,32 @@ function buildPanelShadowCss(variant: PanelShadowVariant): string {
       border-top: 1px solid #333;
     }
     .ao-notify-types[data-off] {
+      opacity: 0.45;
+      pointer-events: none;
+    }
+    .ao-body {
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+      margin-top: 10px;
+      padding: 12px 12px 12px 14px;
+      border-left: 2px solid #00bc8c55;
+      border-top: 1px solid #333;
+    }
+    .ao-body--off {
+      opacity: 0.45;
+      pointer-events: none;
+    }
+    .ao-ach-sub {
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      margin-top: 6px;
+      padding: 10px 10px 2px 14px;
+      border-left: 2px solid #00bc8c44;
+      border-top: 1px solid #333;
+    }
+    .ao-ach-sub--off {
       opacity: 0.45;
       pointer-events: none;
     }

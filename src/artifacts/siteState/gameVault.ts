@@ -95,28 +95,49 @@ export function canAffordAnyVaultOffer(
 }
 
 /**
+True when this list-price game can be claimed now. `purchasable: false` is the
+countdown scrape (`data-product-disabled`); once `gameVaultOpensAt` has passed,
+treat it as live so a stale flag cannot drop the discount window.
+*/
+export function isVaultItemPurchasable(
+  game: GameVaultItem,
+  state: Pick<SiteState, "gameVaultOpensAt">,
+  now = Date.now(),
+): boolean {
+  if (!isListPriceVaultClaim(game) || !game.inStock) {
+    return false;
+  }
+  if (game.purchasable === true) {
+    return true;
+  }
+  const opensAt = gameVaultOpensAtMs(state);
+  return opensAt !== undefined && opensAt <= now;
+}
+
+/**
 In-stock list-price vault game this user can claim right now: purchasable +
 tier + enough redeemable ARP. `discountPct` is the market % off they would pay.
 */
 export function isClaimableVaultGame(
   game: GameVaultItem,
-  state: Pick<SiteState, "userArpTier" | "arpLog">,
+  state: Pick<SiteState, "userArpTier" | "arpLog" | "gameVaultOpensAt">,
   discountPct = 0,
+  now = Date.now(),
 ): boolean {
   return (
-    game.purchasable === true &&
+    isVaultItemPurchasable(game, state, now) &&
     isAffordableVaultOffer(game, state, discountPct)
   );
 }
 
 function isVaultStockForUser(
   game: GameVaultItem,
-  userTier: number | undefined,
+  state: SiteState,
+  now = Date.now(),
 ): boolean {
   return (
-    game.purchasable === true &&
-    isListPriceVaultClaim(game) &&
-    isVaultTierMet(game, userTier)
+    isVaultItemPurchasable(game, state, now) &&
+    isVaultTierMet(game, state.userArpTier)
   );
 }
 
@@ -124,9 +145,34 @@ function isVaultStockForUser(
 True while this user still has an in-stock list-price Game Vault claim
 (tier only — ARP is checked separately). Stock can run out at any time.
 */
-export function isGameVaultStockOpen(state: SiteState): boolean {
-  return state.gameVault.some((game) =>
-    isVaultStockForUser(game, state.userArpTier),
+export function isGameVaultStockOpen(
+  state: SiteState,
+  now = Date.now(),
+): boolean {
+  return state.gameVault.some((game) => isVaultStockForUser(game, state, now));
+}
+
+/**
+Hold / equip market-discount while any in-stock list-price vault game is still
+available to this user. True after open (including stale `purchasable: false`
+once the countdown has elapsed) and when the timer node is gone but catalog
+remains. False only while a future countdown is running.
+*/
+export function isGameVaultDiscountWindow(
+  state: SiteState,
+  now = Date.now(),
+): boolean {
+  if (isGameVaultStockOpen(state, now)) {
+    return true;
+  }
+  const opensAt = gameVaultOpensAtMs(state);
+  if (opensAt !== undefined && opensAt > now) {
+    return false;
+  }
+  return state.gameVault.some(
+    (game) =>
+      isPostedListPriceVaultGame(game) &&
+      isVaultTierMet(game, state.userArpTier),
   );
 }
 
@@ -137,9 +183,10 @@ can afford right now (optionally after market discount).
 export function isGameVaultCurrentlyOpen(
   state: SiteState,
   discountPct = 0,
+  now = Date.now(),
 ): boolean {
   return state.gameVault.some((game) =>
-    isClaimableVaultGame(game, state, discountPct),
+    isClaimableVaultGame(game, state, discountPct, now),
   );
 }
 
@@ -161,7 +208,9 @@ export function gameVaultCycleId(state: SiteState): string | undefined {
   return undefined;
 }
 
-export function gameVaultOpensAtMs(state: SiteState): number | undefined {
+export function gameVaultOpensAtMs(
+  state: Pick<SiteState, "gameVaultOpensAt">,
+): number | undefined {
   const opensAt = parseTimestamp(state.gameVaultOpensAt);
   return Number.isFinite(opensAt) ? opensAt : undefined;
 }
@@ -184,9 +233,10 @@ export function willMissDiscountEquipBeforeOpen(
 export function gameVaultCatalogPrice(
   state: SiteState,
   discountPct = 0,
+  now = Date.now(),
 ): number {
   const buyable = state.gameVault.find((game) =>
-    isClaimableVaultGame(game, state, discountPct),
+    isClaimableVaultGame(game, state, discountPct, now),
   );
   return buyable?.price ?? 0;
 }
@@ -287,6 +337,16 @@ function applyGameVaultSchedule(
     next.gameVaultOpensAt = new Date(timerMs).toISOString();
     return;
   }
+  // Timer gone (or elapsed) while list-price catalog is still posted: the
+  // rotation has opened. Keep a past opensAt so discount logic does not
+  // fall through to a 24h ARP swap.
+  if (next.gameVault.some((game) => isPostedListPriceVaultGame(game))) {
+    const existingOpen = parseTimestamp(next.gameVaultOpensAt);
+    if (!Number.isFinite(existingOpen) || existingOpen > now) {
+      next.gameVaultOpensAt = new Date(now).toISOString();
+    }
+    return;
+  }
   delete next.gameVaultOpensAt;
 }
 
@@ -310,7 +370,7 @@ export function applyGameVaultDocument(
   applyGameVaultSchedule(
     next,
     timerMs,
-    vault.some((game) => isVaultStockForUser(game, next.userArpTier)),
+    vault.some((game) => isVaultStockForUser(game, next)),
     Date.now(),
   );
 }

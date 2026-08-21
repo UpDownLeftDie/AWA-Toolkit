@@ -1,21 +1,21 @@
-import { BASE_ACTIVITY, lastDiscordPollPostAt } from "../data";
-import type { ArpLogState } from "./arpLog";
-import { scrapeLiveCommunityEventBanner } from "./communityEvent";
+import { BASE_ACTIVITY, lastDiscordPollPostAt } from '../data';
+import type { ArpLogState } from './arpLog';
+import { scrapeLiveCommunityEventBanner } from './communityEvent';
+import {
+  dailyQuestsCapFromRows,
+  scrapeDailyQuestRowsFromDocument,
+} from './dailyQuests';
 import {
   findActivityCard,
   isElementVisiblyHidden,
   pageText,
   utcDateString,
-} from "./shared";
-import {
-  dailyQuestsCapFromRows,
-  scrapeDailyQuestRowsFromDocument,
-} from "./dailyQuests";
+} from './shared';
 import {
   scrapeSteamQuestRowsFromDocument,
   steamQuestsCapFromRows,
-} from "./steamQuests";
-import type { ActivityCapState, CapStatus, SiteState } from "./types";
+} from './steamQuests';
+import type { ActivityCapState, CapStatus, SiteState } from './types';
 
 export interface WatchTwitchProgress {
   scrapedAt: string;
@@ -59,9 +59,9 @@ function readTimeOnSiteCap(body: string): CapStatus | undefined {
   // UCF: equip ToS bonus before the unbuffed 5 ARP. Once that base is hit,
   // extra sit is inefficient — treat as done even if a ToS artifact raised max.
   if (earnedArp >= BASE_ACTIVITY.timeOnSiteBasePerDay) {
-    return "capped";
+    return 'capped';
   }
-  return earnedArp >= capArp ? "capped" : "available";
+  return earnedArp >= capArp ? 'capped' : 'available';
 }
 
 /**
@@ -73,21 +73,21 @@ function parseTwitchArpStatus(document_: Document): {
 } {
   const status =
     document_
-      .querySelector("#control-center__twitch-arp-status")
-      ?.textContent?.trim() ?? "";
+      .querySelector('#control-center__twitch-arp-status')
+      ?.textContent?.trim() ?? '';
   const incompleteArp = /^Incomplete:\s*(\d+)\s*ARP/i.exec(status);
   if (incompleteArp?.[1] !== undefined) {
-    return { cap: "available", earnedArp: Number(incompleteArp[1]) };
+    return { cap: 'available', earnedArp: Number(incompleteArp[1]) };
   }
   if (/^Incomplete\b/i.test(status)) {
-    return { cap: "available" };
+    return { cap: 'available' };
   }
   const completeArp = /^Complete:\s*(\d+)\s*ARP/i.exec(status);
   if (completeArp?.[1] !== undefined) {
-    return { cap: "capped", earnedArp: Number(completeArp[1]) };
+    return { cap: 'capped', earnedArp: Number(completeArp[1]) };
   }
   if (/^Complete\b/i.test(status)) {
-    return { cap: "capped" };
+    return { cap: 'capped' };
   }
   return {};
 }
@@ -101,19 +101,19 @@ function readWatchTwitchCapFromDocument(
   }
 
   const card = findActivityCard(document_, /^Watch Twitch$/i);
-  if (card && /Incomplete/i.test(card.textContent ?? "")) {
-    return "available";
+  if (card && /Incomplete/i.test(card.textContent ?? '')) {
+    return 'available';
   }
 
   const maxReached = document_.querySelector(
-    "#control-center__twitch-max-reached",
+    '#control-center__twitch-max-reached',
   );
   if (
     maxReached &&
     !isElementVisiblyHidden(maxReached) &&
-    /Max Cap Reached/i.test(maxReached.textContent ?? "")
+    /Max Cap Reached/i.test(maxReached.textContent ?? '')
   ) {
-    return "capped";
+    return 'capped';
   }
 
   return readWatchTwitchCap(pageText(document_));
@@ -123,19 +123,19 @@ function readWatchTwitchCap(body: string): CapStatus | undefined {
   // Plain-text fallback when dedicated Twitch status nodes are missing.
   // Incomplete must win over a hidden "Max Cap Reached" in the same card.
   if (/Watch Twitch[\s\S]{0,400}?Incomplete:\s*\d+\s*ARP/i.test(body)) {
-    return "available";
+    return 'available';
   }
   if (/Watch Twitch[\s\S]{0,400}?\bIncomplete\b/i.test(body)) {
-    return "available";
+    return 'available';
   }
   if (
     /Watch Twitch[\s\S]{0,240}Max Cap Reached/i.test(body) &&
     !/twitch-max-reached[^>]*display:\s*none/i.test(body)
   ) {
-    return "capped";
+    return 'capped';
   }
   if (/Watch Twitch[\s\S]{0,80}\bComplete\b/i.test(body)) {
-    return "capped";
+    return 'capped';
   }
   return undefined;
 }
@@ -156,9 +156,9 @@ interface DailyArpTwitchData {
 function parseDailyArpTwitchData(
   document_: Document,
 ): DailyArpTwitchData | undefined {
-  const scripts = [...document_.querySelectorAll("script:not([src])")]
-    .map((script) => script.textContent ?? "")
-    .join("\n");
+  const scripts = [...document_.querySelectorAll('script:not([src])')]
+    .map((script) => script.textContent ?? '')
+    .join('\n');
   const assignment = /dailyArpData\s*=\s*(\{[\s\S]*?\});/.exec(scripts)?.[1];
   if (!assignment) {
     return undefined;
@@ -169,11 +169,11 @@ function parseDailyArpTwitchData(
   } catch {
     return undefined;
   }
-  if (!parsed || typeof parsed !== "object" || !("twitchData" in parsed)) {
+  if (!parsed || typeof parsed !== 'object' || !('twitchData' in parsed)) {
     return undefined;
   }
   const twitch = (parsed as { twitchData: unknown }).twitchData;
-  if (!twitch || typeof twitch !== "object") {
+  if (!twitch || typeof twitch !== 'object') {
     return undefined;
   }
   const data = twitch as Record<string, unknown>;
@@ -192,10 +192,10 @@ function parseDailyArpTwitchData(
 }
 
 function isTwitchUnderCapFromData(data: Record<string, unknown>): boolean {
-  if (typeof data.underCap === "boolean") {
+  if (typeof data.underCap === 'boolean') {
     return data.underCap;
   }
-  if (typeof data.isUnderCap === "boolean") {
+  if (typeof data.isUnderCap === 'boolean') {
     return data.isUnderCap;
   }
   return true;
@@ -251,9 +251,9 @@ export function scrapeWatchTwitchProgressFromDocument(
   // `underCap` is often missing, and the default-true path then treats a
   // Max Cap day as still watchable — which is how "Watch Twitch now" survives
   // on the same page that already says Complete.
-  if (status.cap === "capped") {
+  if (status.cap === 'capped') {
     isUnderCap = false;
-  } else if (status.cap === "available") {
+  } else if (status.cap === 'available') {
     isUnderCap = true;
   } else if (twitchData) {
     isUnderCap = twitchData.isUnderCap;
@@ -294,7 +294,7 @@ export function twitchWatchRemainingMs(
   // recommended loadout must not invent leftover ARP after the boosted cap
   // was already collected (Complete: 30 ARP with +15 still equipped).
   if (
-    state?.caps.watchTwitch === "capped" ||
+    state?.caps.watchTwitch === 'capped' ||
     (isFreshProgress && progress && !progress.isUnderCap)
   ) {
     return 0;
@@ -305,21 +305,21 @@ export function twitchWatchRemainingMs(
 }
 
 function readQuestStatusesFromCard(card: Element): CapStatus | undefined {
-  const statuses = [...card.querySelectorAll("td, th, span, div, li")]
-    .map((element) => element.textContent?.trim() ?? "")
+  const statuses = [...card.querySelectorAll('td, th, span, div, li')]
+    .map((element) => element.textContent?.trim() ?? '')
     .filter((text) => /^(Incomplete|Complete)$/i.test(text));
   if (statuses.some((status) => /^Incomplete$/i.test(status))) {
-    return "available";
+    return 'available';
   }
   if (statuses.some((status) => /^Complete$/i.test(status))) {
-    return "capped";
+    return 'capped';
   }
-  const text = card.textContent ?? "";
+  const text = card.textContent ?? '';
   if (/Incomplete/i.test(text)) {
-    return "available";
+    return 'available';
   }
   if (/\bComplete\b/i.test(text)) {
-    return "capped";
+    return 'capped';
   }
   return undefined;
 }
@@ -335,10 +335,10 @@ function readSteamQuestsCap(body: string): CapStatus | undefined {
   }
   const section = steamSection[1];
   if (/Incomplete/i.test(section)) {
-    return "available";
+    return 'available';
   }
   if (/\bComplete\b/i.test(section)) {
-    return "capped";
+    return 'capped';
   }
   return undefined;
 }
@@ -380,10 +380,10 @@ function readDailyQuestsCap(body: string): CapStatus | undefined {
     return undefined;
   }
   if (/Incomplete/i.test(section[1])) {
-    return "available";
+    return 'available';
   }
   if (/\bComplete\b/i.test(section[1])) {
-    return "capped";
+    return 'capped';
   }
   return undefined;
 }
@@ -407,10 +407,10 @@ function readDailyQuestsCapFromDocument(
 function readDailyCalendarCap(body: string): CapStatus | undefined {
   // Legacy Control Center label.
   if (/Daily Login Calendar[\s\S]{0,120}Claimed/i.test(body)) {
-    return "capped";
+    return 'capped';
   }
   if (/Daily Login Calendar[\s\S]{0,120}\bClaim\b/i.test(body)) {
-    return "available";
+    return 'available';
   }
 
   // Current Control Center: Today's Reward / 28-Day Daily Login Rewards.
@@ -418,13 +418,13 @@ function readDailyCalendarCap(body: string): CapStatus | undefined {
     return undefined;
   }
   if (/Today'?s Reward[\s\S]{0,240}Claimed/i.test(body)) {
-    return "capped";
+    return 'capped';
   }
   if (/Today'?s Reward[\s\S]{0,240}\bClaim\b/i.test(body)) {
-    return "available";
+    return 'available';
   }
   // Calendar UI is present but there's no claim CTA → already taken today.
-  return "capped";
+  return 'capped';
 }
 
 function readDailyCalendarCapFromDocument(
@@ -441,19 +441,70 @@ function readDailyCalendarCapFromDocument(
   if (!card) {
     return undefined;
   }
-  const claimControl = [...card.querySelectorAll("button, a")].find((element) =>
-    /^claim$/i.test(element.textContent?.trim() ?? ""),
+  const claimControl = [...card.querySelectorAll('button, a')].find((element) =>
+    /^claim$/i.test(element.textContent?.trim() ?? ''),
   );
   if (!claimControl) {
-    return "capped";
+    return 'capped';
   }
   if (claimControl instanceof HTMLButtonElement && claimControl.disabled) {
-    return "capped";
+    return 'capped';
   }
-  if (claimControl.getAttribute("aria-disabled") === "true") {
-    return "capped";
+  if (claimControl.getAttribute('aria-disabled') === 'true') {
+    return 'capped';
   }
-  return "available";
+  return 'available';
+}
+
+function isDiscordPollEntry(entry: { action: string }): boolean {
+  return /Discord Poll/i.test(entry.action);
+}
+
+/**
+ * ARP Log only stores a UTC date, not a time. Voting the previous weekday
+ * poll after 00:00 UTC stamps today's date — and once today's poll posts at
+ * 16:00 UTC that row looks like a vote for the new poll.
+ *
+ * Detect that carryover when the Discord Poll row sits on the day boundary
+ * (newest-first: immediately older neighbor is a prior date, and nothing
+ * older on the same date exists beneath it). A real same-day vote after the
+ * post usually lands above other same-day earns, or the previous cycle
+ * already has its own Discord Poll row.
+ */
+function isLatePreviousPollStamp(
+  recent: ArpLogState['recent'],
+  index: number,
+  pollStartDate: string,
+): boolean {
+  const entry = recent[index];
+  if (!entry || entry.date !== pollStartDate) {
+    return false;
+  }
+  const older = recent[index + 1];
+  if (!older?.date || older.date >= pollStartDate) {
+    // Older neighbor is missing or same-day — not a day-boundary carryover.
+    return false;
+  }
+  // Any same-day row below this one means the poll wasn't the first stamp of
+  // the UTC day (vote happened after other same-day activity).
+  for (let cursor = index + 1; cursor < recent.length; cursor += 1) {
+    const row = recent[cursor];
+    if (!row?.date) {
+      continue;
+    }
+    if (row.date < pollStartDate) {
+      break;
+    }
+    if (row.date === pollStartDate) {
+      return false;
+    }
+  }
+  return true;
+}
+
+function previousDiscordPollStartDate(pollStart: Date): string {
+  const previousPost = lastDiscordPollPostAt(new Date(pollStart.getTime() - 1));
+  return utcDateString(previousPost);
 }
 
 /**
@@ -461,6 +512,10 @@ function readDailyCalendarCapFromDocument(
  * cast Friday is still "this poll" through the whole weekend — check from
  * the last post date, not just today, or a Friday vote reads as still
  * pending all weekend.
+ *
+ * Same-calendar-day late votes for the *previous* poll are filtered via
+ * {@link isLatePreviousPollStamp} and prior-cycle coverage so they don't
+ * mark the newly posted poll as done.
  */
 export function hasVotedCurrentDiscordPoll(
   arpLog: ArpLogState | undefined,
@@ -469,13 +524,35 @@ export function hasVotedCurrentDiscordPoll(
   if (!arpLog || arpLog.recent.length === 0) {
     return false;
   }
-  const pollStartDate = utcDateString(lastDiscordPollPostAt(now));
-  return arpLog.recent.some(
+  const pollStart = lastDiscordPollPostAt(now);
+  const pollStartDate = utcDateString(pollStart);
+  const previousPollStartDate = previousDiscordPollStartDate(pollStart);
+  const recent = arpLog.recent;
+  const hasVotedPreviousCycle = recent.some(
     (entry) =>
-      /Discord Poll/i.test(entry.action) &&
+      isDiscordPollEntry(entry) &&
       entry.date !== undefined &&
-      entry.date >= pollStartDate,
+      entry.date >= previousPollStartDate &&
+      entry.date < pollStartDate,
   );
+
+  return recent.some((entry, index) => {
+    if (!isDiscordPollEntry(entry) || entry.date === undefined) {
+      return false;
+    }
+    if (entry.date < pollStartDate) {
+      return false;
+    }
+    if (entry.date > pollStartDate) {
+      // Vote after midnight on a later UTC day, still before the next post.
+      return true;
+    }
+    // entry.date === pollStartDate
+    if (hasVotedPreviousCycle) {
+      return true;
+    }
+    return !isLatePreviousPollStamp(recent, index, pollStartDate);
+  });
 }
 
 /**
@@ -499,12 +576,12 @@ export function applyArpLogActivityCaps(
   if (
     todaysActions.some((entry) => /Daily Login Calendar/i.test(entry.action))
   ) {
-    next.dailyCalendar = "capped";
+    next.dailyCalendar = 'capped';
   }
 
   next.discordPoll = hasVotedCurrentDiscordPoll(arpLog, now)
-    ? "capped"
-    : "available";
+    ? 'capped'
+    : 'available';
   return next;
 }
 
@@ -536,7 +613,7 @@ export function scrapeControlCenterCapsFromDocument(
   }
 
   const liveEvent = scrapeLiveCommunityEventBanner(document_);
-  caps.steamCommunityEvent = liveEvent ? "available" : "capped";
+  caps.steamCommunityEvent = liveEvent ? 'available' : 'capped';
 
   return caps;
 }
@@ -560,7 +637,7 @@ export function isControlCenterDocumentReady(document_: Document): boolean {
  */
 export function isControlCenterTwitchDataReady(document_: Document): boolean {
   const status = document_
-    .querySelector("#control-center__twitch-arp-status")
+    .querySelector('#control-center__twitch-arp-status')
     ?.textContent?.trim();
   if (status) {
     return true;
@@ -591,7 +668,7 @@ export function controlCenterActivitySignature(document_: Document): string {
     twitch?.isUnderCap,
     twitch?.timeWatched,
     twitch?.bonusArp,
-  ].join(":");
+  ].join(':');
 }
 
 export async function waitForControlCenterDocument(

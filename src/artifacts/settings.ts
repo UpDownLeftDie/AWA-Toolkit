@@ -95,6 +95,11 @@ export interface ArtifactOptimizerSettings {
   your own risk). Missing saved values stay off so 2.0 installs opt in.
   */
   allowAccountActions: boolean;
+  /**
+  Show the Achievements helper (progress scrape + next unlock steps).
+  Off by default. Automations are separate switches.
+  */
+  achievementsEnabled: boolean;
 }
 
 export const NOTIFICATION_TYPE_KEYS = [
@@ -158,6 +163,7 @@ export const defaultArtifactSettings: ArtifactOptimizerSettings = {
   browserNotifications: false,
   notificationTypes: { ...DEFAULT_NOTIFICATION_TYPES },
   allowAccountActions: false,
+  achievementsEnabled: false,
 };
 
 function isPartialSettings(
@@ -232,8 +238,9 @@ function applyParsedSettings(
     const rawLogins = parsed.preferredTwitchStreamers.filter(
       (item): item is string => typeof item === 'string',
     );
-    settings.preferredTwitchStreamers =
-      parsePreferredTwitchStreamers(rawLogins.join('\n'));
+    settings.preferredTwitchStreamers = parsePreferredTwitchStreamers(
+      rawLogins.join('\n'),
+    );
   }
   if (typeof parsed.utcDailyEndBufferHours === 'number') {
     settings.utcDailyEndBufferHours = clampUtcDailyEndBufferHours(
@@ -245,6 +252,9 @@ function applyParsedSettings(
   }
   if (typeof parsed.allowAccountActions === 'boolean') {
     settings.allowAccountActions = parsed.allowAccountActions;
+  }
+  if (typeof parsed.achievementsEnabled === 'boolean') {
+    settings.achievementsEnabled = parsed.achievementsEnabled;
   }
   settings.notificationTypes = mergeNotificationTypes(
     settings.notificationTypes,
@@ -304,16 +314,15 @@ export function clampUtcDailyEndBufferHours(hours: number): number {
   if (!Number.isFinite(hours)) {
     return DEFAULT_UTC_DAILY_END_BUFFER_HOURS;
   }
-  return Math.min(
-    MAX_UTC_DAILY_END_BUFFER_HOURS,
-    Math.max(0, hours),
-  );
+  return Math.min(MAX_UTC_DAILY_END_BUFFER_HOURS, Math.max(0, hours));
 }
 
 export function utcDailyEndBufferMs(
   settings: ArtifactOptimizerSettings,
 ): number {
-  return clampUtcDailyEndBufferHours(settings.utcDailyEndBufferHours) * MS_PER_HOUR;
+  return (
+    clampUtcDailyEndBufferHours(settings.utcDailyEndBufferHours) * MS_PER_HOUR
+  );
 }
 
 export async function getArtifactSettings(): Promise<ArtifactOptimizerSettings> {
@@ -531,6 +540,18 @@ export function areAccountActionsEnabled(
   settings: ArtifactOptimizerSettings,
 ): boolean {
   return settings.allowAccountActions;
+}
+
+/**
+ * Hard kill-switch for Achievements helper while it is unfinished.
+ * User setting is ignored until this is flipped back on.
+ */
+export const isAchievementsHelperFeatureEnabled = false;
+
+export function areAchievementsEnabled(
+  settings: ArtifactOptimizerSettings,
+): boolean {
+  return isAchievementsHelperFeatureEnabled && settings.achievementsEnabled;
 }
 
 export { COOLDOWN_MS };

@@ -4,7 +4,7 @@ import {
   getArtifactById,
   msUntilNextDiscordPollPost,
   TIER_LABELS,
-} from "../data";
+} from '../data';
 import {
   type ActivityLoadoutStats,
   activityStatsForArtifacts,
@@ -14,14 +14,15 @@ import {
   type OptimizerResult,
   type ScoredCombo,
   type UpgradeSuggestion,
-} from "../optimizer";
-import { isArtifactsShowroomPage, type OwnedArtifact } from "../scraper";
+  VAULT_PRIORITY_DISCOUNT_PCT,
+} from '../optimizer';
+import { isArtifactsShowroomPage, type OwnedArtifact } from '../scraper';
 import {
   type ArtifactOptimizerSettings,
   COOLDOWN_MS,
   showroomCooldownRemainingMs,
   utcDailyEndBufferMs,
-} from "../settings";
+} from '../settings';
 import {
   type ActivityKey,
   battlePassClaimableArp,
@@ -42,16 +43,17 @@ import {
   remainingSteamQuestRows,
   type SiteState,
   twitchWatchRemainingMs,
-} from "../siteState";
+} from '../siteState';
 import {
   battlePassClaimButtonLabel,
   shouldShowBattlePassClaimAll,
-} from "../siteState/battlePass";
-import { describeWaitingCommunityArpLine } from "../siteState/communityEvent";
-import { STEAM_LIBRARY_PENDING_HINT } from "../steamApp";
-import { wrapArtifactNames } from "./artifactTip";
+} from '../siteState/battlePass';
+import { describeWaitingCommunityArpLine } from '../siteState/communityEvent';
+import { STEAM_LIBRARY_PENDING_HINT } from '../steamApp';
+import { wrapArtifactNames } from './artifactTip';
 import {
   artifactsAfterImmediateEquip,
+  escapeHtml,
   formatMs,
   hasAnySlotOnCooldown,
   isSameLoadout,
@@ -61,9 +63,9 @@ import {
   msUntilUtcMidnight,
   planLoadoutChanges,
   utcResetDeadlineLabel,
-} from "./loadoutPlan";
+} from './loadoutPlan';
 
-export type ActionTone = "default" | "muted" | "warn";
+export type ActionTone = 'default' | 'muted' | 'warn';
 
 /**
  * How a step competes in the final "What to do" order.
@@ -73,12 +75,12 @@ export type ActionTone = "default" | "muted" | "warn";
  * All-ARP% equip use kind "schedule" so they sit after that equip (chain)
  * instead of jumping to #1 when 00:00 UTC refreshes Watch Twitch.
  */
-export type ActionTodoUrgencyKind = "action" | "schedule" | "info";
+export type ActionTodoUrgencyKind = 'action' | 'schedule' | 'info';
 
 /**
  * Soft dependency relative to an equip/swap step.
  */
-export type ActionTodoChain = "before" | "equip" | "after";
+export type ActionTodoChain = 'before' | 'equip' | 'after';
 
 type LoadoutLike = ActivityLoadoutStats | ScoredCombo | undefined;
 
@@ -150,7 +152,7 @@ export interface ActionTodo {
   /**
   Unnumbered warning above the list (don't-do-this), not a step.
   */
-  kind?: "caution";
+  kind?: 'caution';
   /**
   Affordable META upgrade — renders a confirm+Upgrade button on this step.
   */
@@ -168,12 +170,21 @@ export interface ActionTodo {
   */
   openTwitchStream?: boolean;
   /**
+  Achievement helper — navigate (or background-visit) this path.
+  */
+  openHref?: string;
+  openHrefLabel?: string;
+  /**
+  Fetch the href in a hidden request instead of leaving the page.
+  */
+  visitInBackground?: boolean;
+  /**
   Final list order — phases still decide wording / swap sequencing metadata.
   */
   urgency?: ActionTodoUrgency;
 }
 
-type ActivityPhase = "before" | "afterNow" | "after" | "other";
+type ActivityPhase = 'before' | 'afterNow' | 'after' | 'other';
 
 const CHAIN_RANK: Record<ActionTodoChain, number> = {
   before: 0,
@@ -203,8 +214,8 @@ function compareActionTodoUrgency(
   if (left.readyAtMs !== right.readyAtMs) {
     return left.readyAtMs - right.readyAtMs;
   }
-  const leftChain = CHAIN_RANK[left.chain ?? "before"];
-  const rightChain = CHAIN_RANK[right.chain ?? "before"];
+  const leftChain = CHAIN_RANK[left.chain ?? 'before'];
+  const rightChain = CHAIN_RANK[right.chain ?? 'before'];
   if (leftChain !== rightChain) {
     return leftChain - rightChain;
   }
@@ -220,10 +231,10 @@ function compareActionTodoUrgency(
 }
 
 function defaultTodoUrgency(todo: ActionTodo): ActionTodoUrgency {
-  if (todo.tone === "muted" && !todo.loadout) {
-    return { kind: "info", readyAtMs: 0, durationMs: 0 };
+  if (todo.tone === 'muted' && !todo.loadout) {
+    return { kind: 'info', readyAtMs: 0, durationMs: 0 };
   }
-  return { kind: "action", readyAtMs: 0, durationMs: 0 };
+  return { kind: 'action', readyAtMs: 0, durationMs: 0 };
 }
 
 /**
@@ -241,40 +252,40 @@ function sortActionTodosByUrgency(todos: ActionTodo[]): ActionTodo[] {
 function phaseChain(phase: ActivityPhase): ActionTodoChain {
   // afterNow = after the immediate equip, not tied with it (ARP would rank
   // Steam Quests above "Equip … now").
-  if (phase === "afterNow" || phase === "after") {
-    return "after";
+  if (phase === 'afterNow' || phase === 'after') {
+    return 'after';
   }
-  return "before";
+  return 'before';
 }
 
 type ActivityTodoRule = {
   key: ActivityKey;
-  isDue: (caps: SiteState["caps"]) => boolean;
+  isDue: (caps: SiteState['caps']) => boolean;
 };
 
 const ACTIVITY_TODO_RULES: readonly ActivityTodoRule[] = [
   {
-    key: "steamQuests",
-    isDue: (caps) => isActivityPending(caps, "steamQuests"),
+    key: 'steamQuests',
+    isDue: (caps) => isActivityPending(caps, 'steamQuests'),
   },
   {
-    key: "dailyQuests",
-    isDue: (caps) => isActivityPending(caps, "dailyQuests"),
+    key: 'dailyQuests',
+    isDue: (caps) => isActivityPending(caps, 'dailyQuests'),
   },
   {
-    key: "watchTwitch",
-    isDue: (caps) => isActivityAvailable(caps, "watchTwitch"),
+    key: 'watchTwitch',
+    isDue: (caps) => isActivityAvailable(caps, 'watchTwitch'),
   },
   {
-    key: "timeOnSite",
-    isDue: (caps) => isActivityAvailable(caps, "timeOnSite"),
+    key: 'timeOnSite',
+    isDue: (caps) => isActivityAvailable(caps, 'timeOnSite'),
   },
 ];
 
 const UTC_DAILY_KEYS: ReadonlySet<ActivityKey> = new Set([
-  "watchTwitch",
-  "dailyQuests",
-  "timeOnSite",
+  'watchTwitch',
+  'dailyQuests',
+  'timeOnSite',
 ]);
 const TIME_ON_SITE_DURATION_MS = BASE_ACTIVITY.timeOnSiteBasePerDay * 60_000;
 const STEAM_WEEK_MS = 7 * 86_400_000;
@@ -287,10 +298,10 @@ function activityDurationMs(
   key: ActivityKey,
   watchRemainingMs: number,
 ): number {
-  if (key === "watchTwitch") {
+  if (key === 'watchTwitch') {
     return Math.max(0, watchRemainingMs);
   }
-  if (key === "timeOnSite") {
+  if (key === 'timeOnSite') {
     return TIME_ON_SITE_DURATION_MS;
   }
   return 0;
@@ -302,7 +313,7 @@ function twitchFullDayMs(
 ): number {
   const cap =
     siteState.watchTwitch?.capArp ?? BASE_ACTIVITY.watchTwitchBasePerDay;
-  const flat = comboBonusForActivity(stats, "watchTwitch");
+  const flat = comboBonusForActivity(stats, 'watchTwitch');
   return (cap + flat) * 60_000;
 }
 
@@ -310,10 +321,10 @@ function loadoutStats(combo: LoadoutLike): ActivityLoadoutStats | undefined {
   if (!combo) {
     return undefined;
   }
-  if ("artifacts" in combo && combo.artifacts.length > 0) {
+  if ('artifacts' in combo && combo.artifacts.length > 0) {
     return activityStatsForArtifacts(combo.artifacts);
   }
-  if ("timeOnSiteFlat" in combo) {
+  if ('timeOnSiteFlat' in combo) {
     return combo;
   }
   return undefined;
@@ -370,11 +381,11 @@ function communityEventTodoUrgency(
 ): ActionTodoUrgency {
   if (pending.waitingPersonalArp > 0) {
     return actionUrgency({
-      kind: "action",
+      kind: 'action',
       readyAtMs: 0,
       durationMs: 0,
       arp: pending.waitingPersonalArp,
-      chain: "before",
+      chain: 'before',
     });
   }
   const waitingArp =
@@ -383,14 +394,14 @@ function communityEventTodoUrgency(
     pending.waitingPersonalArp;
   if (etaMs === undefined) {
     return actionUrgency({
-      kind: "info",
+      kind: 'info',
       readyAtMs: 0,
       durationMs: 0,
       arp: waitingArp,
     });
   }
   return actionUrgency({
-    kind: "schedule",
+    kind: 'schedule',
     readyAtMs: etaMs,
     durationMs: 0,
     deadlineMs: etaMs,
@@ -406,7 +417,7 @@ function pushCommunityEventTodo(
 ): void {
   const event = siteState.communityEvent;
   if (
-    !isActivityEnabled(settings, "steamCommunityEvent") ||
+    !isActivityEnabled(settings, 'steamCommunityEvent') ||
     !event?.isLive ||
     !canEarnCommunityEventArp(event)
   ) {
@@ -443,20 +454,20 @@ function pushCommunityEventTodo(
 function battlePassClaimCountLabel(readyAll: number, readyArp: number): string {
   if (readyArp <= 0) {
     return readyAll === 1
-      ? "1 Battle Pass reward"
+      ? '1 Battle Pass reward'
       : `${readyAll} Battle Pass rewards`;
   }
   if (readyAll === readyArp) {
     return readyArp === 1
-      ? "1 Battle Pass ARP Boost"
+      ? '1 Battle Pass ARP Boost'
       : `${readyArp} Battle Pass ARP Boosts`;
   }
-  const boosts = readyArp === 1 ? "1 ARP Boost" : `${readyArp} ARP Boosts`;
+  const boosts = readyArp === 1 ? '1 ARP Boost' : `${readyArp} ARP Boosts`;
   return `${readyAll} Battle Pass rewards (${boosts})`;
 }
 
 function holdArpBoostReason(readyArp: number): string {
-  const arpLabel = readyArp === 1 ? "1 ARP Boost" : `${readyArp} ARP Boosts`;
+  const arpLabel = readyArp === 1 ? '1 ARP Boost' : `${readyArp} ARP Boosts`;
   return `Hold ${arpLabel} until All-ARP% is on`;
 }
 
@@ -478,7 +489,7 @@ function pushHeldArpBattlePassTodos(
     ];
     if (!hasScheduledAllArp) {
       reasons.push({
-        text: "More boosts may unlock — claim those when All-ARP% is already on",
+        text: 'More boosts may unlock — claim those when All-ARP% is already on',
       });
     }
     todos.push({
@@ -487,10 +498,10 @@ function pushHeldArpBattlePassTodos(
       claimBattlePass: true,
       claimBattlePassSkipArp: true,
       urgency: {
-        kind: "action",
+        kind: 'action',
         readyAtMs: 0,
         durationMs: 0,
-        chain: "before",
+        chain: 'before',
       },
     });
   }
@@ -498,11 +509,11 @@ function pushHeldArpBattlePassTodos(
     todos.push({
       text: `Claim ${battlePassClaimCountLabel(readyArp, readyArp)}`,
       urgency: {
-        kind: "schedule",
+        kind: 'schedule',
         readyAtMs: allArpReadyAtMs,
         durationMs: 0,
         arp: readyArp,
-        chain: "after",
+        chain: 'after',
       },
     });
   }
@@ -554,10 +565,10 @@ function pushBattlePassTodo(
       text: `Claim ${countLabel}`,
       claimBattlePass: shouldShowClaimAll,
       urgency: {
-        kind: "action",
+        kind: 'action',
         readyAtMs: 0,
         durationMs: 0,
-        chain: "before",
+        chain: 'before',
       },
     });
     return;
@@ -568,11 +579,11 @@ function pushBattlePassTodo(
       text: `Claim ${countLabel} now — All-ARP% is equipped`,
       claimBattlePass: shouldShowClaimAll,
       urgency: {
-        kind: "action",
+        kind: 'action',
         readyAtMs: 0,
         durationMs: 0,
         arp: readyArp,
-        chain: "before",
+        chain: 'before',
       },
     });
     return;
@@ -581,16 +592,16 @@ function pushBattlePassTodo(
   if (ownsAllArp && seasonEndsBeforeAllArp) {
     const left = battlePassRemainingMs(siteState.battlePass);
     const todo: ActionTodo = {
-      tone: "warn",
+      tone: 'warn',
       text: `Claim ${countLabel} now — Battle Pass ends before All-ARP% can be equipped`,
       claimBattlePass: shouldShowClaimAll,
       urgency: actionUrgency({
-        kind: "action",
+        kind: 'action',
         readyAtMs: 0,
         durationMs: 0,
-        ...(typeof left === "number" && { deadlineMs: left }),
+        ...(typeof left === 'number' && { deadlineMs: left }),
         arp: readyArp,
-        chain: "before",
+        chain: 'before',
       }),
     };
     if (left !== undefined) {
@@ -615,11 +626,11 @@ function pushBattlePassTodo(
     text: `Claim ${countLabel}`,
     claimBattlePass: shouldShowClaimAll,
     urgency: {
-      kind: "action",
+      kind: 'action',
       readyAtMs: 0,
       durationMs: 0,
       arp: readyArp,
-      chain: "before",
+      chain: 'before',
     },
   });
 }
@@ -629,16 +640,16 @@ function comboBonusForActivity(combo: LoadoutLike, key: ActivityKey): number {
     return 0;
   }
   switch (key) {
-    case "steamQuests": {
+    case 'steamQuests': {
       return combo.steamQuestsFlat;
     }
-    case "watchTwitch": {
+    case 'watchTwitch': {
       return combo.watchTwitchFlat;
     }
-    case "discordPoll": {
+    case 'discordPoll': {
       return combo.discordPollFlat;
     }
-    case "timeOnSite": {
+    case 'timeOnSite': {
       return loadoutStats(combo)?.timeOnSiteFlat ?? 0;
     }
     default: {
@@ -655,11 +666,11 @@ function twitchActivityLabel(options: {
   watchRemainingMs: number;
   utcDailyEndBufferMs: number;
 }): string {
-  if (options.phase === "after" || options.phase === "afterNow") {
-    return "Watch Twitch";
+  if (options.phase === 'after' || options.phase === 'afterNow') {
+    return 'Watch Twitch';
   }
   if (
-    options.phase === "before" &&
+    options.phase === 'before' &&
     options.waitMs > 0 &&
     !canFinishTwitchAfterUnlock(
       options.waitMs,
@@ -667,12 +678,12 @@ function twitchActivityLabel(options: {
       options.utcDailyEndBufferMs,
     )
   ) {
-    return "Watch Twitch now";
+    return 'Watch Twitch now';
   }
   if (options.utcDeadline) {
     return `Watch Twitch (${utcResetDeadlineLabel()})`;
   }
-  return `Watch Twitch${options.beforeSwap ? " before swapping" : ""}`;
+  return `Watch Twitch${options.beforeSwap ? ' before swapping' : ''}`;
 }
 
 function twitchArpReason(options: {
@@ -680,7 +691,7 @@ function twitchArpReason(options: {
   waitMs: number;
   watchRemainingMs: number;
   allArpPct: number;
-  upcomingReset?: "utc" | "steam";
+  upcomingReset?: 'utc' | 'steam';
 }): ActionTodoReason | undefined {
   const arp = Math.round(
     (options.watchRemainingMs / 60_000) * (1 + options.allArpPct),
@@ -688,10 +699,10 @@ function twitchArpReason(options: {
   if (arp <= 0) {
     return undefined;
   }
-  if (options.upcomingReset === "utc") {
+  if (options.upcomingReset === 'utc') {
     return { text: `+${arp} ARP after 00:00 UTC` };
   }
-  if (options.phase === "after" && options.waitMs > 0) {
+  if (options.phase === 'after' && options.waitMs > 0) {
     const left = msAfterUnlockBeforeReset(options.waitMs);
     if (left > 0) {
       return { text: `+${arp} ARP (fits in ${formatMs(left)} before reset)` };
@@ -708,25 +719,25 @@ function discordPollActivityLabel(
     waitMs: number;
   },
 ): string {
-  const bonusPart = bonus > 0 ? ` (+${bonus} equipped bonus)` : "";
+  const bonusPart = bonus > 0 ? ` (+${bonus} equipped bonus)` : '';
   const nextPost = formatMs(msUntilNextDiscordPollPost());
-  if (options.phase === "after" && options.waitMs > 0) {
+  if (options.phase === 'after' && options.waitMs > 0) {
     return `Vote Discord Poll after unlock (${formatMs(options.waitMs)} wait, next post in ${nextPost})${bonusPart}`;
   }
-  if (options.phase === "before") {
+  if (options.phase === 'before') {
     return `Vote Discord Poll now — next post in ${nextPost}${bonusPart}`;
   }
-  return `Vote Discord Poll${options.beforeSwap ? " before swapping" : ""}${bonusPart}`;
+  return `Vote Discord Poll${options.beforeSwap ? ' before swapping' : ''}${bonusPart}`;
 }
 
 function steamQuestCountLabel(count: number): string {
   if (count === 1) {
-    return "1 Steam Quest";
+    return '1 Steam Quest';
   }
   if (count > 1) {
     return `${count} Steam Quests`;
   }
-  return "Steam Quest(s)";
+  return 'Steam Quest(s)';
 }
 
 function steamQuestsActivityLabel(
@@ -736,39 +747,39 @@ function steamQuestsActivityLabel(
     pendingCount: number;
   },
 ): string {
-  const bonusPart = bonus > 0 ? ` (+${bonus} equipped bonus)` : "";
-  const beforePart = options.beforeSwap ? " before swapping" : "";
+  const bonusPart = bonus > 0 ? ` (+${bonus} equipped bonus)` : '';
+  const beforePart = options.beforeSwap ? ' before swapping' : '';
   return `Complete ${steamQuestCountLabel(options.pendingCount)}${beforePart}${bonusPart}`;
 }
 
 function dailyQuestCountLabel(
-  pending: ReadonlyArray<{ kind: "daily" | "weekend" }>,
+  pending: ReadonlyArray<{ kind: 'daily' | 'weekend' }>,
 ): string {
   const count = pending.length;
   if (count === 0) {
-    return "Daily Quests";
+    return 'Daily Quests';
   }
-  const daily = pending.filter((quest) => quest.kind === "daily").length;
-  const weekend = pending.filter((quest) => quest.kind === "weekend").length;
+  const daily = pending.filter((quest) => quest.kind === 'daily').length;
+  const weekend = pending.filter((quest) => quest.kind === 'weekend').length;
   if (daily > 0 && weekend > 0) {
     return count === 2
-      ? "Daily and Weekend Quests"
+      ? 'Daily and Weekend Quests'
       : `${count} Daily and Weekend Quests`;
   }
   if (weekend > 0) {
-    return count === 1 ? "Weekend Quest" : `${count} Weekend Quests`;
+    return count === 1 ? 'Weekend Quest' : `${count} Weekend Quests`;
   }
-  return count === 1 ? "Daily Quest" : `${count} Daily Quests`;
+  return count === 1 ? 'Daily Quest' : `${count} Daily Quests`;
 }
 
 function dailyQuestsActivityLabel(
-  pending: ReadonlyArray<{ kind: "daily" | "weekend" }>,
+  pending: ReadonlyArray<{ kind: 'daily' | 'weekend' }>,
   options: {
     beforeSwap: boolean;
     utcDeadline: boolean;
   },
 ): string {
-  const beforePart = options.beforeSwap ? " before swapping" : "";
+  const beforePart = options.beforeSwap ? ' before swapping' : '';
   const questsName = dailyQuestCountLabel(pending);
   if (options.utcDeadline) {
     return `Complete ${questsName} (${utcResetDeadlineLabel()})`;
@@ -787,37 +798,37 @@ function activityLabel(
     watchRemainingMs: number;
     utcDailyEndBufferMs: number;
     steamQuestCount?: number;
-    dailyQuestPending?: ReadonlyArray<{ kind: "daily" | "weekend" }>;
+    dailyQuestPending?: ReadonlyArray<{ kind: 'daily' | 'weekend' }>;
   },
 ): string {
-  const beforePart = options.beforeSwap ? " before swapping" : "";
+  const beforePart = options.beforeSwap ? ' before swapping' : '';
   switch (key) {
-    case "steamQuests": {
+    case 'steamQuests': {
       return steamQuestsActivityLabel(bonus, {
         beforeSwap: options.beforeSwap,
         pendingCount: options.steamQuestCount ?? 0,
       });
     }
-    case "watchTwitch": {
+    case 'watchTwitch': {
       return twitchActivityLabel(options);
     }
-    case "dailyQuests": {
+    case 'dailyQuests': {
       return dailyQuestsActivityLabel(options.dailyQuestPending ?? [], {
         beforeSwap: options.beforeSwap,
         utcDeadline: options.utcDeadline,
       });
     }
-    case "discordPoll": {
+    case 'discordPoll': {
       return discordPollActivityLabel(bonus, options);
     }
-    case "timeOnSite": {
+    case 'timeOnSite': {
       // Only remind when this step follows an equip onto a ToS loadout.
       // Skip when ToS is already on, not planned, or slots are locked (phase
       // "other" / before) — otherwise it implies a preceding swap you can't do.
       const equipHint =
-        (options.phase === "after" || options.phase === "afterNow") && bonus > 0
-          ? " (equip ToS bonus before 5 ARP)"
-          : "";
+        (options.phase === 'after' || options.phase === 'afterNow') && bonus > 0
+          ? ' (equip ToS bonus before 5 ARP)'
+          : '';
       return `Earn Time on Site ARP${equipHint}${beforePart}`;
     }
     default: {
@@ -855,7 +866,7 @@ function activityWindowArp(
   const allArpPct = stats?.allArpPct ?? combo?.allArpPct ?? 0;
   let base = 0;
   switch (key) {
-    case "watchTwitch": {
+    case 'watchTwitch': {
       base =
         siteState === undefined || options?.fullDay === true
           ? (siteState?.watchTwitch?.capArp ??
@@ -867,15 +878,15 @@ function activityWindowArp(
             ) / 60_000;
       break;
     }
-    case "dailyQuests": {
+    case 'dailyQuests': {
       base = BASE_ACTIVITY.dailyQuestBase;
       break;
     }
-    case "timeOnSite": {
+    case 'timeOnSite': {
       base = BASE_ACTIVITY.timeOnSiteBasePerDay + (stats?.timeOnSiteFlat ?? 0);
       break;
     }
-    case "steamQuests": {
+    case 'steamQuests': {
       const remaining = siteState
         ? remainingSteamQuestRewards(siteState)
         : [...BASE_ACTIVITY.steamQuestBases];
@@ -889,7 +900,7 @@ function activityWindowArp(
         (1 + allArpPct)
       );
     }
-    case "discordPoll": {
+    case 'discordPoll': {
       base = BASE_ACTIVITY.discordPollBase;
       break;
     }
@@ -898,7 +909,7 @@ function activityWindowArp(
     }
   }
   const flat =
-    key === "watchTwitch" || key === "timeOnSite"
+    key === 'watchTwitch' || key === 'timeOnSite'
       ? 0
       : comboBonusForActivity(combo, key);
   return (base + flat) * (1 + allArpPct);
@@ -908,8 +919,8 @@ function resolveUtcDailyPhase(options: {
   key: ActivityKey;
   needsSwap: boolean;
   waitMs: number;
-  current: OptimizerResult["current"];
-  best: OptimizerResult["best"];
+  current: OptimizerResult['current'];
+  best: OptimizerResult['best'];
   afterNow: ActivityLoadoutStats | undefined;
   hasImmediateEquip: boolean;
   watchRemainingMs: number;
@@ -935,14 +946,14 @@ function resolveUtcDailyPhase(options: {
   // Filling a free slot (or replacing a piece that doesn't help this activity)
   // doesn't cost ARP — start the 24h cooldown first, then do the daily.
   if (needsSwap && hasImmediateEquip && afterNowArp >= currentArp) {
-    return "afterNow";
+    return 'afterNow';
   }
   const futureWaitMs = plannedWear?.waitMs ?? waitMs;
   const futureStats = plannedWear?.stats ?? best;
   const futureArp = activityWindowArp(futureStats, key, siteState);
   const durationMs = activityDurationMs(key, watchRemainingMs);
   const isFitsAfterFuture =
-    key === "watchTwitch"
+    key === 'watchTwitch'
       ? canFinishTwitchAfterUnlock(futureWaitMs, watchRemainingMs, cutoffMs)
       : canCompleteInWearWindow(
           0,
@@ -953,9 +964,9 @@ function resolveUtcDailyPhase(options: {
   // Wait for All-ARP% (deferred or recommended) when that lock still covers
   // this UTC day — repeating dailies must not beat a later one-shot multiplier.
   if (isFitsAfterFuture && futureArp > currentArp) {
-    return "after";
+    return 'after';
   }
-  return "before";
+  return 'before';
 }
 
 function resolveActivityPhase(options: {
@@ -968,8 +979,8 @@ function resolveActivityPhase(options: {
   waitMs: number;
   canEquipBeforeReset: boolean;
   isUtcDaily: boolean;
-  current: OptimizerResult["current"];
-  best: OptimizerResult["best"];
+  current: OptimizerResult['current'];
+  best: OptimizerResult['best'];
   afterNow: ActivityLoadoutStats | undefined;
   hasImmediateEquip: boolean;
   watchRemainingMs: number;
@@ -1014,7 +1025,7 @@ function resolveActivityPhase(options: {
   }
 
   if (
-    key === "steamQuests" &&
+    key === 'steamQuests' &&
     plannedWear &&
     activityWindowArp(plannedWear.stats, key, siteState) >
       activityWindowArp(current, key, siteState) &&
@@ -1025,48 +1036,48 @@ function resolveActivityPhase(options: {
       0,
     )
   ) {
-    return "after";
+    return 'after';
   }
 
   if (!needsSwap) {
-    return "other";
+    return 'other';
   }
 
   if (hasImmediateEquip && afterNowBonus >= currentBonus) {
-    return "afterNow";
+    return 'afterNow';
   }
 
   // Must do today with whatever is equipped — can't wait for the swap.
   if (expiresBeforeUnlock || currentBonus > bestBonus) {
-    return "before";
+    return 'before';
   }
 
   if (bestBonus > currentBonus && (waitMs === 0 || canEquipBeforeReset)) {
-    return "after";
+    return 'after';
   }
 
   if (currentBonus > 0 && currentBonus >= bestBonus) {
-    return "before";
+    return 'before';
   }
 
   if (bestBonus <= 0) {
-    return "other";
+    return 'other';
   }
 
-  return !canEquipBeforeReset && waitMs > 0 ? "other" : "after";
+  return !canEquipBeforeReset && waitMs > 0 ? 'other' : 'after';
 }
 
 function allArpPctForPhase(
   phase: ActivityPhase,
-  current: OptimizerResult["current"],
-  best: OptimizerResult["best"],
+  current: OptimizerResult['current'],
+  best: OptimizerResult['best'],
   afterNow: ActivityLoadoutStats | undefined,
   plannedWear?: PlannedWear,
 ): number {
-  if (phase === "after") {
+  if (phase === 'after') {
     return plannedWear?.stats.allArpPct ?? best?.allArpPct ?? 0;
   }
-  if (phase === "afterNow") {
+  if (phase === 'afterNow') {
     return afterNow?.allArpPct ?? current?.allArpPct ?? 0;
   }
   return current?.allArpPct ?? 0;
@@ -1078,13 +1089,13 @@ function bonusForActivityPhase(
   bestBonus: number,
   afterNowBonus = 0,
 ): number {
-  if (phase === "after") {
+  if (phase === 'after') {
     return bestBonus;
   }
-  if (phase === "afterNow") {
+  if (phase === 'afterNow') {
     return afterNowBonus;
   }
-  if (phase === "before") {
+  if (phase === 'before') {
     return currentBonus;
   }
   return 0;
@@ -1097,10 +1108,10 @@ function activityTodoArp(options: {
   twitchArp: number;
 }): number {
   const { key, bonusForText, allArpPct, twitchArp } = options;
-  if (key === "watchTwitch") {
+  if (key === 'watchTwitch') {
     return twitchArp;
   }
-  if (key === "timeOnSite") {
+  if (key === 'timeOnSite') {
     return Math.round(
       (BASE_ACTIVITY.timeOnSiteBasePerDay + bonusForText) * (1 + allArpPct),
     );
@@ -1126,13 +1137,13 @@ function activityTodoUrgency(options: {
     bonusForText,
     allArpPct,
   } = options;
-  const readyAtMs = phase === "after" ? waitMs : 0;
+  const readyAtMs = phase === 'after' ? waitMs : 0;
   const twitchArp =
-    key === "watchTwitch"
+    key === 'watchTwitch'
       ? Math.round((Math.max(0, watchRemainingMs) / 60_000) * (1 + allArpPct))
       : 0;
   return actionUrgency({
-    kind: readyAtMs > 0 ? "schedule" : "action",
+    kind: readyAtMs > 0 ? 'schedule' : 'action',
     readyAtMs,
     durationMs: activityDurationMs(key, watchRemainingMs),
     ...(isUtcDaily && { deadlineMs: msUntilUtcMidnight() }),
@@ -1153,7 +1164,7 @@ function steamQuestsTodoExtras(
   const pending = remainingSteamQuestRows(siteState);
   const reasons: ActionTodoReason[] = [];
   if (bonus > 0) {
-    reasons.push({ text: "Equip bonus before starting" });
+    reasons.push({ text: 'Equip bonus before starting' });
   }
   if (pending.some((quest) => quest.libraryPending === true)) {
     reasons.push({ text: STEAM_LIBRARY_PENDING_HINT });
@@ -1184,7 +1195,7 @@ function activityTodoReasons(options: {
   waitMs: number;
   watchRemainingMs: number;
   allArpPct: number;
-  upcomingReset?: "utc" | "steam";
+  upcomingReset?: 'utc' | 'steam';
   steamQuests?: { reasons?: ActionTodoReason[] };
   dailyQuests?: { reasons?: ActionTodoReason[] };
 }): ActionTodoReason[] | undefined {
@@ -1199,7 +1210,7 @@ function activityTodoReasons(options: {
     dailyQuests,
   } = options;
   const reasons: ActionTodoReason[] = [];
-  if (key === "watchTwitch") {
+  if (key === 'watchTwitch') {
     const twitchReason = twitchArpReason({
       phase,
       waitMs,
@@ -1215,10 +1226,10 @@ function activityTodoReasons(options: {
   } else if (dailyQuests?.reasons) {
     reasons.push(...dailyQuests.reasons);
   }
-  if (upcomingReset === "steam") {
-    reasons.push({ text: "after Monday 00:00 UTC reset" });
-  } else if (upcomingReset === "utc" && key !== "watchTwitch") {
-    reasons.push({ text: "after 00:00 UTC reset" });
+  if (upcomingReset === 'steam') {
+    reasons.push({ text: 'after Monday 00:00 UTC reset' });
+  } else if (upcomingReset === 'utc' && key !== 'watchTwitch') {
+    reasons.push({ text: 'after 00:00 UTC reset' });
   }
   return reasons.length > 0 ? reasons : undefined;
 }
@@ -1236,7 +1247,7 @@ function buildActivityTodo(options: {
   allArpPct: number;
   siteState: SiteState;
   utcDailyEndBufferMs: number;
-  upcomingReset?: "utc" | "steam";
+  upcomingReset?: 'utc' | 'steam';
 }): ActionTodo {
   const {
     key,
@@ -1260,14 +1271,14 @@ function buildActivityTodo(options: {
     afterNowBonus,
   );
   const steamQuests =
-    key === "steamQuests"
+    key === 'steamQuests'
       ? steamQuestsTodoExtras(siteState, bonusForText)
       : undefined;
   const dailyQuests =
-    key === "dailyQuests" ? dailyQuestsTodoExtras(siteState) : undefined;
+    key === 'dailyQuests' ? dailyQuestsTodoExtras(siteState) : undefined;
   const todo: ActionTodo = {
     text: activityLabel(key, bonusForText, {
-      beforeSwap: phase === "before" && needsSwap && currentBonus > 0,
+      beforeSwap: phase === 'before' && needsSwap && currentBonus > 0,
       utcDeadline: isUtcDaily && upcomingReset === undefined,
       phase,
       waitMs,
@@ -1300,7 +1311,7 @@ function buildActivityTodo(options: {
   if (reasons) {
     todo.reasons = reasons;
   }
-  if (key === "watchTwitch" && upcomingReset === undefined) {
+  if (key === 'watchTwitch' && upcomingReset === undefined) {
     todo.openTwitchStream = true;
   }
 
@@ -1309,7 +1320,7 @@ function buildActivityTodo(options: {
     upcomingReset === undefined &&
     msUntilUtcMidnight() <= 2 * 3_600_000;
   if (isUtcUrgent) {
-    todo.tone = "warn";
+    todo.tone = 'warn';
   }
 
   return todo;
@@ -1325,15 +1336,15 @@ function pushTodoByPhase(
   phase: ActivityPhase,
   todo: ActionTodo,
 ): void {
-  if (phase === "before") {
+  if (phase === 'before') {
     buckets.beforeSwap.push(todo);
     return;
   }
-  if (phase === "afterNow") {
+  if (phase === 'afterNow') {
     buckets.afterNow.push(todo);
     return;
   }
-  if (phase === "after") {
+  if (phase === 'after') {
     buckets.afterSwap.push(todo);
     return;
   }
@@ -1378,8 +1389,8 @@ function upcomingResetAtMs(
   if (!plannedWear || isTodayDue) {
     return undefined;
   }
-  if (key === "steamQuests") {
-    if (isActivityPending(siteState.caps, "steamQuests")) {
+  if (key === 'steamQuests') {
+    if (isActivityPending(siteState.caps, 'steamQuests')) {
       return undefined;
     }
     const monday = msUntilNextSteamQuestWeek();
@@ -1400,7 +1411,7 @@ function upcomingResetAtMs(
   }
   const midnight = msUntilUtcMidnight();
   const duration =
-    key === "watchTwitch"
+    key === 'watchTwitch'
       ? twitchFullDayMs(plannedWear.stats, siteState)
       : activityDurationMs(key, 0);
   if (
@@ -1421,10 +1432,10 @@ function waitMsForActivityPhase(
   delayWaitMs: number,
   waitMs: number,
 ): number {
-  if (phase === "afterNow") {
+  if (phase === 'afterNow') {
     return 0;
   }
-  if (phase === "after") {
+  if (phase === 'after') {
     return delayWaitMs;
   }
   return waitMs;
@@ -1439,8 +1450,8 @@ function appendDueActivityTodo(options: {
   };
   rule: ActivityTodoRule;
   needsSwap: boolean;
-  current: OptimizerResult["current"];
-  best: OptimizerResult["best"];
+  current: OptimizerResult['current'];
+  best: OptimizerResult['best'];
   afterNow: ActivityLoadoutStats | undefined;
   hasImmediateEquip: boolean;
   watchAfterMs: number;
@@ -1495,7 +1506,7 @@ function appendDueActivityTodo(options: {
     utcDailyEndBufferMs: cutoffMs,
   });
   const watchRemainingMs =
-    rule.key === "watchTwitch"
+    rule.key === 'watchTwitch'
       ? twitchWatchRemainingMs(
           siteState,
           bonusForActivityPhase(phase, currentBonus, bestBonus, afterNowBonus),
@@ -1555,15 +1566,15 @@ function appendUpcomingActivityTodo(options: {
     utcDailyEndBufferMs: cutoffMs,
   } = options;
   const upcomingWatchMs =
-    rule.key === "watchTwitch"
+    rule.key === 'watchTwitch'
       ? twitchFullDayMs(plannedWear.stats, siteState)
       : watchAfterMs;
   pushTodoByPhase(
     buckets,
-    "after",
+    'after',
     buildActivityTodo({
       key: rule.key,
-      phase: "after",
+      phase: 'after',
       needsSwap,
       currentBonus,
       bestBonus,
@@ -1574,7 +1585,7 @@ function appendUpcomingActivityTodo(options: {
       allArpPct: plannedWear.stats.allArpPct,
       siteState,
       utcDailyEndBufferMs: cutoffMs,
-      upcomingReset: rule.key === "steamQuests" ? "steam" : "utc",
+      upcomingReset: rule.key === 'steamQuests' ? 'steam' : 'utc',
     }),
   );
 }
@@ -1588,9 +1599,9 @@ function isSequencedActivityDue(
   if (!isActivityEnabled(settings, rule.key)) {
     return false;
   }
-  if (rule.key === "watchTwitch") {
+  if (rule.key === 'watchTwitch') {
     return (
-      watchRemainingMs > 0 && isActivityAvailable(siteState.caps, "watchTwitch")
+      watchRemainingMs > 0 && isActivityAvailable(siteState.caps, 'watchTwitch')
     );
   }
   return rule.isDue(siteState.caps);
@@ -1633,10 +1644,10 @@ function buildSequencedActivityTodos(
         )
       : undefined;
   const twitchFlatForDue = Math.max(
-    comboBonusForActivity(current, "watchTwitch"),
-    comboBonusForActivity(afterNow ?? current, "watchTwitch"),
-    comboBonusForActivity(best, "watchTwitch"),
-    comboBonusForActivity(plannedWear?.stats, "watchTwitch"),
+    comboBonusForActivity(current, 'watchTwitch'),
+    comboBonusForActivity(afterNow ?? current, 'watchTwitch'),
+    comboBonusForActivity(best, 'watchTwitch'),
+    comboBonusForActivity(plannedWear?.stats, 'watchTwitch'),
   );
   const watchAfterMs = twitchWatchRemainingMs(siteState, twitchFlatForDue);
 
@@ -1792,32 +1803,40 @@ function collectEquipReasons(
 
   pushAllArpEquipReasons(reasons, stats.allArpPct, siteState);
 
+  // Only cite discount when it is vault-priority. Weaker pieces like
+  // Mysterious Text Decipher (2%) are not a reason to equip / lock a slot.
+  if (stats.marketDiscountPct >= VAULT_PRIORITY_DISCOUNT_PCT) {
+    reasons.push({
+      text: `${Math.round(stats.marketDiscountPct * 100)}% Game Vault / marketplace discount before buying`,
+    });
+  }
+
   const isNextUtcResetInLock = isResetInWearWindow(
     msUntilUtcMidnight(),
     waitMs,
   );
-  const isSteamDueNow = isActivityPending(caps, "steamQuests");
+  const isSteamDueNow = isActivityPending(caps, 'steamQuests');
   pushFlatEquipReason(
     reasons,
     stats.steamQuestsFlat,
     waitMs,
     isSteamDueNow,
     isResetInWearWindow(msUntilNextSteamQuestWeek(), waitMs),
-    "Steam Quests",
-    "Steam Quests after Monday reset",
+    'Steam Quests',
+    'Steam Quests after Monday reset',
   );
   pushFlatEquipReason(
     reasons,
     stats.watchTwitchFlat,
     waitMs,
-    isActivityAvailable(caps, "watchTwitch"),
+    isActivityAvailable(caps, 'watchTwitch'),
     isNextUtcResetInLock,
-    "Watch Twitch cap",
-    "Watch Twitch cap after 00:00 UTC",
+    'Watch Twitch cap',
+    'Watch Twitch cap after 00:00 UTC',
   );
-  if (stats.discordPollFlat > 0 && isActivityPending(caps, "discordPoll")) {
+  if (stats.discordPollFlat > 0 && isActivityPending(caps, 'discordPoll')) {
     reasons.push({
-      text: flatBonusReason(stats.discordPollFlat, "Discord Poll", waitMs),
+      text: flatBonusReason(stats.discordPollFlat, 'Discord Poll', waitMs),
     });
   }
   // Auto-claims on visit; ARP log marks today capped. Count the next day.
@@ -1832,7 +1851,7 @@ function collectEquipReasons(
   }
   if (waitMs > 0 && isArtifactsShowroomPage()) {
     reasons.push({
-      text: "Still stuck after Refresh? Upgrade a maxed artifact manually (Warrior Script) — 0 fragments",
+      text: 'Still stuck after Refresh? Upgrade a maxed artifact manually (Warrior Script) — 0 fragments',
     });
   }
 
@@ -1840,7 +1859,7 @@ function collectEquipReasons(
 }
 
 function comboArtifactsByIds(
-  combo: NonNullable<OptimizerResult["best"]>,
+  combo: NonNullable<OptimizerResult['best']>,
   ids: ReadonlySet<number>,
 ): OwnedArtifact[] {
   return combo.artifacts.filter((artifact) => ids.has(artifact.instanceId));
@@ -1854,14 +1873,16 @@ function buildEquipTodo(options: {
   urgency?: ActionTodoUrgency;
 }): ActionTodo {
   const { headline, loadout, reasons, tone, urgency } = options;
+  // Keep loadout on the dedicated field — renderActionTodoBody prints it as its
+  // own line; embedding it in `text` duplicated the artifact names.
   const todo: ActionTodo = {
-    text: `${headline} - ${loadout}`,
+    text: headline,
     loadout,
     urgency: urgency ?? {
-      kind: "action",
+      kind: 'action',
       readyAtMs: 0,
       durationMs: 0,
-      chain: "equip",
+      chain: 'equip',
     },
   };
   if (reasons.length > 0) {
@@ -1874,30 +1895,30 @@ function buildEquipTodo(options: {
 }
 
 function deferredSteamTodo(
-  deferred: NonNullable<OptimizerResult["deferredSteam"]>,
+  deferred: NonNullable<OptimizerResult['deferredSteam']>,
   siteState: SiteState,
 ): ActionTodo {
   const { waitMs, artifacts } = deferred;
   const headline =
     waitMs > 0
       ? `Equip Steam Quests set in ${formatMs(waitMs)}`
-      : "Equip Steam Quests set now";
+      : 'Equip Steam Quests set now';
   return buildEquipTodo({
     headline,
     loadout: loadoutLabel(artifacts),
     reasons: collectEquipReasons(siteState, waitMs, artifacts),
     urgency: actionUrgency({
-      kind: waitMs > 0 ? "schedule" : "action",
+      kind: waitMs > 0 ? 'schedule' : 'action',
       readyAtMs: waitMs,
       durationMs: 0,
       deadlineMs: msUntilNextSteamQuestWeek(),
-      chain: "equip",
+      chain: 'equip',
     }),
   });
 }
 
 function deferredAllArpTodo(
-  deferred: NonNullable<OptimizerResult["deferredAllArp"]>,
+  deferred: NonNullable<OptimizerResult['deferredAllArp']>,
 ): ActionTodo {
   const { waitMs, artifacts, unlock } = deferred;
   const parts: string[] = [];
@@ -1911,14 +1932,14 @@ function deferredAllArpTodo(
   return buildEquipTodo({
     headline: `Equip All-ARP% in ${formatMs(waitMs)}`,
     loadout: loadoutLabel(artifacts),
-    reasons: [{ text: parts.join(" · ") }],
+    reasons: [{ text: parts.join(' · ') }],
     urgency: actionUrgency({
-      kind: "schedule",
+      kind: 'schedule',
       readyAtMs: waitMs,
       durationMs: 0,
-      ...(typeof unlock.etaMs === "number" && { deadlineMs: unlock.etaMs }),
+      ...(typeof unlock.etaMs === 'number' && { deadlineMs: unlock.etaMs }),
       arp: unlock.arpReward,
-      chain: "equip",
+      chain: 'equip',
     }),
   });
 }
@@ -1971,7 +1992,7 @@ function battlePassAllArpEquipWaitMs(options: {
       waitMs,
       showroomCooldownRemainingMs(settings, position, {
         ...(result.slotLocks && { slotLocks: result.slotLocks }),
-        ...(typeof equipped?.slotLocked === "boolean" && {
+        ...(typeof equipped?.slotLocked === 'boolean' && {
           equippedSlotLocked: equipped.slotLocked,
         }),
       }),
@@ -1997,17 +2018,17 @@ function battlePassAllArpEquipTodo(options: {
   });
   const arpReady = battlePassClaimableArp(options.siteState.battlePass);
   const headline =
-    waitMs > 0 ? `Equip All-ARP% in ${formatMs(waitMs)}` : "Equip All-ARP%";
+    waitMs > 0 ? `Equip All-ARP% in ${formatMs(waitMs)}` : 'Equip All-ARP%';
   return buildEquipTodo({
     headline,
-    loadout: artifacts ? loadoutLabel(artifacts) : "All-ARP% set",
+    loadout: artifacts ? loadoutLabel(artifacts) : 'All-ARP% set',
     reasons: [],
     urgency: actionUrgency({
-      kind: waitMs > 0 ? "schedule" : "action",
+      kind: waitMs > 0 ? 'schedule' : 'action',
       readyAtMs: waitMs,
       durationMs: 0,
       ...(arpReady > 0 && { arp: arpReady }),
-      chain: "equip",
+      chain: 'equip',
     }),
   });
 }
@@ -2090,14 +2111,14 @@ function pushCommunityAllArpGuards(
   const pending = breakDownCommunityEventPending(event);
   if (pending.waitingPersonalArp > 0) {
     todos.push({
-      tone: "warn",
+      tone: 'warn',
       text: `Equip All-ARP% before playing more Community Event hours (${formatCommunityEventArp(pending.waitingPersonalArp)} community-unlocked)`,
       urgency: {
-        kind: "action",
+        kind: 'action',
         readyAtMs: 0,
         durationMs: 0,
         arp: pending.waitingPersonalArp,
-        chain: "equip",
+        chain: 'equip',
       },
     });
     return;
@@ -2106,10 +2127,10 @@ function pushCommunityAllArpGuards(
     return;
   }
   todos.push({
-    tone: "muted",
+    tone: 'muted',
     text: `Consider All-ARP% before community unlock (${describeWaitingCommunityArpLine(event, pending.waitingCommunityArp)})`,
     urgency: {
-      kind: "info",
+      kind: 'info',
       readyAtMs: 0,
       durationMs: 0,
       arp: pending.waitingCommunityArp,
@@ -2144,14 +2165,14 @@ function pushAllArpGuardTodos(
   ) {
     const arpReady = battlePassClaimableArp(siteState.battlePass);
     todos.push({
-      kind: "caution",
-      tone: hasScheduledAllArp ? "warn" : "muted",
+      kind: 'caution',
+      tone: hasScheduledAllArp ? 'warn' : 'muted',
       text: `Don't claim Battle Pass ARP Boost yet (${arpReady} ready)`,
       reasons: [
         {
           text: hasScheduledAllArp
-            ? "Claim after All-ARP% is on"
-            : "More boosts may unlock — claim when All-ARP% is already on",
+            ? 'Claim after All-ARP% is on'
+            : 'More boosts may unlock — claim when All-ARP% is already on',
         },
       ],
     });
@@ -2197,8 +2218,8 @@ function pushScheduledAllArpTodos(
 }
 
 function nowEquipHeadline(plan: LoadoutChangePlan): string {
-  const nowNames = plan.now.map((change) => change.displayName).join(" + ");
-  const slots = plan.now.map((change) => `slot ${change.position}`).join(", ");
+  const nowNames = plan.now.map((change) => change.displayName).join(' + ');
+  const slots = plan.now.map((change) => `slot ${change.position}`).join(', ');
   return `Equip: ${nowNames} now (${slots} free)`;
 }
 
@@ -2214,10 +2235,10 @@ function buildPartialEquipTodos(
   const nowTodo: ActionTodo = {
     text: nowEquipHeadline(plan),
     urgency: {
-      kind: "action",
+      kind: 'action',
       readyAtMs: 0,
       durationMs: 0,
-      chain: "equip",
+      chain: 'equip',
     },
   };
   if (nowReasons.length > 0) {
@@ -2228,13 +2249,13 @@ function buildPartialEquipTodos(
       nowTodo,
       buildEquipTodo({
         headline: `Equip in ${formatMs(plan.waitMs)}`,
-        loadout: plan.laterNames.join(" + "),
+        loadout: plan.laterNames.join(' + '),
         reasons: laterReasons,
         urgency: {
-          kind: "schedule",
+          kind: 'schedule',
           readyAtMs: plan.waitMs,
           durationMs: 0,
-          chain: "equip",
+          chain: 'equip',
         },
       }),
     ];
@@ -2252,8 +2273,8 @@ function buildPartialEquipTodos(
 }
 
 function buildSwapEquipTodos(options: {
-  best: NonNullable<OptimizerResult["best"]>;
-  current: OptimizerResult["current"];
+  best: NonNullable<OptimizerResult['best']>;
+  current: OptimizerResult['current'];
   settings: ArtifactOptimizerSettings;
   siteState: SiteState;
   slotLocks?: Partial<Record<1 | 2 | 3, boolean>>;
@@ -2313,7 +2334,7 @@ function buildSwapEquipTodos(options: {
   }
   if (isLocked) {
     const laterLabel =
-      plan.laterNames.length > 0 ? plan.laterNames.join(" + ") : label;
+      plan.laterNames.length > 0 ? plan.laterNames.join(' + ') : label;
     return {
       immediate: nowUpgrades,
       later: [
@@ -2323,10 +2344,10 @@ function buildSwapEquipTodos(options: {
           loadout: laterLabel,
           reasons: laterReasons,
           urgency: {
-            kind: "schedule",
+            kind: 'schedule',
             readyAtMs: swapWaitMs,
             durationMs: 0,
-            chain: "equip",
+            chain: 'equip',
           },
         }),
       ],
@@ -2336,14 +2357,14 @@ function buildSwapEquipTodos(options: {
     immediate: [
       ...nowUpgrades,
       buildEquipTodo({
-        headline: beforeSwapCount > 0 ? "Then equip" : "Equip this set",
+        headline: beforeSwapCount > 0 ? 'Then equip' : 'Equip this set',
         loadout: label,
         reasons: laterReasons,
         urgency: {
-          kind: "action",
+          kind: 'action',
           readyAtMs: 0,
           durationMs: 0,
-          chain: "equip",
+          chain: 'equip',
         },
       }),
     ],
@@ -2354,7 +2375,7 @@ function buildSwapEquipTodos(options: {
 function pushEquipPlanTodos(
   todos: ActionTodo[],
   options: {
-    best: NonNullable<OptimizerResult["best"]> | undefined;
+    best: NonNullable<OptimizerResult['best']> | undefined;
     siteState: SiteState;
     isMatchingLoadout: boolean;
     isLocked: boolean;
@@ -2396,7 +2417,7 @@ function pushEquipPlanTodos(
     pending.waitingPersonalArp > 0
   ) {
     todos.push({
-      tone: "warn",
+      tone: 'warn',
       text: `Slots on cooldown (${formatMs(waitMs)} left)`,
       reasons: [
         {
@@ -2404,11 +2425,11 @@ function pushEquipPlanTodos(
         },
       ],
       urgency: {
-        kind: "schedule",
+        kind: 'schedule',
         readyAtMs: waitMs,
         durationMs: 0,
         arp: pending.waitingPersonalArp,
-        chain: "equip",
+        chain: 'equip',
       },
     });
     return;
@@ -2422,7 +2443,7 @@ function pushEquipPlanTodos(
     pending.waitingCommunityArp > 0
   ) {
     todos.push({
-      tone: "muted",
+      tone: 'muted',
       text: `Slots on cooldown (${formatMs(waitMs)} left)`,
       reasons: [
         {
@@ -2430,7 +2451,7 @@ function pushEquipPlanTodos(
         },
       ],
       urgency: {
-        kind: "info",
+        kind: 'info',
         readyAtMs: waitMs,
         durationMs: 0,
         arp: pending.waitingCommunityArp,
@@ -2456,10 +2477,10 @@ function upgradeTodosFor(
     const todo: ActionTodo = {
       text: `Upgrade ${upgrade.artifact.displayName} to ${TIER_LABELS[upgrade.toTier]} (${upgrade.fragmentCost} frag)`,
       urgency: {
-        kind: "action",
+        kind: 'action',
         readyAtMs: 0,
         durationMs: 0,
-        chain: "equip",
+        chain: 'equip',
       },
     };
     if (!seenAffordable.has(instanceId)) {
@@ -2471,11 +2492,11 @@ function upgradeTodosFor(
   return todos;
 }
 
-type DiscordPollSlot = "before" | "afterNow" | "afterFull" | "other";
+type DiscordPollSlot = 'before' | 'afterNow' | 'afterFull' | 'other';
 
 function isImmediateDiscordUpgrade(
   plan: LoadoutChangePlan,
-  best: NonNullable<OptimizerResult["best"]>,
+  best: NonNullable<OptimizerResult['best']>,
 ): boolean {
   return plan.now.some((change) => {
     const owned = best.artifacts.find(
@@ -2504,15 +2525,15 @@ function discordPollSlot(options: {
     canNowEquipHelpPoll,
   } = options;
   if (needsSwap && isPollBetterAfterSwap && waitMs > 0 && waitMs < nextPostMs) {
-    return "afterFull";
+    return 'afterFull';
   }
   if (needsSwap && canNowEquipHelpPoll) {
-    return "afterNow";
+    return 'afterNow';
   }
   if (needsSwap && isPollBetterAfterSwap) {
-    return "before";
+    return 'before';
   }
-  return "other";
+  return 'other';
 }
 
 function discordPollTodoText(options: {
@@ -2523,21 +2544,21 @@ function discordPollTodoText(options: {
   nowNames: string;
 }): string {
   const { slot, bonus, waitMs, nextPostMs, nowNames } = options;
-  const bonusPart = bonus > 0 ? ` (+${bonus} equipped bonus)` : "";
+  const bonusPart = bonus > 0 ? ` (+${bonus} equipped bonus)` : '';
   const nextPost = formatMs(nextPostMs);
-  if (slot === "afterFull") {
+  if (slot === 'afterFull') {
     return `Vote Discord Poll after unlock (${formatMs(waitMs)} wait, next post in ${nextPost})${bonusPart}`;
   }
-  if (slot === "afterNow") {
+  if (slot === 'afterNow') {
     return `Vote Discord Poll after equipping ${nowNames}${bonusPart}`;
   }
-  if (slot === "before") {
+  if (slot === 'before') {
     return `Vote Discord Poll now — next post in ${nextPost}${bonusPart}`;
   }
   if (bonus > 0) {
     return `Vote Discord Poll (+${bonus} already equipped)`;
   }
-  return "Vote Discord Poll";
+  return 'Vote Discord Poll';
 }
 
 function buildDiscordPollAction(options: {
@@ -2548,13 +2569,13 @@ function buildDiscordPollAction(options: {
   waitMs: number;
 }): { slot: DiscordPollSlot; todo: ActionTodo } | undefined {
   const { result, settings, siteState, needsSwap, waitMs } = options;
-  if (!isActivityEnabled(settings, "discordPoll")) {
+  if (!isActivityEnabled(settings, 'discordPoll')) {
     return undefined;
   }
   // ARP Log is the only completion signal — trust it even if caps lagged.
   if (
     hasVotedCurrentDiscordPoll(siteState.arpLog) ||
-    !isActivityAvailable(siteState.caps, "discordPoll")
+    !isActivityAvailable(siteState.caps, 'discordPoll')
   ) {
     return undefined;
   }
@@ -2562,8 +2583,8 @@ function buildDiscordPollAction(options: {
   const current = result.current;
   const best = result.best;
   const isPollBetterAfterSwap =
-    activityWindowArp(best, "discordPoll") >
-    activityWindowArp(current, "discordPoll");
+    activityWindowArp(best, 'discordPoll') >
+    activityWindowArp(current, 'discordPoll');
   const plan =
     best === undefined
       ? undefined
@@ -2578,31 +2599,31 @@ function buildDiscordPollAction(options: {
     isPollBetterAfterSwap,
     canNowEquipHelpPoll,
   });
-  const currentBonus = comboBonusForActivity(current, "discordPoll");
-  const bestBonus = comboBonusForActivity(best, "discordPoll");
-  let phase: ActivityPhase = "other";
-  if (slot === "afterFull" || slot === "afterNow") {
-    phase = "after";
-  } else if (slot === "before") {
-    phase = "before";
+  const currentBonus = comboBonusForActivity(current, 'discordPoll');
+  const bestBonus = comboBonusForActivity(best, 'discordPoll');
+  let phase: ActivityPhase = 'other';
+  if (slot === 'afterFull' || slot === 'afterNow') {
+    phase = 'after';
+  } else if (slot === 'before') {
+    phase = 'before';
   }
   const bonus =
-    slot === "other"
+    slot === 'other'
       ? currentBonus
       : bonusForActivityPhase(phase, currentBonus, bestBonus);
   const chain: ActionTodoChain =
-    slot === "afterFull" || slot === "afterNow" ? "after" : "before";
+    slot === 'afterFull' || slot === 'afterNow' ? 'after' : 'before';
   const todo: ActionTodo = {
     text: discordPollTodoText({
       slot,
       bonus,
       waitMs,
       nextPostMs,
-      nowNames: plan?.now.map((change) => change.displayName).join(" + ") ?? "",
+      nowNames: plan?.now.map((change) => change.displayName).join(' + ') ?? '',
     }),
     urgency: actionUrgency({
-      kind: "action",
-      readyAtMs: slot === "afterFull" ? waitMs : 0,
+      kind: 'action',
+      readyAtMs: slot === 'afterFull' ? waitMs : 0,
       durationMs: 0,
       deadlineMs: nextPostMs,
       arp: BASE_ACTIVITY.discordPollBase + bonus,
@@ -2610,8 +2631,8 @@ function buildDiscordPollAction(options: {
     }),
   };
   const twoHoursMs = 2 * 3_600_000;
-  if (slot !== "afterFull" && nextPostMs <= twoHoursMs) {
-    todo.tone = "warn";
+  if (slot !== 'afterFull' && nextPostMs <= twoHoursMs) {
+    todo.tone = 'warn';
   }
   return { slot, todo };
 }
@@ -2625,8 +2646,8 @@ function discordTodoForSlot(
 
 function pushRecommendedSwapTodos(options: {
   todos: ActionTodo[];
-  best: NonNullable<OptimizerResult["best"]>;
-  current: OptimizerResult["current"];
+  best: NonNullable<OptimizerResult['best']>;
+  current: OptimizerResult['current'];
   settings: ArtifactOptimizerSettings;
   siteState: SiteState;
   slotLocks?: Partial<Record<1 | 2 | 3, boolean>>;
@@ -2657,16 +2678,16 @@ function pushRecommendedSwapTodos(options: {
     isLocked,
     waitMs,
     beforeSwapCount:
-      sequenced.beforeSwap.length + (discord?.slot === "before" ? 1 : 0),
+      sequenced.beforeSwap.length + (discord?.slot === 'before' ? 1 : 0),
     upgrades,
     ...(slotLocks && { slotLocks }),
   });
   todos.push(
     ...swap.immediate,
     ...sequenced.afterNow,
-    ...discordTodoForSlot(discord, "afterNow"),
+    ...discordTodoForSlot(discord, 'afterNow'),
     ...sequenced.other,
-    ...discordTodoForSlot(discord, "other"),
+    ...discordTodoForSlot(discord, 'other'),
     ...swap.later,
   );
 }
@@ -2678,12 +2699,12 @@ function pushAfterSwapTodos(
   isNeedsSwap: boolean,
 ): void {
   const afterSwap = [...sequenced.afterSwap];
-  if (discord?.slot === "afterFull") {
+  if (discord?.slot === 'afterFull') {
     afterSwap.unshift(discord.todo);
   }
   todos.push(...afterSwap);
   if (!isNeedsSwap) {
-    todos.push(...sequenced.other, ...discordTodoForSlot(discord, "other"));
+    todos.push(...sequenced.other, ...discordTodoForSlot(discord, 'other'));
   }
 }
 
@@ -2751,7 +2772,7 @@ export function buildActionPlan(
 
   // 1) UTC-reset work that would lose ARP if we equipped first.
   todos.push(...sequenced.beforeSwap);
-  if (discord?.slot === "before") {
+  if (discord?.slot === 'before') {
     todos.push(discord.todo);
   }
 
@@ -2834,9 +2855,9 @@ export function buildActionPlan(
   if (todos.length === 0) {
     return [
       {
-        tone: "muted",
-        text: "Nothing urgent — check back after activities refresh",
-        urgency: { kind: "info", readyAtMs: 0, durationMs: 0 },
+        tone: 'muted',
+        text: 'Nothing urgent — check back after activities refresh',
+        urgency: { kind: 'info', readyAtMs: 0, durationMs: 0 },
       },
     ];
   }
@@ -2848,14 +2869,14 @@ export function buildActionPlan(
   return [...cautions, ...steps];
 }
 
-function actionTodoToneClass(tone: ActionTodo["tone"]): string {
-  if (tone === "warn") {
-    return " ao-todo-warn";
+function actionTodoToneClass(tone: ActionTodo['tone']): string {
+  if (tone === 'warn') {
+    return ' ao-todo-warn';
   }
-  if (tone === "muted") {
-    return " ao-todo-muted";
+  if (tone === 'muted') {
+    return ' ao-todo-muted';
   }
-  return "";
+  return '';
 }
 
 function renderActionTodoBody(todo: ActionTodo): string {
@@ -2872,13 +2893,13 @@ function renderActionTodoBody(todo: ActionTodo): string {
       .map((reason) => {
         const detail = reason.detail
           ? `<div class="ao-todo-reason-detail">${wrapArtifactNames(reason.detail)}</div>`
-          : "";
+          : '';
         return `<li><div class="ao-todo-reason-text">${wrapArtifactNames(reason.text)}</div>${detail}</li>`;
       })
-      .join("");
+      .join('');
     parts.push(`<ul class="ao-todo-reasons">${items}</ul>`);
   }
-  return parts.join("");
+  return parts.join('');
 }
 
 function renderTodoActionButton(
@@ -2888,26 +2909,31 @@ function renderTodoActionButton(
   const areActionsEnabled = options.allowAccountActions === true;
   if (todo.upgradeInstanceId !== undefined) {
     if (!areActionsEnabled) {
-      return "";
+      return '';
     }
     return `<button type="button" class="ao-upgrade-btn" data-id="${todo.upgradeInstanceId}">Upgrade</button>`;
   }
   if (todo.claimBattlePass === true) {
     if (!areActionsEnabled) {
-      return "";
+      return '';
     }
     const skipArp =
-      todo.claimBattlePassSkipArp === true ? ' data-skip-arp="1"' : "";
+      todo.claimBattlePassSkipArp === true ? ' data-skip-arp="1"' : '';
     return `<button type="button" class="ao-claim-btn"${skipArp}>${battlePassClaimButtonLabel(todo.claimBattlePassSkipArp === true)}</button>`;
   }
   if (todo.openTwitchStream === true) {
     return '<button type="button" class="ao-twitch-btn">Open stream</button>';
   }
-  return "";
+  if (todo.openHref) {
+    const visit = todo.visitInBackground === true ? ' data-visit="1"' : '';
+    const label = todo.openHrefLabel ?? 'Open';
+    return `<button type="button" class="ao-ach-open-btn" data-href="${escapeHtml(todo.openHref)}"${visit}>${escapeHtml(label)}</button>`;
+  }
+  return '';
 }
 
 function isCautionTodo(todo: ActionTodo): boolean {
-  return todo.kind === "caution";
+  return todo.kind === 'caution';
 }
 
 /**
@@ -2917,12 +2943,12 @@ function isCautionTodo(todo: ActionTodo): boolean {
  */
 export function isKeepingCurrentLoadout(todos: ActionTodo[]): boolean {
   const firstStep = todos.find((todo) => !isCautionTodo(todo));
-  return firstStep?.urgency?.chain !== "equip";
+  return firstStep?.urgency?.chain !== 'equip';
 }
 
 export function renderActionPlanContents(
   todos: ActionTodo[],
-  options: { allowAccountActions?: boolean } = {},
+  options: { allowAccountActions?: boolean; heading?: string } = {},
 ): string {
   const cautions = todos.filter((todo) => isCautionTodo(todo));
   const steps = todos.filter((todo) => !isCautionTodo(todo));
@@ -2931,17 +2957,18 @@ export function renderActionPlanContents(
       const toneClass = actionTodoToneClass(todo.tone);
       return `<div class="ao-caution${toneClass}" role="note">${renderActionTodoBody(todo)}</div>`;
     })
-    .join("");
+    .join('');
   const items = steps
     .map((todo, index) => {
       const toneClass = actionTodoToneClass(todo.tone);
       return `<li class="ao-todo-item${toneClass}"><span class="ao-todo-index">${index + 1}.</span><div class="ao-todo-text">${renderActionTodoBody(todo)}</div>${renderTodoActionButton(todo, options)}</li>`;
     })
-    .join("");
+    .join('');
   const listHtml =
-    steps.length > 0 ? `<ul class="ao-todo-list">${items}</ul>` : "";
+    steps.length > 0 ? `<ul class="ao-todo-list">${items}</ul>` : '';
+  const heading = options.heading ?? 'What to do';
   return `
-    <div class="ao-heading">What to do</div>
+    <div class="ao-heading">${escapeHtml(heading)}</div>
     ${cautionHtml}
     ${listHtml}
   `;

@@ -115,6 +115,7 @@ export interface ActivityLoadoutStats {
   dailyCalendarFlat: number;
   discordPollFlat: number;
   timeOnSiteFlat: number;
+  marketDiscountPct: number;
 }
 
 export function activityStatsForArtifacts(
@@ -128,6 +129,7 @@ export function activityStatsForArtifacts(
     dailyCalendarFlat: bonuses.dailyCalendar,
     discordPollFlat: bonuses.discordPoll,
     timeOnSiteFlat: bonuses.timeOnSite,
+    marketDiscountPct: bonuses.marketDiscountPct,
   };
 }
 

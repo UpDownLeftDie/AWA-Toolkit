@@ -19,6 +19,10 @@ import {
   saveArtifactSettings,
   type ArtifactOptimizerSettings,
 } from '../settings';
+import {
+  bindAchievementAutomationSwitches,
+  bindAchievementOpenButtons,
+} from '../../achievements/ui';
 import { bindClaimAllButtons } from './battlePassClaim';
 import {
   didAllowAccountActions,
@@ -485,6 +489,14 @@ function syncNotifyTypesEnabled(root: HTMLElement, isMasterOn: boolean): void {
   types.dataset.off = '';
 }
 
+function syncAchievementsSubEnabled(root: HTMLElement, isOn: boolean): void {
+  const sub = root.querySelector<HTMLElement>(':scope .ao-body');
+  if (!sub) {
+    return;
+  }
+  sub.classList.toggle('ao-body--off', !isOn);
+}
+
 function bindNotificationTypeSwitches(root: HTMLElement): void {
   for (const key of NOTIFICATION_TYPE_KEYS) {
     root
@@ -547,6 +559,19 @@ export function bindDynamicBody(
           return;
         }
         await saveArtifactSettings({ allowAccountActions: true });
+        await reloadOptimizerFromCache();
+      })();
+    });
+  root
+    .querySelector<HTMLInputElement>('#ao-achievements-enabled')
+    ?.addEventListener('change', (event) => {
+      const input = event.currentTarget;
+      if (!(input instanceof HTMLInputElement)) {
+        return;
+      }
+      void (async () => {
+        await saveArtifactSettings({ achievementsEnabled: input.checked });
+        syncAchievementsSubEnabled(root, input.checked);
         await reloadOptimizerFromCache();
       })();
     });
@@ -619,6 +644,8 @@ export function bindDynamicBody(
   bindClaimAllButtons(root);
   bindOpenTwitchButtons(root);
   bindVaultDiscountActions(root, onChanged);
+  bindAchievementOpenButtons(root, onChanged);
+  bindAchievementAutomationSwitches(root, onChanged);
 }
 
 export function bindUpgradeButtons(

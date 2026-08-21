@@ -7,5 +7,6 @@ pnpm-debug.log
 /types
 .DS_Store
 thumbs.db
+scripts
 
 HARs

@@ -4,6 +4,7 @@ import {
   currentLoadout,
   isSameLoadout,
   pinnedEquippedArtifacts,
+  resolveNow,
   resolveOwnedList,
 } from './context';
 import { collectNotes } from './notes';
@@ -59,6 +60,7 @@ export function optimize(context: OptimizerContext): OptimizerResult {
     current,
     discountCombo,
     context,
+    resolveNow(context),
   );
   const best = guarded.best;
   const monthlyMetaLoadout = findMonthlyMetaCombo(owned, context);
@@ -149,6 +151,7 @@ export {
   UTC_DAILY_END_BUFFER_MS,
 } from './context';
 export { describeArtifact } from './notes';
+export { VAULT_PRIORITY_DISCOUNT_PCT } from './search';
 export { scoreCombo } from './scoring';
 export type {
   BreakdownLine,

@@ -409,7 +409,11 @@ export function vaultListPrice(
   if (context.settings.pendingVaultPurchaseArp > 0) {
     return context.settings.pendingVaultPurchaseArp;
   }
-  return gameVaultCatalogPrice(context.siteState, discountPct);
+  return gameVaultCatalogPrice(
+    context.siteState,
+    discountPct,
+    resolveNow(context),
+  );
 }
 
 /**
@@ -419,7 +423,8 @@ export function vaultPurchasePriceNow(
   context: OptimizerContext,
   discountPct = 0,
 ): number {
-  if (!isGameVaultCurrentlyOpen(context.siteState, discountPct)) {
+  const now = resolveNow(context);
+  if (!isGameVaultCurrentlyOpen(context.siteState, discountPct, now)) {
     return 0;
   }
   const price = vaultListPrice(context, discountPct);

@@ -9,12 +9,12 @@ import {
   gameVaultCycleId,
   gameVaultOpensAtMs,
   hasPostedListPriceVaultGames,
-  isGameVaultStockOpen,
+  isGameVaultDiscountWindow,
   willMissDiscountEquipBeforeOpen,
 } from '../siteState';
 import { isSameLoadout } from './context';
 import { comboMarketDiscountPct, projectedRedeemableArp } from './scoring';
-import { hasMarketDiscount } from './search';
+import { hasMarketDiscount, VAULT_PRIORITY_DISCOUNT_PCT } from './search';
 import type { OptimizerContext, OptimizerResult, ScoredCombo } from './types';
 
 export function earliestSlotUnlockMs(
@@ -143,24 +143,6 @@ export function resolveOpenVaultDiscount(
   cycleId: string,
   now: number,
 ): VaultDiscountGuard {
-  const isAlreadyOnBest =
-    current !== undefined &&
-    isSameLoadout(arpBest.artifacts, current.artifacts);
-  if (isAlreadyOnBest) {
-    if (!discountCombo) {
-      return { best: arpBest };
-    }
-    return {
-      best: arpBest,
-      marketDiscountLoadout: discountCombo,
-      vaultDiscount: {
-        cycleId,
-        dismissed: false,
-        note: 'Game Vault has eligible claims — equip market-discount before buying (logout/relogin after).',
-      },
-    };
-  }
-
   if (current && hasMarketDiscount(current)) {
     return suggestVaultDiscount(
       current,
@@ -170,34 +152,30 @@ export function resolveOpenVaultDiscount(
     );
   }
 
-  const canEquipNow = earliestSlotUnlockMs(context, now) <= now;
-  if (discountCombo && canEquipNow) {
-    return suggestVaultDiscount(
-      discountCombo,
-      discountCombo,
-      'Equip market-discount before claiming Game Vault (eligible stock can run out). Logout/relogin after.',
-      cycleId,
-    );
+  if (!discountCombo) {
+    return { best: arpBest };
   }
 
-  return {
-    best: arpBest,
-    vaultDiscount: {
-      cycleId,
-      dismissed: false,
-      note: 'Slots locked — Game Vault stock may run out before you can equip market-discount.',
-    },
-  };
+  const canEquipNow = earliestSlotUnlockMs(context, now) <= now;
+  return suggestVaultDiscount(
+    discountCombo,
+    discountCombo,
+    canEquipNow
+      ? 'Equip market-discount before claiming Game Vault (eligible stock can run out). Logout/relogin after.'
+      : 'Slots locked — Game Vault stock may run out before you can equip market-discount.',
+    cycleId,
+  );
 }
 
 /**
 Pre-open: only interrupt ARP recs when a 24h lock would still be running at
 vault open (discount gear would not be equippable in time). Skip like dismiss
 when current ARP + remaining 24h earnings still cannot cover any posted
-eligible game even with discount. After open: suggest from live stock/tier
-when that projected ARP would be enough — do not ARP-swap into a 24h lock
-that would block discount before they can buy. Auctions never count.
-Dismissable per rotation.
+eligible game even with discount. After open: the recommended loadout is a
+vault-priority market-discount set (≥10%, e.g. Light Warping Platinum / Stanley)
+until they buy — do not keep a 24h ARP combo as `best` while eligible stock
+remains. Weaker discounts (Mysterious Text Decipher 2%) never interrupt ARP.
+Auctions never count. Dismissable per rotation.
 */
 export function resolveVaultDiscountBest(
   arpBest: ScoredCombo | undefined,
@@ -215,6 +193,10 @@ export function resolveVaultDiscountBest(
   }
 
   const discountPct = comboMarketDiscountPct(discountCombo);
+  // Tiny discounts (e.g. Decipher 2%) must not displace ARP / Stanley progress.
+  if (discountPct < VAULT_PRIORITY_DISCOUNT_PCT) {
+    return { best: arpBest };
+  }
   const projectedArp = projectedRedeemableArp(
     context,
     arpBest,
@@ -228,7 +210,7 @@ export function resolveVaultDiscountBest(
     return { best: arpBest };
   }
 
-  if (isGameVaultStockOpen(context.siteState)) {
+  if (isGameVaultDiscountWindow(context.siteState, now)) {
     return resolveOpenVaultDiscount(
       arpBest,
       current,

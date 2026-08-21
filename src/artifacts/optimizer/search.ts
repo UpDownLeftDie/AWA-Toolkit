@@ -693,6 +693,13 @@ export function findBestSteamCombo(
   );
 }
 
+/**
+Minimum market discount before Game Vault logic interrupts an ARP loadout.
+Matches Light Warping Platinum (10%) / Stanley Excavation (15%). Weaker pieces
+like Mysterious Text Decipher (2%) are not worth a 24h lock vs lifetime ARP.
+*/
+export const VAULT_PRIORITY_DISCOUNT_PCT = 0.1;
+
 export function findBestMarketDiscountCombo(
   owned: OwnedArtifact[],
   context: OptimizerContext,
@@ -709,7 +716,7 @@ export function hasMarketDiscount(combo: ScoredCombo | undefined): boolean {
   if (!combo || combo.artifacts.length === 0) {
     return false;
   }
-  return combo.marketDiscountPct > 0;
+  return combo.marketDiscountPct >= VAULT_PRIORITY_DISCOUNT_PCT;
 }
 
 function isMonthlyMetaEligible(artifact: OwnedArtifact): boolean {

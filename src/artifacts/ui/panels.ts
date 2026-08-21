@@ -1,7 +1,7 @@
 import { applyAsceCommunityHours } from "../asce";
 import type { OptimizerResult } from "../optimizer";
 import { isArtifactsShowroomPage, waitForShowroomDocument } from "../scraper";
-import { areAccountActionsEnabled } from "../settings";
+import { areAccountActionsEnabled, areAchievementsEnabled, isAchievementsHelperFeatureEnabled } from "../settings";
 import {
   listBattlePassClaimButtons,
   refreshSiteStateFromPage,
@@ -37,6 +37,13 @@ import {
 } from "./battlePassClaim";
 import { showAoToast } from "./dialog";
 import {
+  bindAchievementAutomationSwitches,
+  bindAchievementOpenButtons,
+  renderAchievementAutoControls,
+  renderAchievementsPanel,
+} from "../../achievements/ui";
+import { isAchievementsPage, waitForAchievementsDocument } from "../../achievements/scraper";
+import {
   gatherData,
   gatheredCache,
   hydrateGatheredData,
@@ -70,6 +77,7 @@ import {
   BACKDROP_ID,
   BP_CLAIM_BAR_ID,
   CC_PANEL_ID,
+  ACH_PANEL_ID,
   INLINE_ID,
   MODAL_ID,
   applyOpaqueBackdropChrome,
@@ -191,7 +199,12 @@ function bindModalEvents(
       cache.snapshot,
       cache.settings,
       cache.siteState,
-      { isHydrating: options.isHydrating === true },
+      {
+        isHydrating: options.isHydrating === true,
+        achievements: cache.achievements,
+        achievementSettings: cache.achievementSettings,
+        achievementCooldowns: cache.achievementCooldowns,
+      },
     );
     const equipButton = tree().querySelector("#ao-equip");
     if (equipButton instanceof HTMLButtonElement) {
@@ -450,6 +463,82 @@ function watchShowroomHost(panel: HTMLElement): void {
   });
 }
 
+function findAchievementsMount(): HTMLElement | undefined {
+  return (
+    document.querySelector<HTMLElement>("main.flex-shrink-0 > .container") ??
+    document.querySelector<HTMLElement>("main > .container") ??
+    undefined
+  );
+}
+
+async function waitForAchievementsMount(timeoutMs = 12_000): Promise<void> {
+  if (findAchievementsMount()) {
+    return;
+  }
+  await new Promise<void>((resolve) => {
+    let isSettled = false;
+    const observer = new MutationObserver(() => {
+      if (findAchievementsMount()) {
+        finish();
+      }
+    });
+    const timer = setTimeout(finish, timeoutMs);
+    function finish(): void {
+      if (isSettled) {
+        return;
+      }
+      isSettled = true;
+      observer.disconnect();
+      clearTimeout(timer);
+      resolve();
+    }
+    observer.observe(document.documentElement, {
+      childList: true,
+      subtree: true,
+    });
+  });
+}
+
+function insertAchievementsHost(panel: HTMLElement): void {
+  const container = findAchievementsMount();
+  if (container) {
+    if (panel.parentElement !== container) {
+      container.prepend(panel);
+    }
+    return;
+  }
+  insertControlCenterHost(panel);
+}
+
+function watchAchievementsHost(panel: HTMLElement): void {
+  insertAchievementsHost(panel);
+  if (panel.dataset.aoHostWatch === "1") {
+    return;
+  }
+  panel.dataset.aoHostWatch = "1";
+  const observer = new MutationObserver(() => {
+    if (!panel.isConnected) {
+      insertAchievementsHost(panel);
+      return;
+    }
+    const mount = findAchievementsMount();
+    if (mount && panel.parentElement !== mount && !panel.contains(mount)) {
+      insertAchievementsHost(panel);
+      return;
+    }
+    const parent = panel.parentElement;
+    const isParked =
+      parent === document.body || parent === document.documentElement;
+    if (isParked) {
+      insertAchievementsHost(panel);
+    }
+  });
+  observer.observe(document.documentElement, {
+    childList: true,
+    subtree: true,
+  });
+}
+
 function mountInlinePanelShadow(
   host: HTMLElement,
   bodyHtml: string,
@@ -569,6 +658,13 @@ function renderControlCenterPanelBody(
     ${renderCredits({ compact: true })}
     ${hydrateBanner}
     ${renderActionPlan(summary.todos, { allowAccountActions: areActionsEnabled })}
+    ${renderAchievementsPanel({
+      snapshot: data.achievements,
+      settings: data.achievementSettings,
+      isEnabled: areAchievementsEnabled(data.settings),
+      compact: true,
+      cooldowns: data.achievementCooldowns,
+    })}
     ${renderSectionDivider()}
     <div class="ao-row"><strong>${summary.label}:</strong> ${wrapArtifactNames(comboLabel(summary.combo))}</div>
     ${renderBreakdown(summary.combo)}
@@ -636,6 +732,13 @@ async function refreshPanelFromLivePage(
       return;
     }
     insertShowroomHost(panel);
+  } else if (isAchievementsPage()) {
+    await waitForAchievementsDocument();
+    await waitForAchievementsMount();
+    if (!isPanelGenerationCurrent(panel, generation)) {
+      return;
+    }
+    insertAchievementsHost(panel);
   } else {
     return;
   }
@@ -832,6 +935,9 @@ function paintControlCenterPanel(
   bindVaultDiscountActions(panelTree(panel), () => {
     void injectControlCenterPanel({ force: true });
   });
+  bindAchievementOpenButtons(panelTree(panel), async () => {
+    void injectControlCenterPanel({ force: true });
+  });
   panelTree(panel)
     .querySelector("#ao-cc-artifacts")
     ?.addEventListener("click", () => {
@@ -891,10 +997,15 @@ export async function reloadOptimizerFromCache(): Promise<void> {
   if (showroomPanel) {
     delete showroomPanel.dataset.aoReady;
   }
+  const achPanel = document.querySelector<HTMLElement>(`#${ACH_PANEL_ID}`);
+  if (achPanel) {
+    delete achPanel.dataset.aoReady;
+  }
   await injectControlCenterPanel();
   await injectShowroomPanel();
+  await injectAchievementsPanel();
   const modal = document.querySelector<OptimizerModal>(`#${MODAL_ID}`);
-  await modal?.__aoRefresh?.({ remote: false });
+  await modal?.__aoRefresh?.({ remote: true });
 }
 
 const DEFAULT_INLINE_PANEL_IDS = {
@@ -1030,6 +1141,93 @@ function injectBattlePassClaimBar(): void {
   bindClaimAllButtons(panelTree(panel));
 }
 
+function ensureAchievementsHost(): HTMLElement {
+  const existing = document.querySelector<HTMLElement>(`#${ACH_PANEL_ID}`);
+  if (existing) {
+    watchAchievementsHost(existing);
+    return existing;
+  }
+  const panel = document.createElement("div");
+  panel.id = ACH_PANEL_ID;
+  mountInlinePanelShadow(panel, renderPanelSkeleton("Loading achievements…"));
+  watchAchievementsHost(panel);
+  return panel;
+}
+
+function renderAchievementsPageBody(
+  data: GatheredData,
+  options: { isHydrating?: boolean } = {},
+): string {
+  const hydrateBanner = options.isHydrating
+    ? renderHydrateBanner("Updating in the background…")
+    : "";
+  const isEnabled = areAchievementsEnabled(data.settings);
+  const helper = isEnabled
+    ? renderAchievementsPanel({
+        snapshot: data.achievements,
+        settings: data.achievementSettings,
+        isEnabled: true,
+        cooldowns: data.achievementCooldowns,
+      })
+    : '<div class="ao-muted">Turn on Achievements helper in Open Full Panel to track progress here.</div>';
+  return `
+    <div class="ao-heading">Achievements helper</div>
+    ${hydrateBanner}
+    ${renderAchievementAutoControls(data.achievementSettings)}
+    ${helper}
+    <div class="ao-actions">
+      <button type="button" id="ao-ach-open" class="ao-secondary">Open Full Panel</button>
+      <button type="button" id="ao-ach-refresh" class="ao-secondary">Refresh</button>
+    </div>
+  `;
+}
+
+function paintAchievementsPanel(
+  panel: HTMLElement,
+  data: GatheredData,
+  isHydrating: boolean,
+): void {
+  replaceInlinePanelBody(
+    panel,
+    renderAchievementsPageBody(data, { isHydrating }),
+  );
+  const tree = panelTree(panel);
+  tree.querySelector("#ao-ach-open")?.addEventListener("click", () => {
+    void openOptimizerModal();
+  });
+  tree.querySelector("#ao-ach-refresh")?.addEventListener("click", () => {
+    void injectAchievementsPanel({ force: true });
+  });
+  bindAchievementOpenButtons(tree, async () => {
+    void injectAchievementsPanel({ force: true });
+  });
+  bindAchievementAutomationSwitches(tree, async () => {
+    void injectAchievementsPanel({ force: true });
+  });
+}
+
+export async function injectAchievementsPanel(
+  options: { force?: boolean } = {},
+): Promise<void> {
+  if (!isAchievementsHelperFeatureEnabled || !isAchievementsPage()) {
+    return;
+  }
+  ensureOptimizerStyles();
+  await waitForAchievementsMount();
+  const panel = ensureAchievementsHost();
+  if (panel.dataset.aoReady === "1" && options.force !== true) {
+    return;
+  }
+  const generation = bumpPanelGeneration(panel);
+  const paint = (data: GatheredData, isHydrating: boolean): void => {
+    paintAchievementsPanel(panel, data, isHydrating);
+  };
+  await fillPanelFromCacheThenHydrate(panel, generation, paint, options);
+  if (isPanelGenerationCurrent(panel, generation)) {
+    panel.dataset.aoReady = "1";
+  }
+}
+
 export async function initArtifactOptimizer(): Promise<void> {
   ensureOptimizerStyles();
   watchOptimizerMenuButton();
@@ -1053,6 +1251,11 @@ export async function initArtifactOptimizer(): Promise<void> {
   } else if (isArtifactsShowroomPage()) {
     ensureShowroomHost();
     void injectShowroomPanel();
+  } else if (isAchievementsPage()) {
+    if (isAchievementsHelperFeatureEnabled) {
+      ensureAchievementsHost();
+      void injectAchievementsPanel();
+    }
   } else if (isSiteStatePage()) {
     if (location.pathname.includes("/battle-pass")) {
       injectBattlePassClaimBar();

@@ -63,7 +63,7 @@ export default [
   {
     // Artifact effect tables and ARP math are inherently numeric game data;
     // naming every tier bonus / percent / slot index adds noise without clarity.
-    files: ['src/artifacts/**/*.ts'],
+    files: ['src/artifacts/**/*.ts', 'src/achievements/**/*.ts'],
     rules: {
       'no-magic-numbers': 'off',
     },
