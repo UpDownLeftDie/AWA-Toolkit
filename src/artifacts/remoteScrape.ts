@@ -27,6 +27,8 @@ import {
   isChooseYourOwnGameQuest,
   isControlCenterActivityReady,
   isControlCenterDocumentReady,
+  isGameVaultDocumentReady,
+  isGameVaultMonthlyClaimUsedFromDocument,
   loadSiteState,
   markCommunityEventEnded,
   mergeArpLogScrape,
@@ -191,6 +193,8 @@ async function settleIframePage(
     await waitForCommunityEventHours(document_);
   } else if (path.includes('/battle-pass')) {
     await waitForBattlePassUi(document_);
+  } else if (path.includes('/game-vault')) {
+    await waitForGameVaultUi(document_);
   } else {
     await delay(400);
   }
@@ -261,6 +265,16 @@ function hasPersonalHours(document_: Document): boolean {
   return /personalPlaytime\s*=\s*\d+/i.test(scripts);
 }
 
+async function waitForGameVaultUi(document_: Document): Promise<void> {
+  const started = Date.now();
+  while (Date.now() - started < 5000) {
+    if (isGameVaultDocumentReady(document_)) {
+      return;
+    }
+    await delay(250);
+  }
+}
+
 function requiresIframeFallback(path: string, fetched: Document): boolean {
   if (path.includes('/artifacts') || path.includes('/user-artifacts-room')) {
     return !fetched.body?.querySelector(
@@ -272,6 +286,11 @@ function requiresIframeFallback(path: string, fetched: Document): boolean {
   }
   if (path.includes('/battle-pass')) {
     return !isBattlePassDocumentReady(fetched);
+  }
+  if (path.includes('/game-vault')) {
+    // Claimed / monthly-cap banners are client-rendered. Fetch HTML still
+    // looks purchasable after this user has claimed.
+    return !isGameVaultMonthlyClaimUsedFromDocument(fetched);
   }
   if (path.includes('/steam/community-event')) {
     // Hours are filled client-side into #personal-hours; fetch HTML is empty.
@@ -399,6 +418,36 @@ async function refreshBattlePassOnly(next: SiteState): Promise<void> {
   const battlePass = scrapeBattlePassFromDocument(battleDocument);
   if (battlePass) {
     next.battlePass = mergeBattlePassScrape(battlePass, next.battlePass);
+  }
+}
+
+async function refreshGameVaultOnly(next: SiteState): Promise<void> {
+  const vaultDocument = await loadRemoteDocument(GAME_VAULT_PATH);
+  if (vaultDocument) {
+    applyGameVaultDocument(next, vaultDocument);
+  }
+}
+
+async function refreshPartialSitePages(
+  next: SiteState,
+  options: {
+    isForce: boolean;
+    requiresBattlePassRefresh: boolean;
+    requiresEventRefresh: boolean;
+    requiresSteamEligibility: boolean;
+  },
+): Promise<void> {
+  if (options.requiresBattlePassRefresh) {
+    await refreshBattlePassOnly(next);
+  }
+  if (options.requiresEventRefresh) {
+    await refreshStaleLiveEvent(next);
+  }
+  if (options.requiresSteamEligibility) {
+    await enrichSteamQuestEligibility(next);
+  }
+  if (options.isForce) {
+    await refreshGameVaultOnly(next);
   }
 }
 
@@ -1114,15 +1163,12 @@ export async function ensureSiteState(
   if (requiresCapsRefresh) {
     await refreshActivityPages(next);
   } else {
-    if (requiresBattlePassRefresh) {
-      await refreshBattlePassOnly(next);
-    }
-    if (requiresEventRefresh) {
-      await refreshStaleLiveEvent(next);
-    }
-    if (requiresSteamEligibility) {
-      await enrichSteamQuestEligibility(next);
-    }
+    await refreshPartialSitePages(next, {
+      isForce,
+      requiresBattlePassRefresh,
+      requiresEventRefresh,
+      requiresSteamEligibility,
+    });
   }
 
   if (requiresArpLogRefresh) {

@@ -174,7 +174,8 @@ when current ARP + remaining 24h earnings still cannot cover any posted
 eligible game even with discount. After open: the recommended loadout is a
 vault-priority market-discount set (≥10%, e.g. Light Warping Platinum / Stanley)
 until they buy — do not keep a 24h ARP combo as `best` while eligible stock
-remains. Weaker discounts (Mysterious Text Decipher 2%) never interrupt ARP.
+remains. After they claim this rotation, stop interrupting ARP. Weaker
+discounts (Mysterious Text Decipher 2%) never interrupt ARP.
 Auctions never count. Dismissable per rotation.
 */
 export function resolveVaultDiscountBest(

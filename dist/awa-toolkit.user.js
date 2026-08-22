@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         AWA Toolkit
 // @namespace    https://github.com/UpDownLeftDie/AWA-Toolkit
-// @version      2.2.2
+// @version      2.2.3
 // @author       jaredcat
 // @description  Artifact Optimizer, Control Center tasks, giveaway/vault filters, and UCF reading mode
 // @license      AGPL-3.0-or-later
@@ -3955,6 +3955,15 @@
 			});
 		});
 	}
+	var MONTHLY_VAULT_CLAIM_USED_RE = /already claimed a game this month/i;
+	var VAULT_CLAIMED_BADGE_RE = /\bclaimed\b/i;
+	var VAULT_CLAIM_ACTION_RE = /\bclaim\b/i;
+	var VAULT_CARD_SELECTORS = [
+		".gamevault-marketplace-product[data-product-price]",
+		".marketplace-game-product[data-product-price]",
+		".pointer.marketplace-game-small",
+		".pointer.marketplace-game-large"
+	].join(", ");
 	function isListPriceVaultClaim(game) {
 		return game.isAuction !== true;
 	}
@@ -3976,17 +3985,31 @@
 		return game.inStock && isListPriceVaultClaim(game);
 	}
 	function isAffordableVaultOffer(game, state, discountPct = 0, availableArp = state.arpLog?.redeemableArp) {
+		if (game.isClaimed === true) return false;
 		if (!isPostedListPriceVaultGame(game)) return false;
 		if (!isVaultTierMet(game, state.userArpTier)) return false;
 		return canAffordVaultPrice(availableArp, vaultGamePayArp(game, discountPct));
+	}
+	function hasUsedMonthlyVaultClaim(state) {
+		return state.gameVaultClaimedThisCycle === true || state.gameVault.some((game) => game.isClaimed === true);
+	}
+	function isGameVaultClaimedThisCycle(previous, options) {
+		if (options.isMonthlyClaimUsed || options.isScrapedClaimed) return true;
+		if (options.isLiveDocument && options.hasClaimAction) return false;
+		return previous === true;
+	}
+	function isLiveVaultDocument(document_) {
+		return Boolean(document_.defaultView);
 	}
 	function hasPostedListPriceVaultGames(state) {
 		return state.gameVault.some((game) => isPostedListPriceVaultGame(game));
 	}
 	function canAffordAnyVaultOffer(state, discountPct = 0, availableArp = state.arpLog?.redeemableArp) {
+		if (hasUsedMonthlyVaultClaim(state)) return false;
 		return state.gameVault.some((game) => isAffordableVaultOffer(game, state, discountPct, availableArp));
 	}
 	function isVaultItemPurchasable(game, state, now = Date.now()) {
+		if (game.isClaimed === true) return false;
 		if (!isListPriceVaultClaim(game) || !game.inStock) return false;
 		if (game.purchasable === true) return true;
 		const opensAt = gameVaultOpensAtMs(state);
@@ -3999,15 +4022,18 @@
 		return isVaultItemPurchasable(game, state, now) && isVaultTierMet(game, state.userArpTier);
 	}
 	function isGameVaultStockOpen(state, now = Date.now()) {
+		if (hasUsedMonthlyVaultClaim(state)) return false;
 		return state.gameVault.some((game) => isVaultStockForUser(game, state, now));
 	}
 	function isGameVaultDiscountWindow(state, now = Date.now()) {
+		if (hasUsedMonthlyVaultClaim(state)) return false;
 		if (isGameVaultStockOpen(state, now)) return true;
 		const opensAt = gameVaultOpensAtMs(state);
 		if (opensAt !== void 0 && opensAt > now) return false;
 		return state.gameVault.some((game) => isPostedListPriceVaultGame(game) && isVaultTierMet(game, state.userArpTier));
 	}
 	function isGameVaultCurrentlyOpen(state, discountPct = 0, now = Date.now()) {
+		if (hasUsedMonthlyVaultClaim(state)) return false;
 		return state.gameVault.some((game) => isClaimableVaultGame(game, state, discountPct, now));
 	}
 	var GAME_VAULT_EQUIP_BUFFER_MS = 18e5;
@@ -4032,34 +4058,70 @@
 		const ms = parseTimestamp$1((timer?.dataset.unlockDate ?? timer?.dataset.endDate ?? timer?.dataset.lockDate ?? timer?.dataset.closeDate)?.trim());
 		return Number.isFinite(ms) ? ms : void 0;
 	}
+	function isGameVaultMonthlyClaimUsedFromDocument(document_) {
+		return MONTHLY_VAULT_CLAIM_USED_RE.test(pageText(document_));
+	}
+	function isVaultCardClaimedByUser(item) {
+		return VAULT_CLAIMED_BADGE_RE.test((item.textContent ?? "").replaceAll(/\s+/g, " "));
+	}
+	function vaultCardName(item) {
+		return item.dataset.productName?.trim() || item.querySelector(".product-name, .gv-product-name, h3, h4")?.textContent?.trim() || item.getAttribute("title") || "Game Vault item";
+	}
+	function vaultCardPrice(item) {
+		const fromData = Number(item.dataset.productPrice);
+		if (Number.isFinite(fromData) && fromData > 0) return fromData;
+		const match = /(\d{1,7})\s*ARP/i.exec((item.textContent ?? "").replaceAll(/\s+/g, " "));
+		if (!match?.[1]) return;
+		const price = Number(match[1].replaceAll(",", ""));
+		return Number.isFinite(price) && price > 0 ? price : void 0;
+	}
+	function parseVaultProductCard(item) {
+		const price = vaultCardPrice(item);
+		if (price === void 0) return;
+		const isAuction = item.dataset.isBlindAuction === "true" || item.classList.contains("auction-game");
+		const isInStock = item.dataset.productInStock !== "false";
+		const isDisabled = item.dataset.productDisabled === "true";
+		const minTierRaw = item.dataset.arpTier;
+		const minTier = minTierRaw === void 0 ? void 0 : Number(minTierRaw);
+		const isClaimed = isVaultCardClaimedByUser(item);
+		const nextItem = {
+			name: vaultCardName(item),
+			price,
+			inStock: isInStock && !isAuction,
+			purchasable: isInStock && !isDisabled && !isAuction && !isClaimed,
+			isAuction
+		};
+		if (minTier !== void 0 && Number.isFinite(minTier)) nextItem.minTier = minTier;
+		if (isClaimed) nextItem.isClaimed = true;
+		return nextItem;
+	}
 	function scrapeGameVaultFromDocument(document_) {
-		const items = document_.querySelectorAll([".gamevault-marketplace-product[data-product-price]", ".marketplace-game-product[data-product-price]"].join(", "));
+		const items = document_.querySelectorAll(VAULT_CARD_SELECTORS);
 		const result = [];
 		const seen = new Set();
 		for (const item of items) {
-			const priceRaw = item.dataset.productPrice;
-			if (priceRaw === void 0) continue;
-			const price = Number(priceRaw);
-			if (Number.isNaN(price) || price <= 0) continue;
-			const id = item.dataset.productId ?? `${price}:${item.dataset.productName ?? ""}`;
+			const nextItem = parseVaultProductCard(item);
+			if (!nextItem) continue;
+			const id = item.dataset.productId ?? `${nextItem.price}:${nextItem.name}`;
 			if (seen.has(id)) continue;
 			seen.add(id);
-			const isAuction = item.dataset.isBlindAuction === "true" || item.classList.contains("auction-game");
-			const isInStock = item.dataset.productInStock !== "false";
-			const isDisabled = item.dataset.productDisabled === "true";
-			const minTierRaw = item.dataset.arpTier;
-			const minTier = minTierRaw === void 0 ? void 0 : Number(minTierRaw);
-			const nextItem = {
-				name: item.dataset.productName?.trim() || item.querySelector(".product-name, .gv-product-name, h3, h4")?.textContent?.trim() || item.getAttribute("title") || "Game Vault item",
-				price,
-				inStock: isInStock && !isAuction,
-				purchasable: isInStock && !isDisabled && !isAuction,
-				isAuction
-			};
-			if (minTier !== void 0 && Number.isFinite(minTier)) nextItem.minTier = minTier;
 			result.push(nextItem);
 		}
 		return result;
+	}
+	function hasVaultClaimActionFromDocument(document_) {
+		const cards = document_.querySelectorAll(VAULT_CARD_SELECTORS);
+		if (cards.length > 0) return [...cards].some((item) => {
+			const text = (item.textContent ?? "").replaceAll(/\s+/g, " ");
+			return VAULT_CLAIM_ACTION_RE.test(text) && !VAULT_CLAIMED_BADGE_RE.test(text);
+		});
+		const text = pageText(document_).replaceAll(/\s+/g, " ");
+		return VAULT_CLAIM_ACTION_RE.test(text) && !VAULT_CLAIMED_BADGE_RE.test(text);
+	}
+	function isGameVaultDocumentReady(document_) {
+		if (isGameVaultMonthlyClaimUsedFromDocument(document_)) return true;
+		if (hasVaultClaimActionFromDocument(document_)) return true;
+		return scrapeGameVaultFromDocument(document_).some((game) => game.isClaimed === true);
 	}
 	function scrapeUserArpTierFromDocument(document_) {
 		return readPageArpTier(document_);
@@ -4087,8 +4149,15 @@
 		applyRedeemableArpFromDocument(next, document_);
 		const vault = scrapeGameVaultFromDocument(document_);
 		const timerMs = scrapeGameVaultTimerMsFromDocument(document_);
-		if (timerMs === void 0 && vault.length === 0) return;
+		const isMonthlyClaimUsed = isGameVaultMonthlyClaimUsedFromDocument(document_);
+		if (!(isMonthlyClaimUsed || vault.length > 0 || timerMs !== void 0)) return;
 		if (vault.length > 0) next.gameVault = vault;
+		next.gameVaultClaimedThisCycle = isGameVaultClaimedThisCycle(next.gameVaultClaimedThisCycle, {
+			isMonthlyClaimUsed,
+			isScrapedClaimed: vault.some((game) => game.isClaimed === true),
+			isLiveDocument: isLiveVaultDocument(document_),
+			hasClaimAction: hasVaultClaimActionFromDocument(document_)
+		});
 		applyGameVaultSchedule(next, timerMs, vault.some((game) => isVaultStockForUser(game, next)), Date.now());
 	}
 	var SITE_STATE_KEY = "artifactSiteState";
@@ -8463,6 +8532,7 @@
 		if (!document_) return;
 		if (path.includes("/steam/community-event")) await waitForCommunityEventHours(document_);
 		else if (path.includes("/battle-pass")) await waitForBattlePassUi(document_);
+		else if (path.includes("/game-vault")) await waitForGameVaultUi(document_);
 		else await delay$1(400);
 		return {
 			document: document_,
@@ -8511,10 +8581,18 @@
 		const scripts = [...document_.querySelectorAll("script:not([src])")].map((script) => script.textContent ?? "").join("\n");
 		return /personalPlaytime\s*=\s*\d+/i.test(scripts);
 	}
+	async function waitForGameVaultUi(document_) {
+		const started = Date.now();
+		while (Date.now() - started < 5e3) {
+			if (isGameVaultDocumentReady(document_)) return;
+			await delay$1(250);
+		}
+	}
 	function requiresIframeFallback(path, fetched) {
 		if (path.includes("/artifacts") || path.includes("/user-artifacts-room")) return !fetched.body?.querySelector(":scope a.artifact-list-item.change-artifact-modal, :scope .slot img");
 		if (path.includes("/arp-log")) return !isArpLogDocumentReady(fetched);
 		if (path.includes("/battle-pass")) return !isBattlePassDocumentReady(fetched);
+		if (path.includes("/game-vault")) return !isGameVaultMonthlyClaimUsedFromDocument(fetched);
 		if (path.includes("/steam/community-event")) return !fetched.querySelector(".carousel-cell") || !hasPersonalHours(fetched);
 		if (/\/steam\/quests\/.+/.test(path)) return !hasSteamPlayEligibilitySignal(fetched);
 		return false;
@@ -8566,6 +8644,16 @@
 		if (!battleDocument) return;
 		const battlePass = scrapeBattlePassFromDocument(battleDocument);
 		if (battlePass) next.battlePass = mergeBattlePassScrape(battlePass, next.battlePass);
+	}
+	async function refreshGameVaultOnly(next) {
+		const vaultDocument = await loadRemoteDocument(GAME_VAULT_PATH$1);
+		if (vaultDocument) applyGameVaultDocument(next, vaultDocument);
+	}
+	async function refreshPartialSitePages(next, options) {
+		if (options.requiresBattlePassRefresh) await refreshBattlePassOnly(next);
+		if (options.requiresEventRefresh) await refreshStaleLiveEvent(next);
+		if (options.requiresSteamEligibility) await enrichSteamQuestEligibility(next);
+		if (options.isForce) await refreshGameVaultOnly(next);
 	}
 	function isScrapedWithin(scrapedAt, maxAgeMs) {
 		if (!scrapedAt) return false;
@@ -8894,11 +8982,12 @@
 			caps: { ...existing.caps }
 		};
 		if (requiresCapsRefresh) await refreshActivityPages(next);
-		else {
-			if (requiresBattlePassRefresh) await refreshBattlePassOnly(next);
-			if (requiresEventRefresh) await refreshStaleLiveEvent(next);
-			if (requiresSteamEligibility) await enrichSteamQuestEligibility(next);
-		}
+		else await refreshPartialSitePages(next, {
+			isForce,
+			requiresBattlePassRefresh,
+			requiresEventRefresh,
+			requiresSteamEligibility
+		});
 		if (requiresArpLogRefresh) await refreshArpLog(next, existing, { refreshLiveEventAfter: !requiresCapsRefresh && !requiresEventRefresh });
 		applyArpLogReconciliation(next);
 		await applySteamFreeToPlayResolution(next);

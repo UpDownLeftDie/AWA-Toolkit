@@ -36,6 +36,11 @@ export interface SiteState {
   */
   gameVaultOpensAt?: string;
   /**
+  True after this user used their one list-price Game Vault claim for the
+  current rotation. Catalog can stay listed for other users.
+  */
+  gameVaultClaimedThisCycle?: boolean;
+  /**
   Arena tier (`window.arp_tier` / tier-tag). Used for vault eligibility.
   */
   userArpTier?: number;

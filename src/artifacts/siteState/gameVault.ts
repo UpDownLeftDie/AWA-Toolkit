@@ -1,7 +1,17 @@
 import { readPageArpTier } from "../../pageGlobals";
-import { parseTimestamp } from "./shared";
+import { pageText, parseTimestamp } from "./shared";
 import { applyRedeemableArpFromDocument } from "./arpLog";
 import type { SiteState } from "./types";
+
+const MONTHLY_VAULT_CLAIM_USED_RE = /already claimed a game this month/i;
+const VAULT_CLAIMED_BADGE_RE = /\bclaimed\b/i;
+const VAULT_CLAIM_ACTION_RE = /\bclaim\b/i;
+const VAULT_CARD_SELECTORS = [
+  ".gamevault-marketplace-product[data-product-price]",
+  ".marketplace-game-product[data-product-price]",
+  ".pointer.marketplace-game-small",
+  ".pointer.marketplace-game-large",
+].join(", ");
 
 export interface GameVaultItem {
   name: string;
@@ -20,6 +30,10 @@ export interface GameVaultItem {
   Minimum Arena tier to claim (`data-arp-tier`).
   */
   minTier?: number;
+  /**
+  This user already claimed this title (`Claimed` badge).
+  */
+  isClaimed?: boolean;
 }
 
 function isListPriceVaultClaim(game: GameVaultItem): boolean {
@@ -71,6 +85,9 @@ export function isAffordableVaultOffer(
   discountPct = 0,
   availableArp: number | undefined = state.arpLog?.redeemableArp,
 ): boolean {
+  if (game.isClaimed === true) {
+    return false;
+  }
   if (!isPostedListPriceVaultGame(game)) {
     return false;
   }
@@ -78,6 +95,44 @@ export function isAffordableVaultOffer(
     return false;
   }
   return canAffordVaultPrice(availableArp, vaultGamePayArp(game, discountPct));
+}
+
+/**
+True after this user spent their one list-price Game Vault claim this rotation.
+*/
+export function hasUsedMonthlyVaultClaim(
+  state: Pick<SiteState, "gameVault" | "gameVaultClaimedThisCycle">,
+): boolean {
+  return (
+    state.gameVaultClaimedThisCycle === true ||
+    state.gameVault.some((game) => game.isClaimed === true)
+  );
+}
+
+/**
+SSR fetch HTML still looks purchasable after a claim (the overlay is
+JS-rendered). Only a live/iframe document can clear the flag.
+*/
+export function isGameVaultClaimedThisCycle(
+  previous: boolean | undefined,
+  options: {
+    isMonthlyClaimUsed: boolean;
+    isScrapedClaimed: boolean;
+    isLiveDocument: boolean;
+    hasClaimAction: boolean;
+  },
+): boolean {
+  if (options.isMonthlyClaimUsed || options.isScrapedClaimed) {
+    return true;
+  }
+  if (options.isLiveDocument && options.hasClaimAction) {
+    return false;
+  }
+  return previous === true;
+}
+
+export function isLiveVaultDocument(document_: Document): boolean {
+  return Boolean(document_.defaultView);
 }
 
 export function hasPostedListPriceVaultGames(state: SiteState): boolean {
@@ -89,6 +144,9 @@ export function canAffordAnyVaultOffer(
   discountPct = 0,
   availableArp: number | undefined = state.arpLog?.redeemableArp,
 ): boolean {
+  if (hasUsedMonthlyVaultClaim(state)) {
+    return false;
+  }
   return state.gameVault.some((game) =>
     isAffordableVaultOffer(game, state, discountPct, availableArp),
   );
@@ -104,6 +162,9 @@ export function isVaultItemPurchasable(
   state: Pick<SiteState, "gameVaultOpensAt">,
   now = Date.now(),
 ): boolean {
+  if (game.isClaimed === true) {
+    return false;
+  }
   if (!isListPriceVaultClaim(game) || !game.inStock) {
     return false;
   }
@@ -149,6 +210,9 @@ export function isGameVaultStockOpen(
   state: SiteState,
   now = Date.now(),
 ): boolean {
+  if (hasUsedMonthlyVaultClaim(state)) {
+    return false;
+  }
   return state.gameVault.some((game) => isVaultStockForUser(game, state, now));
 }
 
@@ -156,12 +220,16 @@ export function isGameVaultStockOpen(
 Hold / equip market-discount while any in-stock list-price vault game is still
 available to this user. True after open (including stale `purchasable: false`
 once the countdown has elapsed) and when the timer node is gone but catalog
-remains. False only while a future countdown is running.
+remains. False after this user has claimed this rotation, and while a future
+countdown is running.
 */
 export function isGameVaultDiscountWindow(
   state: SiteState,
   now = Date.now(),
 ): boolean {
+  if (hasUsedMonthlyVaultClaim(state)) {
+    return false;
+  }
   if (isGameVaultStockOpen(state, now)) {
     return true;
   }
@@ -185,6 +253,9 @@ export function isGameVaultCurrentlyOpen(
   discountPct = 0,
   now = Date.now(),
 ): boolean {
+  if (hasUsedMonthlyVaultClaim(state)) {
+    return false;
+  }
   return state.gameVault.some((game) =>
     isClaimableVaultGame(game, state, discountPct, now),
   );
@@ -254,57 +325,90 @@ export function scrapeGameVaultTimerMsFromDocument(
   return Number.isFinite(ms) ? ms : undefined;
 }
 
+export function isGameVaultMonthlyClaimUsedFromDocument(
+  document_: Document,
+): boolean {
+  return MONTHLY_VAULT_CLAIM_USED_RE.test(pageText(document_));
+}
+
+function isVaultCardClaimedByUser(item: HTMLElement): boolean {
+  return VAULT_CLAIMED_BADGE_RE.test(
+    (item.textContent ?? "").replaceAll(/\s+/g, " "),
+  );
+}
+
+function vaultCardName(item: HTMLElement): string {
+  return (
+    item.dataset.productName?.trim() ||
+    item
+      .querySelector(".product-name, .gv-product-name, h3, h4")
+      ?.textContent?.trim() ||
+    item.getAttribute("title") ||
+    "Game Vault item"
+  );
+}
+
+function vaultCardPrice(item: HTMLElement): number | undefined {
+  const fromData = Number(item.dataset.productPrice);
+  if (Number.isFinite(fromData) && fromData > 0) {
+    return fromData;
+  }
+  const match = /(\d{1,7})\s*ARP/i.exec(
+    (item.textContent ?? "").replaceAll(/\s+/g, " "),
+  );
+  if (!match?.[1]) {
+    return undefined;
+  }
+  const price = Number(match[1].replaceAll(",", ""));
+  return Number.isFinite(price) && price > 0 ? price : undefined;
+}
+
+function parseVaultProductCard(item: HTMLElement): GameVaultItem | undefined {
+  const price = vaultCardPrice(item);
+  if (price === undefined) {
+    return undefined;
+  }
+  const isAuction =
+    item.dataset.isBlindAuction === "true" ||
+    item.classList.contains("auction-game");
+  const isInStock = item.dataset.productInStock !== "false";
+  const isDisabled = item.dataset.productDisabled === "true";
+  const minTierRaw = item.dataset.arpTier;
+  const minTier = minTierRaw === undefined ? undefined : Number(minTierRaw);
+  const isClaimed = isVaultCardClaimedByUser(item);
+  const nextItem: GameVaultItem = {
+    name: vaultCardName(item),
+    price,
+    inStock: isInStock && !isAuction,
+    purchasable: isInStock && !isDisabled && !isAuction && !isClaimed,
+    isAuction,
+  };
+  if (minTier !== undefined && Number.isFinite(minTier)) {
+    nextItem.minTier = minTier;
+  }
+  if (isClaimed) {
+    nextItem.isClaimed = true;
+  }
+  return nextItem;
+}
+
 export function scrapeGameVaultFromDocument(
   document_: Document,
 ): GameVaultItem[] {
-  const items = document_.querySelectorAll<HTMLElement>(
-    [
-      ".gamevault-marketplace-product[data-product-price]",
-      ".marketplace-game-product[data-product-price]",
-    ].join(", "),
-  );
+  const items = document_.querySelectorAll<HTMLElement>(VAULT_CARD_SELECTORS);
 
   const result: GameVaultItem[] = [];
   const seen = new Set<string>();
   for (const item of items) {
-    const priceRaw = item.dataset.productPrice;
-    if (priceRaw === undefined) {
+    const nextItem = parseVaultProductCard(item);
+    if (!nextItem) {
       continue;
     }
-    const price = Number(priceRaw);
-    if (Number.isNaN(price) || price <= 0) {
-      continue;
-    }
-    const id =
-      item.dataset.productId ?? `${price}:${item.dataset.productName ?? ""}`;
+    const id = item.dataset.productId ?? `${nextItem.price}:${nextItem.name}`;
     if (seen.has(id)) {
       continue;
     }
     seen.add(id);
-    const isAuction =
-      item.dataset.isBlindAuction === "true" ||
-      item.classList.contains("auction-game");
-    const isInStock = item.dataset.productInStock !== "false";
-    const isDisabled = item.dataset.productDisabled === "true";
-    const minTierRaw = item.dataset.arpTier;
-    const minTier = minTierRaw === undefined ? undefined : Number(minTierRaw);
-    const name =
-      item.dataset.productName?.trim() ||
-      item
-        .querySelector(".product-name, .gv-product-name, h3, h4")
-        ?.textContent?.trim() ||
-      item.getAttribute("title") ||
-      "Game Vault item";
-    const nextItem: GameVaultItem = {
-      name,
-      price,
-      inStock: isInStock && !isAuction,
-      purchasable: isInStock && !isDisabled && !isAuction,
-      isAuction,
-    };
-    if (minTier !== undefined && Number.isFinite(minTier)) {
-      nextItem.minTier = minTier;
-    }
     result.push(nextItem);
   }
   return result;
@@ -312,6 +416,34 @@ export function scrapeGameVaultFromDocument(
 
 export function scrapeGameVault(): GameVaultItem[] {
   return scrapeGameVaultFromDocument(document);
+}
+
+export function hasVaultClaimActionFromDocument(document_: Document): boolean {
+  const cards = document_.querySelectorAll<HTMLElement>(VAULT_CARD_SELECTORS);
+  if (cards.length > 0) {
+    return [...cards].some((item) => {
+      const text = (item.textContent ?? "").replaceAll(/\s+/g, " ");
+      return (
+        VAULT_CLAIM_ACTION_RE.test(text) && !VAULT_CLAIMED_BADGE_RE.test(text)
+      );
+    });
+  }
+  const text = pageText(document_).replaceAll(/\s+/g, " ");
+  return (
+    VAULT_CLAIM_ACTION_RE.test(text) && !VAULT_CLAIMED_BADGE_RE.test(text)
+  );
+}
+
+export function isGameVaultDocumentReady(document_: Document): boolean {
+  if (isGameVaultMonthlyClaimUsedFromDocument(document_)) {
+    return true;
+  }
+  if (hasVaultClaimActionFromDocument(document_)) {
+    return true;
+  }
+  return scrapeGameVaultFromDocument(document_).some(
+    (game) => game.isClaimed === true,
+  );
 }
 
 export function scrapeUserArpTierFromDocument(
@@ -361,12 +493,24 @@ export function applyGameVaultDocument(
   applyRedeemableArpFromDocument(next, document_);
   const vault = scrapeGameVaultFromDocument(document_);
   const timerMs = scrapeGameVaultTimerMsFromDocument(document_);
-  if (timerMs === undefined && vault.length === 0) {
+  const isMonthlyClaimUsed = isGameVaultMonthlyClaimUsedFromDocument(document_);
+  const shouldApplyVault =
+    isMonthlyClaimUsed || vault.length > 0 || timerMs !== undefined;
+  if (!shouldApplyVault) {
     return;
   }
   if (vault.length > 0) {
     next.gameVault = vault;
   }
+  next.gameVaultClaimedThisCycle = isGameVaultClaimedThisCycle(
+    next.gameVaultClaimedThisCycle,
+    {
+      isMonthlyClaimUsed,
+      isScrapedClaimed: vault.some((game) => game.isClaimed === true),
+      isLiveDocument: isLiveVaultDocument(document_),
+      hasClaimAction: hasVaultClaimActionFromDocument(document_),
+    },
+  );
   applyGameVaultSchedule(
     next,
     timerMs,

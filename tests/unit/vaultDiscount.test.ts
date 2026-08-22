@@ -8,6 +8,9 @@ import { defaultArtifactSettings } from '../../src/artifacts/settings';
 import {
   isGameVaultDiscountWindow,
   isVaultItemPurchasable,
+  isGameVaultClaimedThisCycle,
+  scrapeGameVaultFromDocument,
+  isGameVaultMonthlyClaimUsedFromDocument,
 } from '../../src/artifacts/siteState/gameVault';
 import type { SiteState } from '../../src/artifacts/siteState/types';
 import {
@@ -82,6 +85,28 @@ describe('isVaultItemPurchasable / discount window', () => {
       gameVaultOpensAt: isoAt(NOW_MS + 3_600_000),
     });
     expect(isVaultItemPurchasable(game, state, NOW_MS)).toBe(false);
+    expect(isGameVaultDiscountWindow(state, NOW_MS)).toBe(false);
+  });
+
+  it('closes the discount window after this user claimed this rotation', () => {
+    const claimed = {
+      name: 'Ale Abbey',
+      price: 1600,
+      inStock: true,
+      purchasable: true,
+      isClaimed: true as const,
+    };
+    const stillListed = {
+      name: 'Cryptmaster',
+      price: 2100,
+      inStock: true,
+      purchasable: true,
+    };
+    const state = vaultOpenState({
+      gameVault: [claimed, stillListed],
+      gameVaultClaimedThisCycle: true,
+    });
+    expect(isVaultItemPurchasable(claimed, state, NOW_MS)).toBe(false);
     expect(isGameVaultDiscountWindow(state, NOW_MS)).toBe(false);
   });
 });
@@ -195,5 +220,195 @@ describe('vault-open optimizer recommendation', () => {
     );
     expect(familyIds(result)).toContain('light-warping');
     expect(result.best?.marketDiscountPct).toBeGreaterThanOrEqual(0.1);
+  });
+
+  it('stops vault-discount recs after the monthly Game Vault claim is used', () => {
+    resetArtifactIds(6250);
+    const snapshot = makeSnapshot([
+      makeArtifact('light-warping', ArtifactTier.Platinum, {
+        equippedPosition: 1,
+      }),
+      makeArtifact('chai-stones', ArtifactTier.Interstellar, {
+        equippedPosition: 2,
+      }),
+      makeArtifact('pn295', ArtifactTier.Interstellar, {
+        equippedPosition: 3,
+      }),
+      makeArtifact('pn295-unstable-battery', ArtifactTier.Interstellar),
+    ]);
+    const claimedOpen = vaultOpenState({
+      gameVault: [
+        {
+          name: 'Ale Abbey',
+          price: 1600,
+          inStock: true,
+          purchasable: true,
+          isClaimed: true,
+        },
+        {
+          name: 'Cryptmaster',
+          price: 2100,
+          inStock: true,
+          purchasable: true,
+        },
+      ],
+      gameVaultClaimedThisCycle: true,
+    });
+    const result = optimize(
+      buildContext(snapshot, defaultArtifactSettings, claimedOpen, NOW_MS),
+    );
+    expect(result.vaultDiscount).toBeUndefined();
+    expect(result.best?.marketplaceSavingsArp ?? 0).toBe(0);
+  });
+});
+
+function mockVaultCard(options: {
+  price: string;
+  name: string;
+  text: string;
+  inStock?: string;
+  disabled?: string;
+  omitPrice?: boolean;
+}): HTMLElement {
+  return {
+    dataset: {
+      productName: options.name,
+      productId: options.name,
+      ...(!options.omitPrice && { productPrice: options.price }),
+      ...(options.inStock !== undefined && {
+        productInStock: options.inStock,
+      }),
+      ...(options.disabled !== undefined && {
+        productDisabled: options.disabled,
+      }),
+    },
+    classList: { contains: () => false },
+    querySelector() {
+      return { textContent: '' };
+    },
+    getAttribute() {
+      return '';
+    },
+    textContent: options.text,
+  } as unknown as HTMLElement;
+}
+
+function mockVaultDocument(cards: HTMLElement[], bodyText: string): Document {
+  return {
+    body: { textContent: bodyText },
+    querySelector() {
+      return;
+    },
+    querySelectorAll: (selector: string) =>
+      /data-product-price|marketplace-game-small|marketplace-game-large/.test(
+        selector,
+      )
+        ? cards
+        : [],
+  } as unknown as Document;
+}
+
+describe('Game Vault claimed scrape', () => {
+  it('reads Claimed badges and the monthly-claim banner', () => {
+    const cards = [
+      mockVaultCard({
+        price: '2100',
+        name: 'Cook, Serve, Delicious! 3?!',
+        text: 'Cook, Serve, Delicious! 3?! You have already claimed a game this month! 2100 ARP',
+      }),
+      mockVaultCard({
+        price: '1600',
+        name: 'Ale Abbey - Monastery Brewery Tycoon',
+        text: 'Ale Abbey - Monastery Brewery Tycoon Claimed 1600 ARP',
+      }),
+      mockVaultCard({
+        price: '2100',
+        name: 'Cryptmaster',
+        text: 'Cryptmaster You have already claimed a game this month! 2100 ARP',
+      }),
+    ];
+    const document_ = mockVaultDocument(
+      cards,
+      'You have already claimed a game this month!',
+    );
+    const vault = scrapeGameVaultFromDocument(document_);
+    expect(vault.every((game) => game.isClaimed === true)).toBe(true);
+    expect(isGameVaultMonthlyClaimUsedFromDocument(document_)).toBe(true);
+
+    const state = vaultOpenState({
+      gameVault: vault,
+      gameVaultClaimedThisCycle: true,
+    });
+    expect(isGameVaultDiscountWindow(state, NOW_MS)).toBe(false);
+  });
+
+  it('does not treat a Claim button as already claimed', () => {
+    const cards = [
+      mockVaultCard({
+        price: '1600',
+        name: 'Ale Abbey',
+        text: 'Ale Abbey Claim for 1600 ARP',
+      }),
+    ];
+    const document_ = mockVaultDocument(cards, 'Ale Abbey Claim for 1600 ARP');
+    const vault = scrapeGameVaultFromDocument(document_);
+    expect(vault[0]?.isClaimed).toBeUndefined();
+    expect(vault[0]?.purchasable).toBe(true);
+    expect(isGameVaultMonthlyClaimUsedFromDocument(document_)).toBe(false);
+  });
+
+  it('reads live vault cards that only show ARP in the label', () => {
+    const cards = [
+      mockVaultCard({
+        price: '1600',
+        name: 'Ale Abbey',
+        omitPrice: true,
+        text: 'Ale Abbey Claimed 1600 ARP',
+      }),
+    ];
+    const document_ = mockVaultDocument(cards, 'Claimed 1600 ARP');
+    const vault = scrapeGameVaultFromDocument(document_);
+    expect(vault).toEqual([
+      expect.objectContaining({
+        name: 'Ale Abbey',
+        price: 1600,
+        isClaimed: true,
+      }),
+    ]);
+  });
+});
+
+describe('isGameVaultClaimedThisCycle', () => {
+  it('keeps a prior claim through SSR HTML that still looks purchasable', () => {
+    expect(
+      isGameVaultClaimedThisCycle(true, {
+        isMonthlyClaimUsed: false,
+        isScrapedClaimed: false,
+        isLiveDocument: false,
+        hasClaimAction: false,
+      }),
+    ).toBe(true);
+  });
+
+  it('sets claimed from the monthly banner even when no cards parsed', () => {
+    expect(
+      isGameVaultClaimedThisCycle(undefined, {
+        isMonthlyClaimUsed: true,
+        isScrapedClaimed: false,
+        isLiveDocument: true,
+        hasClaimAction: false,
+      }),
+    ).toBe(true);
+  });
+
+  it('clears the flag on a live page that still has Claim buttons', () => {
+    expect(
+      isGameVaultClaimedThisCycle(true, {
+        isMonthlyClaimUsed: false,
+        isScrapedClaimed: false,
+        isLiveDocument: true,
+        hasClaimAction: true,
+      }),
+    ).toBe(false);
   });
 });
