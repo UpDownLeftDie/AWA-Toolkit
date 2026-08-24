@@ -5,13 +5,18 @@ import {
   comboEquipWaitMs,
   currentLoadout,
   isSameLoadout,
+  msUntilNextSteamQuestWeek,
   resolveOwnedList,
 } from '../../src/artifacts/optimizer/context';
 import { optimize } from '../../src/artifacts/optimizer/index';
 import {
   battlePassClaimableArp,
+  isActivityAvailable,
+  isActivityPending,
   isCommunityGateMet,
   isPersonalHoursMet,
+  scrapedRemainingSteamQuestRewards,
+  type SiteState,
 } from '../../src/artifacts/siteState';
 import {
   estimateCommunityUnlockAt,
@@ -33,10 +38,6 @@ import {
   type ArtifactSlotPosition,
 } from '../../src/artifacts/settings';
 import type { ArtifactSnapshot, OwnedArtifact } from '../../src/artifacts/scraper';
-import {
-  isActivityAvailable,
-  type SiteState,
-} from '../../src/artifacts/siteState';
 import type { ActivityKey } from '../../src/artifacts/siteState/types';
 import type { OptimizerResult } from '../../src/artifacts/optimizer/types';
 
@@ -47,6 +48,7 @@ export interface ArpLedger {
   daily: number;
   community: number;
   battlePass: number;
+  steam: number;
 }
 
 export interface SimDayResult {
@@ -75,6 +77,8 @@ interface LifetimeSimState {
   bpClaimed: boolean;
   /** Milestone indices already paid out in this run. */
   communityAwarded: Set<number>;
+  /** Steam week ids (Monday 00:00 UTC date) already paid. */
+  steamWeeksAwarded: Set<string>;
 }
 
 type SimStrategy = (
@@ -224,6 +228,92 @@ function earnDailyArp(
   return total;
 }
 
+function steamWeekId(nowMs: number): string {
+  const untilNext = msUntilNextSteamQuestWeek(nowMs);
+  const startMs = nowMs + untilNext - 7 * MS_PER_DAY;
+  return new Date(startMs).toISOString().slice(0, 10);
+}
+
+function siteStateWithSteamCapped(siteState: SiteState): SiteState {
+  return {
+    ...siteState,
+    caps: { ...siteState.caps, steamQuests: 'capped' },
+  };
+}
+
+function bindScenarioSteamCaps(
+  scenario: (dayOffset: number, nowMs: number) => SiteState,
+  awarded: Set<string>,
+): (dayOffset: number, nowMs: number) => SiteState {
+  return (dayOffset, nowMs) => {
+    const raw = scenario(dayOffset, nowMs);
+    return awarded.has(steamWeekId(nowMs))
+      ? siteStateWithSteamCapped(raw)
+      : raw;
+  };
+}
+
+function oracleFlatArtifacts(
+  result: OptimizerResult,
+): OwnedArtifact[] | undefined {
+  if (result.best && result.best.allArpPct === 0) {
+    return [...result.best.artifacts];
+  }
+  return (
+    result.alternatives.find((combo) => combo.allArpPct === 0)?.artifacts ??
+    result.current?.artifacts
+  );
+}
+
+function comboHasSteamBonus(artifacts: readonly OwnedArtifact[] | undefined): boolean {
+  return artifacts !== undefined && collectBonuses([...artifacts]).steamQuests > 0;
+}
+
+function isImmediateEquip(todo: ActionTodo): boolean {
+  return (
+    todo.urgency?.chain === 'equip' && (todo.urgency.readyAtMs ?? 0) === 0
+  );
+}
+
+function isAllArpEquipTodo(todo: ActionTodo): boolean {
+  return isImmediateEquip(todo) && /all-arp/i.test(todo.text);
+}
+
+function awardSteamQuests(
+  state: LifetimeSimState,
+  siteState: SiteState,
+  nowMs: number,
+): number {
+  const weekId = steamWeekId(nowMs);
+  if (state.steamWeeksAwarded.has(weekId)) {
+    return 0;
+  }
+  const act = state.settings.activities.steamQuests;
+  if (!act?.enabled || !isActivityPending(siteState.caps, 'steamQuests')) {
+    return 0;
+  }
+  const remaining = scrapedRemainingSteamQuestRewards(siteState);
+  if (!remaining || remaining.length === 0) {
+    return 0;
+  }
+  const loadout = currentLoadout(state.snapshot.artifacts);
+  if (loadout.length === 0) {
+    return 0;
+  }
+  const bonuses = collectBonuses(loadout);
+  if (bonuses.steamQuests <= 0) {
+    return 0;
+  }
+  const arp = Math.round(
+    (remaining.reduce((sum, base) => sum + base, 0) +
+      bonuses.steamQuests * remaining.length) *
+      (1 + bonuses.allArpPct) *
+      (act.frequency ?? 1),
+  );
+  state.steamWeeksAwarded.add(weekId);
+  return arp;
+}
+
 function awardCommunityMilestones(
   state: LifetimeSimState,
   siteState: SiteState,
@@ -271,12 +361,10 @@ function awardBattlePass(
 }
 
 /** Follow buildActionPlan — respects cooldowns via readyAtMs on equip steps. */
-const guidedStrategy: SimStrategy = (_result, todos) => {
-  const equipTodo = todos.find(
-    (todo) =>
-      todo.urgency?.chain === 'equip' &&
-      (todo.urgency.readyAtMs ?? 0) === 0 &&
-      resolveEquipLoadout(todo),
+const guidedStrategy: SimStrategy = (result, todos) => {
+  const allArpTodo = todos.find(isAllArpEquipTodo);
+  const dailyTodo = todos.find(
+    (todo) => isImmediateEquip(todo) && resolveEquipLoadout(todo),
   );
   const claimTodo = todos.find(
     (todo) => todo.claimBattlePass === true && todo.claimBattlePassSkipArp !== true,
@@ -285,11 +373,33 @@ const guidedStrategy: SimStrategy = (_result, todos) => {
     equipLoadout?: readonly string[];
     claimBattlePass?: boolean;
   } = {};
-  if (equipTodo) {
-    const names = resolveEquipLoadout(equipTodo)
+  const artifactsForTodo = (
+    preferred: OwnedArtifact[] | undefined,
+    todo: ActionTodo,
+  ): readonly string[] | undefined => {
+    if (preferred && preferred.length === 3) {
+      return loadoutNames(preferred);
+    }
+    const names = resolveEquipLoadout(todo)
       ?.split(/\s*\+\s*/)
       .map((name) => name.trim());
-    if (names && names.length > 0) {
+    return names && names.length > 0 ? names : undefined;
+  };
+  if (allArpTodo) {
+    const names = artifactsForTodo(
+      result.allArpLoadout?.artifacts ?? result.deferredAllArp?.artifacts,
+      allArpTodo,
+    );
+    if (names) {
+      decision.equipLoadout = names;
+    }
+  } else if (dailyTodo) {
+    const steamLock = comboHasSteamBonus(result.best?.artifacts);
+    const preferred = steamLock
+      ? oracleFlatArtifacts(result)
+      : result.best?.artifacts;
+    const names = artifactsForTodo(preferred, dailyTodo);
+    if (names) {
       decision.equipLoadout = names;
     }
   }
@@ -382,27 +492,35 @@ function runLifetimeSim(
     snapshot: structuredClone(persona.snapshot),
     settings: structuredClone(defaultArtifactSettings),
     lifetimeArp: 0,
-    ledger: { daily: 0, community: 0, battlePass: 0 },
+    ledger: { daily: 0, community: 0, battlePass: 0, steam: 0 },
     bpClaimed: false,
     communityAwarded: new Set(),
+    steamWeeksAwarded: new Set(),
   };
   const days: SimDayResult[] = [];
   const allViolations: ReturnType<typeof runOptimizerAudit>['violations'] = [];
 
   for (let day = 0; day < SIM_DAYS; day += 1) {
     const nowMs = MONTH_START_MS + day * MS_PER_DAY + 8 * 3_600_000;
-    const siteState = scenario(day, nowMs);
+    const boundScenario = bindScenarioSteamCaps(
+      scenario,
+      state.steamWeeksAwarded,
+    );
+    const siteState = boundScenario(day, nowMs);
     const personaState: PersonaFixture = { ...persona, snapshot: state.snapshot };
 
     let violations: ReturnType<typeof runOptimizerAudit>['violations'] = [];
     let result: OptimizerResult;
     let todos: ActionTodo[] = [];
 
-    if (collectViolations) {
+    const auditThisTick =
+      collectViolations &&
+      !state.steamWeeksAwarded.has(steamWeekId(nowMs));
+    if (auditThisTick) {
       const audit = runOptimizerAudit(
         personaState,
         scenarioId,
-        scenario,
+        boundScenario,
         nowMs,
         state.settings,
       );
@@ -454,6 +572,7 @@ function runLifetimeSim(
     }
 
     const daily = earnDailyArp(state.snapshot, siteState, state.settings);
+    const steam = awardSteamQuests(state, siteState, nowMs);
     const community = awardCommunityMilestones(state, siteState);
     const shouldClaimBp =
       claimBattlePass === true ||
@@ -466,9 +585,10 @@ function runLifetimeSim(
       : 0;
 
     state.ledger.daily += daily;
+    state.ledger.steam += steam;
     state.ledger.community += community;
     state.ledger.battlePass += battlePass;
-    state.lifetimeArp += daily + community + battlePass;
+    state.lifetimeArp += daily + steam + community + battlePass;
 
     days.push({
       day,

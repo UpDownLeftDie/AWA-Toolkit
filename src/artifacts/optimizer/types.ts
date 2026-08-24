@@ -134,9 +134,10 @@ export interface OptimizerResult {
     };
   };
   /**
-  Steam Quests remaining this week, but this 24h lock is not the last chance
-  before Monday. Wear the Steam-flat set before starting quests — not as the
-  24h recommended loadout.
+  Steam Quests remaining this week, but a higher-value 24h lock won (community
+  All-ARP%, last-hour preload, etc.). Wear the Steam-flat set after that lock
+  — not instead of it, and not now if that would displace it. Remaining Steam
+  is otherwise the 24h pick: dailies reset, so we pick a day for the lock.
   */
   deferredSteam?: {
     waitMs: number;
@@ -158,6 +159,11 @@ export interface OptimizerResult {
     note?: string;
     dismissed: boolean;
   };
+  /**
+  Recommended set is tomorrow's 00:00 UTC 24h pick, equipped now so the lock
+  is already running at reset (today's sits are done / past the UTC cutoff).
+  */
+  preloadNextUtcDay?: boolean;
 }
 
 export interface OptimizerContext {

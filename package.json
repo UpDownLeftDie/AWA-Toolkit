@@ -39,5 +39,5 @@
     "vite-plugin-monkey": "^8.1.0",
     "vitest": "^4.1.11"
   },
-  "packageManager": "pnpm@11.22.0"
+  "packageManager": "pnpm@11.23.0"
 }

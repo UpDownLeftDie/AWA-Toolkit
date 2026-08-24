@@ -1,5 +1,5 @@
 import type { SiteState } from '../../../src/artifacts/siteState/types';
-import { baselineScenario } from './baseline';
+import { baselineScenario, steamWeekOpen } from './baseline';
 import { battlePassOnlyScenario } from './battlePassOnly';
 import { communityOnlyScenario } from './communityOnly';
 
@@ -22,6 +22,11 @@ export const ALL_SCENARIOS: readonly {
 }[] = [
   { id: 'baseline', label: 'No BP or community event', fn: baselineScenario },
   {
+    id: 'steamWeekOpen',
+    label: 'Steam Quests remaining this week, Twitch still due',
+    fn: steamWeekOpen,
+  },
+  {
     id: 'battlePassOnly',
     label: 'Live battle pass, mid-month end',
     fn: battlePassOnlyScenario,
@@ -38,4 +43,9 @@ export const ALL_SCENARIOS: readonly {
   },
 ];
 
-export { baselineScenario, battlePassOnlyScenario, communityOnlyScenario };
+export {
+  baselineScenario,
+  battlePassOnlyScenario,
+  communityOnlyScenario,
+  steamWeekOpen,
+};

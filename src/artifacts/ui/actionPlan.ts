@@ -680,10 +680,11 @@ function twitchActivityLabel(options: {
   ) {
     return 'Watch Twitch now';
   }
+  const swapPart = options.beforeSwap ? ' before swapping' : '';
   if (options.utcDeadline) {
-    return `Watch Twitch (${utcResetDeadlineLabel()})`;
+    return `Watch Twitch${swapPart} (${utcResetDeadlineLabel()})`;
   }
-  return `Watch Twitch${options.beforeSwap ? ' before swapping' : ''}`;
+  return `Watch Twitch${swapPart}`;
 }
 
 function twitchArpReason(options: {
@@ -1796,6 +1797,7 @@ function collectEquipReasons(
   siteState: SiteState,
   waitMs: number,
   stepArtifacts: OwnedArtifact[],
+  isPreloadNextUtcDay = false,
 ): ActionTodoReason[] {
   const reasons: ActionTodoReason[] = [];
   const caps = siteState.caps;
@@ -1811,6 +1813,12 @@ function collectEquipReasons(
     });
   }
 
+  if (isPreloadNextUtcDay) {
+    reasons.push({
+      text: 'Start 24h lock before 00:00 UTC reset',
+    });
+  }
+
   const isNextUtcResetInLock = isResetInWearWindow(
     msUntilUtcMidnight(),
     waitMs,
@@ -1821,7 +1829,8 @@ function collectEquipReasons(
     stats.steamQuestsFlat,
     waitMs,
     isSteamDueNow,
-    isResetInWearWindow(msUntilNextSteamQuestWeek(), waitMs),
+    isPreloadNextUtcDay ||
+      isResetInWearWindow(msUntilNextSteamQuestWeek(), waitMs),
     'Steam Quests',
     'Steam Quests after Monday reset',
   );
@@ -2282,6 +2291,7 @@ function buildSwapEquipTodos(options: {
   waitMs: number;
   beforeSwapCount: number;
   upgrades: UpgradeSuggestion[];
+  isPreloadNextUtcDay?: boolean;
 }): { immediate: ActionTodo[]; later: ActionTodo[] } {
   const {
     best,
@@ -2293,6 +2303,7 @@ function buildSwapEquipTodos(options: {
     waitMs,
     beforeSwapCount,
     upgrades,
+    isPreloadNextUtcDay = false,
   } = options;
   const plan = planLoadoutChanges(best.artifacts, current, settings, slotLocks);
   const swapWaitMs = plan.waitMs > 0 ? plan.waitMs : waitMs;
@@ -2304,10 +2315,11 @@ function buildSwapEquipTodos(options: {
     siteState,
     swapWaitMs,
     laterArtifacts.length > 0 ? laterArtifacts : best.artifacts,
+    isPreloadNextUtcDay,
   );
   const nowReasons =
     nowArtifacts.length > 0
-      ? collectEquipReasons(siteState, 0, nowArtifacts)
+      ? collectEquipReasons(siteState, 0, nowArtifacts, isPreloadNextUtcDay)
       : laterReasons;
   const label = loadoutLabel(best.artifacts);
   const nowUpgrades = upgradeTodosFor(
@@ -2656,6 +2668,7 @@ function pushRecommendedSwapTodos(options: {
   sequenced: ReturnType<typeof buildSequencedActivityTodos>;
   discord: ReturnType<typeof buildDiscordPollAction>;
   upgrades: UpgradeSuggestion[];
+  isPreloadNextUtcDay?: boolean;
 }): void {
   const {
     todos,
@@ -2669,6 +2682,7 @@ function pushRecommendedSwapTodos(options: {
     sequenced,
     discord,
     upgrades,
+    isPreloadNextUtcDay = false,
   } = options;
   const swap = buildSwapEquipTodos({
     best,
@@ -2680,6 +2694,7 @@ function pushRecommendedSwapTodos(options: {
     beforeSwapCount:
       sequenced.beforeSwap.length + (discord?.slot === 'before' ? 1 : 0),
     upgrades,
+    isPreloadNextUtcDay,
     ...(slotLocks && { slotLocks }),
   });
   todos.push(
@@ -2791,6 +2806,7 @@ export function buildActionPlan(
       sequenced,
       discord,
       upgrades: result.upgrades,
+      isPreloadNextUtcDay: result.preloadNextUtcDay === true,
       ...(result.slotLocks && { slotLocks: result.slotLocks }),
     });
   } else {

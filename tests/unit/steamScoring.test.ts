@@ -4,8 +4,11 @@ import { buildContext } from '../../src/artifacts/optimizer/context';
 import { scoreCombo } from '../../src/artifacts/optimizer/scoring';
 import { defaultArtifactSettings } from '../../src/artifacts/settings';
 import { midTwitchFocus } from '../fixtures/personas/index';
-import { steamWeekComplete } from '../fixtures/scenarios/baseline';
-import { baselineScenario } from '../fixtures/scenarios/baseline';
+import {
+  baselineScenario,
+  steamWeekComplete,
+  steamWeekOpen,
+} from '../fixtures/scenarios/baseline';
 import { wednesdayMidWeekSteamCompleteMs } from '../fixtures/timeGrid';
 
 describe('scoreCombo steam scoring', () => {
@@ -79,6 +82,22 @@ describe('scoreCombo steam scoring', () => {
     );
     const waitMs = 0;
     const scored = scoreCombo([recycler!], context, waitMs);
+    expect(scored.breakdown.steamQuests?.base ?? 0).toBeGreaterThan(0);
+  });
+
+  it('mid-week remaining steam quests count on this 24h lock', () => {
+    const siteState = steamWeekOpen(0, nowMs);
+    const context = buildContext(
+      midTwitchFocus.snapshot,
+      defaultArtifactSettings,
+      siteState,
+      nowMs,
+    );
+    const recycler = context.snapshot.artifacts.find(
+      (artifact) => artifact.familyId === 'pn295-unstable-battery',
+    );
+    expect(recycler).toBeDefined();
+    const scored = scoreCombo([recycler!], context, 0);
     expect(scored.breakdown.steamQuests?.base ?? 0).toBeGreaterThan(0);
   });
 });

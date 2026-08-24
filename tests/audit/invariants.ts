@@ -9,6 +9,11 @@ import { optimize } from '../../src/artifacts/optimizer/index';
 import type { OptimizerResult, ScoredCombo } from '../../src/artifacts/optimizer/types';
 import { COOLDOWN_MS } from '../../src/artifacts/settings';
 import { scrapedRemainingSteamQuestRewards } from '../../src/artifacts/siteState/steamQuests';
+import {
+  isActivityAvailable,
+  twitchWatchRemainingMs,
+} from '../../src/artifacts/siteState';
+import type { SiteState } from '../../src/artifacts/siteState/types';
 import { buildActionPlan, type ActionTodo } from '../../src/artifacts/ui/actionPlan';
 import type { PersonaFixture } from '../fixtures/artifactFactory';
 import type { MonthScenario } from '../fixtures/scenarios/shared';
@@ -86,17 +91,17 @@ export function collectInvariantViolations(
 ): InvariantViolation[] {
   const violations: InvariantViolation[] = [];
   const best = result.best;
-  const current = result.current;
   const now = resolveNow(context);
   const siteState = context.siteState;
 
   if (best) {
     violations.push(...checkBreakdownTotals(best, ctx));
-    violations.push(...checkSteamScoring(best, current, ctx, context, now));
+    violations.push(...checkSteamScoring(result, ctx, context, now));
   }
 
   violations.push(...checkDeferredAllArp(result, ctx));
-  violations.push(...checkActionPlan(result, todos, ctx, now));
+  violations.push(...checkDeferredSteamDoesNotPreemptBest(result, ctx));
+  violations.push(...checkActionPlan(result, todos, ctx, now, siteState));
 
   const steamCapped = siteState.caps.steamQuests === 'capped';
   const remaining = scrapedRemainingSteamQuestRewards(siteState);
@@ -128,12 +133,16 @@ function checkBreakdownTotals(
 }
 
 function checkSteamScoring(
-  best: ScoredCombo,
-  current: ScoredCombo | undefined,
+  result: OptimizerResult,
   ctx: AuditContext,
   context: ReturnType<typeof buildContext>,
   now: number,
 ): InvariantViolation[] {
+  const best = result.best;
+  const current = result.current;
+  if (!best) {
+    return [];
+  }
   const violations: InvariantViolation[] = [];
   const siteState = context.siteState;
   const steamLine = best.breakdown.steamQuests;
@@ -142,6 +151,7 @@ function checkSteamScoring(
   const steamCapped =
     siteState.caps.steamQuests === 'capped' ||
     (remaining !== undefined && remaining.length === 0);
+  const allowPreloadSteam = result.preloadNextUtcDay === true;
 
   if (steamCapped && steamTotal > 0) {
     const waitMs = best.artifacts.length > 0 ? 0 : 0;
@@ -163,6 +173,7 @@ function checkSteamScoring(
   const waitMs = 0;
   if (
     waitMs + COOLDOWN_MS < mondayMs &&
+    !(remaining && remaining.length > 0) &&
     steamTotal >=
       [...BASE_ACTIVITY.steamQuestBases].reduce((sum, base) => sum + base, 0) *
         (1 + best.allArpPct)
@@ -177,13 +188,15 @@ function checkSteamScoring(
   }
 
   if (steamCapped && steamFamilyIds(best.artifacts).length >= 2) {
-    violations.push(
-      violation(
-        ctx,
-        'no-steam-loadout-when-capped',
-        `recommended steam-heavy loadout when week is complete: ${best.artifacts.map((a) => a.displayName).join(', ')}`,
-      ),
-    );
+    if (!allowPreloadSteam) {
+      violations.push(
+        violation(
+          ctx,
+          'no-steam-loadout-when-capped',
+          `recommended steam-heavy loadout when week is complete: ${best.artifacts.map((a) => a.displayName).join(', ')}`,
+        ),
+      );
+    }
   }
 
   if (
@@ -195,13 +208,15 @@ function checkSteamScoring(
       (current.breakdown.timeOnSite?.total ?? 0) >
         (best.breakdown.timeOnSite?.total ?? 0))
   ) {
-    violations.push(
-      violation(
-        ctx,
-        'no-steam-only-upgrade',
-        `steam-only swap beats current by ${(best.weeklyArp - current.weeklyArp).toFixed(1)} ARP with no steam due`,
-      ),
-    );
+    if (!allowPreloadSteam) {
+      violations.push(
+        violation(
+          ctx,
+          'no-steam-only-upgrade',
+          `steam-only swap beats current by ${(best.weeklyArp - current.weeklyArp).toFixed(1)} ARP with no steam due`,
+        ),
+      );
+    }
   }
 
   return violations;
@@ -229,6 +244,31 @@ function checkDeferredAllArp(
   return violations;
 }
 
+function checkDeferredSteamDoesNotPreemptBest(
+  result: OptimizerResult,
+  ctx: AuditContext,
+): InvariantViolation[] {
+  const steam = result.deferredSteam;
+  const best = result.best;
+  if (!steam || !best) {
+    return [];
+  }
+  if ((steam.waitMs ?? 0) > 0) {
+    return [];
+  }
+  return [
+    violation(
+      ctx,
+      'deferred-steam-preempts-best',
+      'deferred Steam set is immediate while it is not the 24h pick — would lock over Twitch/dailies',
+      {
+        best: best.artifacts.map((artifact) => artifact.displayName),
+        steam: steam.artifacts.map((artifact) => artifact.displayName),
+      },
+    ),
+  ];
+}
+
 function checkNoSteamOnlyDowngrade(
   result: OptimizerResult,
   ctx: AuditContext,
@@ -241,7 +281,7 @@ function checkNoSteamOnlyDowngrade(
   }
   const steamPick = steamFamilyIds(best.artifacts).length >= 1;
   const twitchLoss = best.watchTwitchFlat < current.watchTwitchFlat;
-  if (steamPick && twitchLoss && !result.deferredSteam) {
+  if (steamPick && twitchLoss && !result.deferredSteam && !result.preloadNextUtcDay) {
     const isSameSteamCombo =
       steamFamilyIds(best.artifacts).length > 0 &&
       best.weeklyArp <= current.weeklyArp + 5;
@@ -268,19 +308,44 @@ function checkNoSteamOnlyDowngrade(
   return violations;
 }
 
+function isImmediateSteamLockEquip(
+  todo: ActionTodo,
+  result: OptimizerResult,
+): boolean {
+  if (todo.urgency?.chain !== 'equip') {
+    return false;
+  }
+  if ((todo.urgency.readyAtMs ?? 0) > 0) {
+    return false;
+  }
+  if (/equip steam quests set now/i.test(todo.text)) {
+    return true;
+  }
+  const blob = `${todo.text} ${todo.loadout ?? ''}`;
+  if (!/recycler|fission blade/i.test(blob)) {
+    return false;
+  }
+  return steamFamilyIds(result.best?.artifacts ?? []).length >= 1;
+}
+
+function isTwitchDueNow(todo: ActionTodo): boolean {
+  if (!/watch twitch/i.test(todo.text)) {
+    return false;
+  }
+  if ((todo.urgency?.readyAtMs ?? 0) > 0) {
+    return false;
+  }
+  return todo.urgency?.kind !== 'schedule';
+}
+
 function checkActionPlan(
   result: OptimizerResult,
   todos: ActionTodo[],
   ctx: AuditContext,
-  now: number,
+  _now: number,
+  siteState: SiteState,
 ): InvariantViolation[] {
   const violations: InvariantViolation[] = [];
-  const siteState = buildContext(
-    ctx.persona.snapshot,
-    defaultArtifactSettings,
-    undefined,
-    ctx.nowMs,
-  ).siteState;
   const steamCapped = siteState.caps.steamQuests === 'capped';
   const remaining = scrapedRemainingSteamQuestRewards(siteState);
   const noSteam =
@@ -292,7 +357,7 @@ function checkActionPlan(
         todo.urgency?.chain === 'equip' &&
         /recycler|fission blade/i.test(`${todo.text} ${todo.loadout ?? ''}`),
     );
-    if (equipTodo && (equipTodo.urgency?.readyAtMs ?? 0) === 0) {
+    if (equipTodo && (equipTodo.urgency?.readyAtMs ?? 0) === 0 && !result.preloadNextUtcDay) {
       violations.push(
         violation(
           ctx,
@@ -323,7 +388,36 @@ function checkActionPlan(
     );
   }
 
-  void now;
+  const twitchDue =
+    isActivityAvailable(siteState.caps, 'watchTwitch') &&
+    twitchWatchRemainingMs(siteState) > 0;
+  const twitchDropped =
+    (result.current?.watchTwitchFlat ?? 0) >
+    (result.best?.watchTwitchFlat ?? 0);
+  if (
+    twitchDue &&
+    twitchDropped &&
+    result.preloadNextUtcDay !== true
+  ) {
+    const twitchIndex = todos.findIndex(isTwitchDueNow);
+    const steamIndex = todos.findIndex((todo) =>
+      isImmediateSteamLockEquip(todo, result),
+    );
+    if (twitchIndex >= 0 && steamIndex >= 0 && steamIndex < twitchIndex) {
+      violations.push(
+        violation(
+          ctx,
+          'action-plan-steam-before-twitch',
+          'ranks a Steam lock equip above Watch Twitch while today still needs the current Twitch bonus',
+          {
+            steam: todos[steamIndex]?.text,
+            twitch: todos[twitchIndex]?.text,
+          },
+        ),
+      );
+    }
+  }
+
   return violations;
 }
 

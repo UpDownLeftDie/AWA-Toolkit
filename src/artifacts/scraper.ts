@@ -442,8 +442,9 @@ export async function scrapeAndPersist(): Promise<ArtifactSnapshot> {
 }
 
 export function isArtifactsShowroomPage(): boolean {
+  const pathname = globalThis.location?.pathname ?? '';
   return (
-    /\/member\/[^/]+\/artifacts\/?$/.test(location.pathname) ||
-    /\/user-artifacts-room\/?$/.test(location.pathname)
+    /\/member\/[^/]+\/artifacts\/?$/.test(pathname) ||
+    /\/user-artifacts-room\/?$/.test(pathname)
   );
 }

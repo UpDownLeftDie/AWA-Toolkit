@@ -21,19 +21,21 @@ tests/
 
 ## Personas
 
-Six inventory snapshots from `tests/fixtures/personas/`:
+Seven inventory snapshots from `tests/fixtures/personas/`:
 
 - **newUser** — low tier, no sets
 - **midTwitchFocus** — regression loadout (Apotho + Chai + Pn295; owns Recycler/Fission unequipped)
 - **midPartialCooldown** — slots 2/3 locked
 - **midZorathian** — All-ARP% owned, wearing Twitch set
 - **endgameHpc** / **endgameNoHpc** — Megumin standing sets
+- **midMixedRecyclerTwitch** — Chai + Recycler + Collapsed Star (slot 1 locked); owns Fission and Scion
 
 ## Scenarios
 
-Four month templates under `tests/fixtures/scenarios/`:
+Five month templates under `tests/fixtures/scenarios/`:
 
 - **baseline** — no battle pass or community event
+- **steamWeekOpen** — Steam Quest rows still incomplete; Twitch remaining when the UTC day is open
 - **battlePassOnly** — claimable boosts, season ends mid-month
 - **communityOnly** — ASCE-style milestones + hour samples
 - **both** — battle pass + community event
@@ -51,6 +53,7 @@ Named tests in `optimizer.audit.test.ts`:
 1. `midTwitchFocus` + steam week complete → no Recycler/Fission 24h pick; lock-window ARP not ~180+
 2. `midZorathian` + 10 ARP community lump + slot cooldown → no `deferredAllArp`
 3. `midPartialCooldown` — partial equip OK, no steam-for-dailies trade
+4. `midMixedRecyclerTwitch` + steam week open + Twitch due → Steam is the 24h pick; Watch Twitch still comes before the lock (do not swap off Collapsed Star mid-sit)
 
 ## Month simulator
 
@@ -58,13 +61,14 @@ Named tests in `optimizer.audit.test.ts`:
 
 - **24h slot cooldowns** on both guided and oracle paths (`slotCooldowns` + `comboEquipWaitMs`)
 - **Daily ARP** from the actually equipped loadout (flats + All-ARP%)
+- **Steam quest ARP** once per Steam week (Monday 00:00 UTC) when a Steam-flat set is worn and Control Center rows are still incomplete; that week is then treated as capped so the lock is not repeated
 - **Community milestones** that progress ~3k community hours/day; payout = lump × `(1 + All-ARP%)` on whatever is equipped when gates clear
 - **Battle pass** claim ARP = `readyToClaimArp × (1 + All-ARP%)` when the strategy claims on All-ARP%
 
 | Path | Behavior |
 |------|----------|
-| **Guided** | Follows `buildActionPlan` equip steps when `readyAtMs === 0`; claims BP when the plan says so |
-| **Oracle** | Same cooldown rules; swaps to All-ARP% before community gates / deferred All-ARP%; claims BP on All-ARP%; otherwise equips `best` when slots allow |
+| **Guided** | Follows `buildActionPlan` equip steps when `readyAtMs === 0` (artifact objects, not name-splitting); 24h Steam locks use the same 0% All-ARP set as the oracle; claims BP when the plan says so |
+| **Oracle** | Same cooldown rules; swaps to All-ARP% before community gates / deferred All-ARP%; claims BP on All-ARP%; otherwise equips the best 0% All-ARP set when slots allow |
 
 Guided should not trail the oracle by more than **10%** (action-plan sequencing vs perfect lump timing). Failures include per-ledger breakdowns.
 

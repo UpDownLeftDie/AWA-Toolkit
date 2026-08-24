@@ -31,7 +31,6 @@ import {
   completableUtcDayStarts,
   currentLoadout,
   isResetInWearWindow,
-  isWeeklyForcedIntoLock,
   msUntilNextSteamQuestWeek,
   msUntilNextUtcMidnight,
   resolveNow,
@@ -271,14 +270,14 @@ function steamBasesInWearWindow(
   const mondayResetMs = msUntilNextSteamQuestWeek(now);
   const steamBases: number[] = [];
   const remaining = scrapedRemainingSteamQuestRewards(siteState);
-  // This week's quests last until Monday. Credit them to this 24h lock only
-  // when they cannot be finished after it comes off — otherwise Recycler
-  // steals a Time on Site day for Steam that can wait.
+  // Steam is weekly; Time on Site / Calendar / Twitch reset every day, so a
+  // 24h lock has to spend one of those days. Credit remaining quests whenever
+  // they are pending — waiting for last-chance Monday just pushes Steam off
+  // forever. Today's Twitch sit still finishes on current gear before the swap.
   if (
     remaining &&
     remaining.length > 0 &&
-    isActivityPending(siteState.caps, 'steamQuests') &&
-    isWeeklyForcedIntoLock(mondayResetMs, waitMs)
+    isActivityPending(siteState.caps, 'steamQuests')
   ) {
     steamBases.push(...remaining);
   }

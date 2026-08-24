@@ -13,6 +13,11 @@ import {
 } from '../siteState';
 import { collectBonuses } from './bonuses';
 import {
+  isWeeklyForcedIntoLock,
+  msUntilNextSteamQuestWeek,
+  resolveNow,
+} from './context';
+import {
   hasAllArpEffect,
   hasInventoryAllArp,
   resolveDeferredAllArp,
@@ -150,7 +155,14 @@ export function collectNotes(
       best?.steamQuestsFlat ?? 0,
       ...owned.map((artifact) => collectBonuses([artifact]).steamQuests),
     );
-    if (best && best.steamQuestsFlat < currentSteam) {
+    if (
+      best &&
+      best.steamQuestsFlat < currentSteam &&
+      isWeeklyForcedIntoLock(
+        msUntilNextSteamQuestWeek(resolveNow(context)),
+        0,
+      )
+    ) {
       notes.push(
         `Steam Quests still look unfinished — finish them before swapping away from your +${currentSteam} Steam Quests bonus (equip before starting quests).`,
       );

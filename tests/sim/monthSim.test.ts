@@ -1,7 +1,10 @@
 import { describe, expect, it } from 'vitest';
 
-import { midZorathian } from '../fixtures/personas/index';
-import { baselineScenario } from '../fixtures/scenarios/baseline';
+import { endgameHpc, midZorathian } from '../fixtures/personas/index';
+import {
+  baselineScenario,
+  steamWeekOpen,
+} from '../fixtures/scenarios/baseline';
 import {
   communityOnlyScenario,
   communityTenArpLumpScenario,
@@ -17,6 +20,17 @@ import {
 } from './monthSimulator';
 
 describe('month lifetime ARP simulator', () => {
+  it('steamWeekOpen pays Steam quest ARP once the lock is worn', () => {
+    const guided = simulateMonth(endgameHpc, 'steamWeekOpen', steamWeekOpen);
+    const oracle = simulateOracleMonth(
+      endgameHpc,
+      'steamWeekOpen',
+      steamWeekOpen,
+    );
+    expect(guided.ledger.steam).toBeGreaterThan(0);
+    expect(oracle.ledger.steam).toBeGreaterThan(0);
+  });
+
   for (const persona of ALL_PERSONAS) {
     for (const scenario of ALL_SCENARIOS) {
       it(`${persona.id} × ${scenario.id} — invariants + realistic oracle`, () => {

@@ -56,6 +56,9 @@ import type {
 } from './types';
 
 const BP_CLAIM_BUFFER_MS = 10 * 60 * 1000;
+const MS_PER_DAY = 86_400_000;
+const TWITCH_MS_PER_ARP = 60_000;
+const TIME_ON_SITE_DURATION_MS = BASE_ACTIVITY.timeOnSiteBasePerDay * 60_000;
 const deferBattlePassCache = new WeakMap<OptimizerContext, boolean>();
 
 const UPGRADE_PATH_MAX = 5;
@@ -210,6 +213,125 @@ export function suggestUpgrades(
   return path;
 }
 
+function siteStateAtNextUtcDay(state: SiteState, midnightMs: number): SiteState {
+  const watchTwitch = state.watchTwitch;
+  return {
+    ...state,
+    caps: {
+      ...state.caps,
+      timeOnSite: 'available',
+      watchTwitch: 'available',
+      dailyCalendar: 'available',
+      dailyQuests: 'available',
+    },
+    ...(watchTwitch && {
+      watchTwitch: {
+        ...watchTwitch,
+        scrapedAt: new Date(midnightMs + 1000).toISOString(),
+        baseArp: 0,
+        bonusArp: 0,
+        timeWatched: 0,
+        isUnderCap: true,
+        remainingMs:
+          (watchTwitch.capArp ?? BASE_ACTIVITY.watchTwitchBasePerDay) *
+          60_000,
+      },
+    }),
+  };
+}
+
+function contextAtNextUtcDay(context: OptimizerContext): OptimizerContext {
+  const now = resolveNow(context);
+  const midnightMs = now + msUntilNextUtcMidnight(now);
+  return {
+    ...context,
+    nowMs: midnightMs + 1000,
+    siteState: siteStateAtNextUtcDay(context.siteState, midnightMs),
+  };
+}
+
+/**
+Today's leftover ToS / Twitch / instant dailies still fit before the UTC
+cutoff, so do those on the current set before starting tomorrow's 24h lock.
+*/
+export function shouldPreloadNextUtcDayLoadout(
+  context: OptimizerContext,
+): boolean {
+  const now = resolveNow(context);
+  const untilMidnight = msUntilNextUtcMidnight(now);
+  if (untilMidnight <= 0) {
+    return false;
+  }
+  const cutoffMs = untilMidnight - utcDailyEndBufferMs(context.settings);
+  if (cutoffMs <= 0) {
+    return true;
+  }
+  const caps = context.siteState.caps;
+  if (
+    isActivityAvailable(caps, 'timeOnSite') &&
+    TIME_ON_SITE_DURATION_MS <= cutoffMs
+  ) {
+    return false;
+  }
+  const twitchLeft = twitchWatchRemainingMs(
+    context.siteState,
+    0,
+    new Date(now),
+  );
+  if (twitchLeft > 0 && twitchLeft <= cutoffMs) {
+    return false;
+  }
+  if (
+    isActivityPending(caps, 'dailyCalendar') ||
+    isActivityPending(caps, 'dailyQuests')
+  ) {
+    return false;
+  }
+  return true;
+}
+
+/**
+When today is idle (or past the UTC cutoff), wear tomorrow's 00:00 24h pick
+now so the cooldown is already ticking at reset. Recycler-for-Monday-steam is
+the usual case: waiting until 00:00 just delays the lock by the leftover hour.
+
+If that pick is already equipped, still return it so today's idle 24h winner
+does not swap it off for one dead hour.
+*/
+export function resolvePreloadNextUtcDayBest(
+  owned: OwnedArtifact[],
+  context: OptimizerContext,
+  currentBest: ScoredCombo | undefined,
+): ScoredCombo | undefined {
+  if (!shouldPreloadNextUtcDayLoadout(context)) {
+    return undefined;
+  }
+  const nextBest = findBestCombo(owned, contextAtNextUtcDay(context));
+  if (!nextBest) {
+    return undefined;
+  }
+  if (
+    currentBest &&
+    isSameLoadout(nextBest.artifacts, currentBest.artifacts)
+  ) {
+    return undefined;
+  }
+  const now = resolveNow(context);
+  if (!isSameLoadout(nextBest.artifacts, currentLoadout(owned))) {
+    const waitMs = comboEquipWaitMs(
+      nextBest.artifacts,
+      owned,
+      context.settings,
+      context.snapshot.slotLocks,
+      now,
+    );
+    if (waitMs >= msUntilNextUtcMidnight(now)) {
+      return undefined;
+    }
+  }
+  return scoreCombo(nextBest.artifacts, context);
+}
+
 export function findBestCombo(
   owned: OwnedArtifact[],
   context: OptimizerContext,
@@ -330,10 +452,6 @@ function bestFlatBonusesForLock(
   }
   return best;
 }
-
-const MS_PER_DAY = 86_400_000;
-const TWITCH_MS_PER_ARP = 60_000;
-const TIME_ON_SITE_DURATION_MS = BASE_ACTIVITY.timeOnSiteBasePerDay * 60_000;
 
 function utcDayBounds(
   dayStartMs: number,
@@ -559,9 +677,10 @@ export function resolveDeferredAllArp(
 }
 
 /**
- * Steam Quests last until Monday. If Recycler is not the 24h pick (this lock
- * is not the last chance this week), still offer it as a side swap so the
- * +15/quest is not left on the table.
+ * Steam Quests remaining this week normally win the 24h pick (dailies reset;
+ * we pick a lock day). If a higher-value lock beat Steam (community All-ARP%),
+ * still offer the Steam-flat set as a side swap after that wear — not instead
+ * of it. Today's Watch Twitch on current gear is sequenced before the swap.
  */
 export function resolveDeferredSteam(
   owned: OwnedArtifact[],
@@ -592,13 +711,27 @@ export function resolveDeferredSteam(
     return undefined;
   }
   const now = resolveNow(context);
-  const waitMs = comboEquipWaitMs(
+  let waitMs = comboEquipWaitMs(
     steam.artifacts,
     owned,
     context.settings,
     context.snapshot.slotLocks,
     now,
   );
+  // Side swap after the recommended 24h wear — including when that set is
+  // already on. Immediate Recycler/Fission would lock over a better lock.
+  if (best) {
+    waitMs = Math.max(
+      waitMs,
+      comboEquipWaitMs(
+        best.artifacts,
+        owned,
+        context.settings,
+        context.snapshot.slotLocks,
+        now,
+      ) + COOLDOWN_MS,
+    );
+  }
   if (isWeeklyForcedIntoLock(msUntilNextSteamQuestWeek(now), waitMs)) {
     return undefined;
   }

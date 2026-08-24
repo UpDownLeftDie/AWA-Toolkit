@@ -125,6 +125,32 @@ export const endgameNoHpc: PersonaFixture = {
   ]),
 };
 
+resetArtifactIds(6000);
+
+export const midMixedRecyclerTwitch: PersonaFixture = {
+  id: 'midMixedRecyclerTwitch',
+  label:
+    'Chai + Recycler + Collapsed Star (slot 1 locked); owns Fission and Scion',
+  defaultEquipped: ['chai-stones', 'pn295-unstable-battery', 'pn295'],
+  snapshot: makeSnapshot(
+    [
+      makeArtifact('chai-stones', ArtifactTier.Interstellar, {
+        equippedPosition: 1,
+        slotLocked: true,
+      }),
+      makeArtifact('pn295-unstable-battery', ArtifactTier.Interstellar, {
+        equippedPosition: 2,
+      }),
+      makeArtifact('pn295', ArtifactTier.Interstellar, {
+        equippedPosition: 3,
+      }),
+      makeArtifact('sylphin-fission-blade', ArtifactTier.Interstellar),
+      makeArtifact('scion-of-the-light', ArtifactTier.Bronze),
+    ],
+    { slotLocks: { 1: true } },
+  ),
+};
+
 export const ALL_PERSONAS: readonly PersonaFixture[] = [
   newUser,
   midTwitchFocus,
@@ -132,4 +158,5 @@ export const ALL_PERSONAS: readonly PersonaFixture[] = [
   midZorathian,
   endgameHpc,
   endgameNoHpc,
+  midMixedRecyclerTwitch,
 ];

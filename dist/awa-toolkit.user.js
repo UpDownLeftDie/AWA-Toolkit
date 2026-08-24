@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         AWA Toolkit
 // @namespace    https://github.com/UpDownLeftDie/AWA-Toolkit
-// @version      2.2.3
+// @version      2.2.4
 // @author       jaredcat
 // @description  Artifact Optimizer, Control Center tasks, giveaway/vault filters, and UCF reading mode
 // @license      AGPL-3.0-or-later
@@ -2793,7 +2793,8 @@
 		return snapshot;
 	}
 	function isArtifactsShowroomPage() {
-		return /\/member\/[^/]+\/artifacts\/?$/.test(location.pathname) || /\/user-artifacts-room\/?$/.test(location.pathname);
+		const pathname = globalThis.location?.pathname ?? "";
+		return /\/member\/[^/]+\/artifacts\/?$/.test(pathname) || /\/user-artifacts-room\/?$/.test(pathname);
 	}
 	var ARP_LOG_ROW_SELECTOR = ".card-table-row";
 	var ARP_LOG_AFTER_ROWS_SELECTOR = "#arp-logs-per-page, #arp-log-chart";
@@ -4678,7 +4679,7 @@
 		const mondayResetMs = msUntilNextSteamQuestWeek(now);
 		const steamBases = [];
 		const remaining = scrapedRemainingSteamQuestRewards(siteState);
-		if (remaining && remaining.length > 0 && isActivityPending(siteState.caps, "steamQuests") && isWeeklyForcedIntoLock(mondayResetMs, waitMs)) steamBases.push(...remaining);
+		if (remaining && remaining.length > 0 && isActivityPending(siteState.caps, "steamQuests")) steamBases.push(...remaining);
 		if (isResetInWearWindow(mondayResetMs, waitMs)) steamBases.push(...BASE_ACTIVITY.steamQuestBases);
 		return steamBases;
 	}
@@ -4777,6 +4778,9 @@
 		};
 	}
 	var BP_CLAIM_BUFFER_MS = 6e5;
+	var MS_PER_DAY = 864e5;
+	var TWITCH_MS_PER_ARP = 6e4;
+	var TIME_ON_SITE_DURATION_MS$1 = BASE_ACTIVITY.timeOnSiteBasePerDay * 6e4;
 	var deferBattlePassCache = new WeakMap();
 	var UPGRADE_PATH_MAX = 5;
 	function monthlyUpgradeGain(artifact, toTier) {
@@ -4861,6 +4865,61 @@
 		}
 		return path;
 	}
+	function siteStateAtNextUtcDay(state, midnightMs) {
+		const watchTwitch = state.watchTwitch;
+		return {
+			...state,
+			caps: {
+				...state.caps,
+				timeOnSite: "available",
+				watchTwitch: "available",
+				dailyCalendar: "available",
+				dailyQuests: "available"
+			},
+			...watchTwitch && { watchTwitch: {
+				...watchTwitch,
+				scrapedAt: new Date(midnightMs + 1e3).toISOString(),
+				baseArp: 0,
+				bonusArp: 0,
+				timeWatched: 0,
+				isUnderCap: true,
+				remainingMs: (watchTwitch.capArp ?? BASE_ACTIVITY.watchTwitchBasePerDay) * 6e4
+			} }
+		};
+	}
+	function contextAtNextUtcDay(context) {
+		const now = resolveNow(context);
+		const midnightMs = now + msUntilNextUtcMidnight(now);
+		return {
+			...context,
+			nowMs: midnightMs + 1e3,
+			siteState: siteStateAtNextUtcDay(context.siteState, midnightMs)
+		};
+	}
+	function shouldPreloadNextUtcDayLoadout(context) {
+		const now = resolveNow(context);
+		const untilMidnight = msUntilNextUtcMidnight(now);
+		if (untilMidnight <= 0) return false;
+		const cutoffMs = untilMidnight - utcDailyEndBufferMs(context.settings);
+		if (cutoffMs <= 0) return true;
+		const caps = context.siteState.caps;
+		if (isActivityAvailable(caps, "timeOnSite") && TIME_ON_SITE_DURATION_MS$1 <= cutoffMs) return false;
+		const twitchLeft = twitchWatchRemainingMs(context.siteState, 0, new Date(now));
+		if (twitchLeft > 0 && twitchLeft <= cutoffMs) return false;
+		if (isActivityPending(caps, "dailyCalendar") || isActivityPending(caps, "dailyQuests")) return false;
+		return true;
+	}
+	function resolvePreloadNextUtcDayBest(owned, context, currentBest) {
+		if (!shouldPreloadNextUtcDayLoadout(context)) return;
+		const nextBest = findBestCombo(owned, contextAtNextUtcDay(context));
+		if (!nextBest) return;
+		if (currentBest && isSameLoadout$1(nextBest.artifacts, currentBest.artifacts)) return;
+		const now = resolveNow(context);
+		if (!isSameLoadout$1(nextBest.artifacts, currentLoadout(owned))) {
+			if (comboEquipWaitMs(nextBest.artifacts, owned, context.settings, context.snapshot.slotLocks, now) >= msUntilNextUtcMidnight(now)) return;
+		}
+		return scoreCombo(nextBest.artifacts, context);
+	}
 	function findBestCombo(owned, context) {
 		if (resolveDeferredAllArp(owned, context)) {
 			const equipped = currentLoadout(owned);
@@ -4900,9 +4959,6 @@
 		if (equipped.length > 0) consider(equipped);
 		return best;
 	}
-	var MS_PER_DAY = 864e5;
-	var TWITCH_MS_PER_ARP = 6e4;
-	var TIME_ON_SITE_DURATION_MS$1 = BASE_ACTIVITY.timeOnSiteBasePerDay * 6e4;
 	function utcDayBounds(dayStartMs, midnight) {
 		if (dayStartMs <= 0) return {
 			fromMs: 0,
@@ -5014,7 +5070,8 @@
 		if (best && isSameLoadout$1(steam.artifacts, best.artifacts)) return;
 		if (collectBonuses(equipped).steamQuests >= steam.steamQuestsFlat) return;
 		const now = resolveNow(context);
-		const waitMs = comboEquipWaitMs(steam.artifacts, owned, context.settings, context.snapshot.slotLocks, now);
+		let waitMs = comboEquipWaitMs(steam.artifacts, owned, context.settings, context.snapshot.slotLocks, now);
+		if (best) waitMs = Math.max(waitMs, comboEquipWaitMs(best.artifacts, owned, context.settings, context.snapshot.slotLocks, now) + COOLDOWN_MS);
 		if (isWeeklyForcedIntoLock(msUntilNextSteamQuestWeek(now), waitMs)) return;
 		return {
 			waitMs,
@@ -5206,7 +5263,7 @@
 		if (isActivityPending(context.siteState.caps, "steamQuests") && equipped.length > 0) {
 			const currentSteam = collectBonuses(equipped).steamQuests;
 			const ownedSteam = Math.max(currentSteam, best?.steamQuestsFlat ?? 0, ...owned.map((artifact) => collectBonuses([artifact]).steamQuests));
-			if (best && best.steamQuestsFlat < currentSteam) notes.push(`Steam Quests still look unfinished — finish them before swapping away from your +${currentSteam} Steam Quests bonus (equip before starting quests).`);
+			if (best && best.steamQuestsFlat < currentSteam && isWeeklyForcedIntoLock(msUntilNextSteamQuestWeek(resolveNow(context)), 0)) notes.push(`Steam Quests still look unfinished — finish them before swapping away from your +${currentSteam} Steam Quests bonus (equip before starting quests).`);
 			else if (currentSteam === 0 && ownedSteam > 0) notes.push("Equip a Steam Quests artifact before starting any quest — Control Center still shows 15/25; real ARP is on the ARP Log.");
 		}
 		return notes;
@@ -5295,6 +5352,17 @@
 		if (opensAt !== void 0 && opensAt > now) return resolvePreOpenVaultDiscount(arpBest, current, discountCombo, context, cycleId ?? context.siteState.gameVaultOpensAt ?? "upcoming", now);
 		return { best: arpBest };
 	}
+	function withPreloadNextUtcDay(result, preloaded) {
+		const best = result.best;
+		if (!preloaded || !best || !isSameLoadout$1(best.artifacts, preloaded.artifacts)) return result;
+		result.preloadNextUtcDay = true;
+		if (!result.dailySwap) return result;
+		result.dailySwap = {
+			...result.dailySwap,
+			reason: `Swap ${result.dailySwap.unequip.displayName} → ${result.dailySwap.equip.displayName} now so the 24h lock is already running at 00:00 UTC`
+		};
+		return result;
+	}
 	function optimize(context) {
 		const owned = resolveOwnedList(context);
 		if (owned.length === 0) return {
@@ -5311,8 +5379,10 @@
 		const arpBest = findBestCombo(owned, context);
 		const equipped = currentLoadout(owned);
 		const current = equipped.length > 0 ? scoreCombo(equipped, context) : void 0;
+		const preloaded = resolvePreloadNextUtcDayBest(owned, context, arpBest);
 		const allArpLoadout = findBestAllArpCombo(owned, context);
-		const guarded = resolveVaultDiscountBest(arpBest, current, findBestMarketDiscountCombo(owned, context), context, resolveNow(context));
+		const discountCombo = findBestMarketDiscountCombo(owned, context);
+		const guarded = resolveVaultDiscountBest(preloaded ?? arpBest, current, discountCombo, context, resolveNow(context));
 		const best = guarded.best;
 		const monthlyMetaLoadout = findMonthlyMetaCombo(owned, context);
 		const alternatives = [];
@@ -5346,7 +5416,7 @@
 		if (marketDiscountLoadout) result.marketDiscountLoadout = marketDiscountLoadout;
 		if (monthlyMetaLoadout) result.monthlyMetaLoadout = monthlyMetaLoadout;
 		if (guarded.vaultDiscount) result.vaultDiscount = guarded.vaultDiscount;
-		return result;
+		return withPreloadNextUtcDay(result, preloaded);
 	}
 	function formatMs(ms) {
 		const days = Math.floor(ms / 864e5);
@@ -6724,8 +6794,9 @@
 	function twitchActivityLabel(options) {
 		if (options.phase === "after" || options.phase === "afterNow") return "Watch Twitch";
 		if (options.phase === "before" && options.waitMs > 0 && !canFinishTwitchAfterUnlock(options.waitMs, options.watchRemainingMs, options.utcDailyEndBufferMs)) return "Watch Twitch now";
-		if (options.utcDeadline) return `Watch Twitch (${utcResetDeadlineLabel()})`;
-		return `Watch Twitch${options.beforeSwap ? " before swapping" : ""}`;
+		const swapPart = options.beforeSwap ? " before swapping" : "";
+		if (options.utcDeadline) return `Watch Twitch${swapPart} (${utcResetDeadlineLabel()})`;
+		return `Watch Twitch${swapPart}`;
 	}
 	function twitchArpReason(options) {
 		const arp = Math.round(options.watchRemainingMs / 6e4 * (1 + options.allArpPct));
@@ -7156,15 +7227,16 @@
 		if (amount <= 0 || !isDueNow && !isDueAfterReset) return;
 		reasons.push({ text: flatBonusReason(amount, isDueNow ? nowLabel : laterLabel, waitMs) });
 	}
-	function collectEquipReasons(siteState, waitMs, stepArtifacts) {
+	function collectEquipReasons(siteState, waitMs, stepArtifacts, isPreloadNextUtcDay = false) {
 		const reasons = [];
 		const caps = siteState.caps;
 		const stats = activityStatsForArtifacts(stepArtifacts);
 		pushAllArpEquipReasons(reasons, stats.allArpPct, siteState);
 		if (stats.marketDiscountPct >= .1) reasons.push({ text: `${Math.round(stats.marketDiscountPct * 100)}% Game Vault / marketplace discount before buying` });
+		if (isPreloadNextUtcDay) reasons.push({ text: "Start 24h lock before 00:00 UTC reset" });
 		const isNextUtcResetInLock = isResetInWearWindow(msUntilUtcMidnight(), waitMs);
 		const isSteamDueNow = isActivityPending(caps, "steamQuests");
-		pushFlatEquipReason(reasons, stats.steamQuestsFlat, waitMs, isSteamDueNow, isResetInWearWindow(msUntilNextSteamQuestWeek(), waitMs), "Steam Quests", "Steam Quests after Monday reset");
+		pushFlatEquipReason(reasons, stats.steamQuestsFlat, waitMs, isSteamDueNow, isPreloadNextUtcDay || isResetInWearWindow(msUntilNextSteamQuestWeek(), waitMs), "Steam Quests", "Steam Quests after Monday reset");
 		pushFlatEquipReason(reasons, stats.watchTwitchFlat, waitMs, isActivityAvailable(caps, "watchTwitch"), isNextUtcResetInLock, "Watch Twitch cap", "Watch Twitch cap after 00:00 UTC");
 		if (stats.discordPollFlat > 0 && isActivityPending(caps, "discordPoll")) reasons.push({ text: flatBonusReason(stats.discordPollFlat, "Discord Poll", waitMs) });
 		if (stats.dailyCalendarFlat > 0) reasons.push({ text: flatBonusReason(stats.dailyCalendarFlat, "Tomorrow's Daily Calendar ", waitMs) });
@@ -7407,15 +7479,15 @@
 		})];
 	}
 	function buildSwapEquipTodos(options) {
-		const { best, current, settings, siteState, slotLocks, isLocked, waitMs, beforeSwapCount, upgrades } = options;
+		const { best, current, settings, siteState, slotLocks, isLocked, waitMs, beforeSwapCount, upgrades, isPreloadNextUtcDay = false } = options;
 		const plan = planLoadoutChanges(best.artifacts, current, settings, slotLocks);
 		const swapWaitMs = plan.waitMs > 0 ? plan.waitMs : waitMs;
 		const laterIds = new Set(plan.later.map((change) => change.artifactId));
 		const nowIds = new Set(plan.now.map((change) => change.artifactId));
 		const laterArtifacts = comboArtifactsByIds(best, laterIds);
 		const nowArtifacts = comboArtifactsByIds(best, nowIds);
-		const laterReasons = collectEquipReasons(siteState, swapWaitMs, laterArtifacts.length > 0 ? laterArtifacts : best.artifacts);
-		const nowReasons = nowArtifacts.length > 0 ? collectEquipReasons(siteState, 0, nowArtifacts) : laterReasons;
+		const laterReasons = collectEquipReasons(siteState, swapWaitMs, laterArtifacts.length > 0 ? laterArtifacts : best.artifacts, isPreloadNextUtcDay);
+		const nowReasons = nowArtifacts.length > 0 ? collectEquipReasons(siteState, 0, nowArtifacts, isPreloadNextUtcDay) : laterReasons;
 		const label = loadoutLabel(best.artifacts);
 		const nowUpgrades = upgradeTodosFor(upgrades, new Set(plan.now.map((change) => change.artifactId)));
 		const laterUpgrades = upgradeTodosFor(upgrades, new Set(plan.later.map((change) => change.artifactId)));
@@ -7597,7 +7669,7 @@
 		return discord?.slot === slot ? [discord.todo] : [];
 	}
 	function pushRecommendedSwapTodos(options) {
-		const { todos, best, current, settings, siteState, slotLocks, isLocked, waitMs, sequenced, discord, upgrades } = options;
+		const { todos, best, current, settings, siteState, slotLocks, isLocked, waitMs, sequenced, discord, upgrades, isPreloadNextUtcDay = false } = options;
 		const swap = buildSwapEquipTodos({
 			best,
 			current,
@@ -7607,6 +7679,7 @@
 			waitMs,
 			beforeSwapCount: sequenced.beforeSwap.length + (discord?.slot === "before" ? 1 : 0),
 			upgrades,
+			isPreloadNextUtcDay,
 			...slotLocks && { slotLocks }
 		});
 		todos.push(...swap.immediate, ...sequenced.afterNow, ...discordTodoForSlot(discord, "afterNow"), ...sequenced.other, ...discordTodoForSlot(discord, "other"), ...swap.later);
@@ -7666,6 +7739,7 @@
 			sequenced,
 			discord,
 			upgrades: result.upgrades,
+			isPreloadNextUtcDay: result.preloadNextUtcDay === true,
 			...result.slotLocks && { slotLocks: result.slotLocks }
 		});
 		else pushEquipPlanTodos(todos, {
