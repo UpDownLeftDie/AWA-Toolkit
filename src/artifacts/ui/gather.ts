@@ -50,6 +50,7 @@ import {
   type SiteState,
 } from '../siteState';
 import { requiresSteamFreeHydrate } from '../steamApp';
+import { attachLoadoutDisplayOrder } from './loadoutPlan';
 
 export function isControlCenterPage(): boolean {
   let path = location.pathname;
@@ -228,6 +229,7 @@ export type GatheredData = Awaited<ReturnType<typeof gatherData>>;
 export const gatheredCache: { current?: GatheredData } = {};
 
 export function rememberGathered(data: GatheredData): GatheredData {
+  attachLoadoutDisplayOrder(data.result, data.settings);
   gatheredCache.current = data;
   scheduleBrowserNotifications(data);
   return data;

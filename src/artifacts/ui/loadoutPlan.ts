@@ -47,9 +47,22 @@ export function utcResetDeadlineLabel(now = new Date()): string {
   return `${formatMs(msUntilUtcMidnight(now))} left`;
 }
 
-export function sortArtifactsForDisplay<T extends { displayName: string }>(
-  artifacts: T[],
-): T[] {
+/**
+ * Worn loadouts and planned display copies (every piece has a slot) stay in
+ * slot 1–3 order. Other lists stay alphabetical.
+ */
+export function sortArtifactsForDisplay<
+  T extends { displayName: string; equippedPosition?: number },
+>(artifacts: T[]): T[] {
+  const isWornLoadout = artifacts.every(
+    (artifact) => artifact.equippedPosition !== undefined,
+  );
+  if (isWornLoadout) {
+    return artifacts.toSorted(
+      (left, right) =>
+        (left.equippedPosition ?? 0) - (right.equippedPosition ?? 0),
+    );
+  }
   return artifacts.toSorted((left, right) =>
     left.displayName.localeCompare(right.displayName, undefined, {
       sensitivity: 'base',
@@ -57,8 +70,22 @@ export function sortArtifactsForDisplay<T extends { displayName: string }>(
   );
 }
 
+export type ArtifactSlot = 1 | 2 | 3;
+
+interface LoadoutLabelContext {
+  current?: ScoredCombo;
+  settings: ArtifactOptimizerSettings;
+  slotLocks?: Partial<Record<ArtifactSlot, boolean>>;
+}
+
+export function artifactsForDisplay(
+  combo: Pick<ScoredCombo, 'artifacts' | 'displayArtifacts'>,
+): ScoredCombo['artifacts'] {
+  return combo.displayArtifacts ?? sortArtifactsForDisplay(combo.artifacts);
+}
+
 export function loadoutLabel(
-  artifacts: { displayName: string }[] | undefined,
+  artifacts: { displayName: string; equippedPosition?: number }[] | undefined,
 ): string {
   if (!artifacts || artifacts.length === 0) {
     return '—';
@@ -66,6 +93,13 @@ export function loadoutLabel(
   return sortArtifactsForDisplay(artifacts)
     .map((artifact) => artifact.displayName)
     .join(' + ');
+}
+
+export function comboLabel(result: OptimizerResult['best']): string {
+  if (!result) {
+    return '—';
+  }
+  return loadoutLabel(artifactsForDisplay(result));
 }
 
 export function loadoutSetNames(
@@ -77,13 +111,6 @@ export function loadoutSetNames(
   return activeSets(artifacts.map((artifact) => artifact.familyId)).map(
     (set) => set.name,
   );
-}
-
-export function comboLabel(result: OptimizerResult['best']): string {
-  if (!result) {
-    return '—';
-  }
-  return loadoutLabel(result.artifacts);
 }
 
 export function isSameLoadout(
@@ -100,8 +127,6 @@ export function isSameLoadout(
     [...leftIds].every((id) => rightIds.has(id))
   );
 }
-
-export type ArtifactSlot = 1 | 2 | 3;
 
 export function maxSlotCooldownMs(
   settings: ArtifactOptimizerSettings,
@@ -417,6 +442,120 @@ export function planLoadoutChanges(
     lockedSlots,
     waitMs,
   };
+}
+
+/**
+ * Target loadout in slot 1–3 order: keep pieces that stay, then fill free
+ * slots from the equip plan, then assign remaining pieces to leftover slots.
+ * Aligns Recommended names with Currently equipped so replacements line up.
+ */
+function artifactsInPlannedSlotOrder(
+  combo: ScoredCombo['artifacts'],
+  context: LoadoutLabelContext,
+): ScoredCombo['artifacts'] {
+  const plan = planLoadoutChanges(
+    combo,
+    context.current,
+    context.settings,
+    context.slotLocks,
+  );
+  const bySlot = new Map<ArtifactSlot, ScoredCombo['artifacts'][number]>();
+  const comboById = new Map(
+    combo.map((artifact) => [artifact.instanceId, artifact]),
+  );
+  const currentArtifacts = context.current?.artifacts ?? [];
+  for (const artifact of currentArtifacts) {
+    if (
+      artifact.equippedPosition !== undefined &&
+      comboById.has(artifact.instanceId)
+    ) {
+      bySlot.set(artifact.equippedPosition, artifact);
+    }
+  }
+  for (const change of plan.now) {
+    placeComboInSlot(bySlot, comboById, change.artifactId, change.position);
+  }
+  const remainingSlots: ArtifactSlot[] = ([1, 2, 3] as const).filter(
+    (position) => !bySlot.has(position),
+  );
+  for (const later of plan.later) {
+    placeComboInSlot(
+      bySlot,
+      comboById,
+      later.artifactId,
+      remainingSlots.shift(),
+    );
+  }
+  const ordered: ScoredCombo['artifacts'] = [];
+  for (const position of [1, 2, 3] as const) {
+    const artifact = bySlot.get(position);
+    if (!artifact) {
+      continue;
+    }
+    ordered.push({ ...artifact, equippedPosition: position });
+  }
+  return ordered;
+}
+
+function placeComboInSlot(
+  bySlot: Map<ArtifactSlot, ScoredCombo['artifacts'][number]>,
+  comboById: Map<number, ScoredCombo['artifacts'][number]>,
+  artifactId: number,
+  position: ArtifactSlot | undefined,
+): void {
+  if (position === undefined) {
+    return;
+  }
+  const incoming = comboById.get(artifactId);
+  if (!incoming) {
+    return;
+  }
+  bySlot.set(position, incoming);
+}
+
+/**
+ * Stamp slot-ordered display copies on every loadout the UI labels. Call once
+ * after optimize so comboLabel / loadoutLabel stay argument-free.
+ */
+export function attachLoadoutDisplayOrder(
+  result: OptimizerResult,
+  settings: ArtifactOptimizerSettings,
+): OptimizerResult {
+  const context: LoadoutLabelContext = {
+    settings,
+    ...(result.current !== undefined && { current: result.current }),
+    ...(result.slotLocks !== undefined && { slotLocks: result.slotLocks }),
+  };
+  const decorate = (combo: ScoredCombo | undefined): void => {
+    if (!combo) {
+      return;
+    }
+    combo.displayArtifacts = artifactsInPlannedSlotOrder(
+      combo.artifacts,
+      context,
+    );
+  };
+  decorate(result.best);
+  decorate(result.current);
+  for (const combo of result.alternatives) {
+    decorate(combo);
+  }
+  decorate(result.allArpLoadout);
+  decorate(result.monthlyMetaLoadout);
+  decorate(result.marketDiscountLoadout);
+  if (result.deferredAllArp) {
+    result.deferredAllArp.displayArtifacts = artifactsInPlannedSlotOrder(
+      result.deferredAllArp.artifacts,
+      context,
+    );
+  }
+  if (result.deferredSteam) {
+    result.deferredSteam.displayArtifacts = artifactsInPlannedSlotOrder(
+      result.deferredSteam.artifacts,
+      context,
+    );
+  }
+  return result;
 }
 
 export function artifactsAfterImmediateEquip(

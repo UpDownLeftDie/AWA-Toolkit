@@ -30,6 +30,11 @@ export interface RawBreakdownParts {
 export interface ScoredCombo {
   artifacts: OwnedArtifact[];
   /**
+  Slot 1–3 order for labels (planned equip). Copies only — do not use for
+  wear/lock checks; those read `artifacts` + currently equipped positions.
+  */
+  displayArtifacts?: OwnedArtifact[];
+  /**
   Estimated ARP for the 24h lock: remaining today plus UTC / Steam-week
   resets that still land while this loadout is worn.
   */
@@ -127,6 +132,7 @@ export interface OptimizerResult {
   deferredAllArp?: {
     waitMs: number;
     artifacts: OwnedArtifact[];
+    displayArtifacts?: OwnedArtifact[];
     unlock: {
       targetHours?: number;
       etaMs?: number;
@@ -142,6 +148,7 @@ export interface OptimizerResult {
   deferredSteam?: {
     waitMs: number;
     artifacts: OwnedArtifact[];
+    displayArtifacts?: OwnedArtifact[];
   };
   /**
   Best owned loadout maximizing market discount (Stanley / Light Warping / etc.).

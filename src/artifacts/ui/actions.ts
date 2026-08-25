@@ -32,12 +32,12 @@ import {
 } from './dialog';
 import { gatheredCache, isControlCenterPage } from './gather';
 import {
+  artifactsForDisplay,
   formatLockedSlotParts,
   isSameLoadout,
   loadoutLabel,
   loadoutSetNames,
   planLoadoutChanges,
-  sortArtifactsForDisplay,
   type ArtifactSlot,
   type LoadoutChangePlan,
 } from './loadoutPlan';
@@ -440,7 +440,7 @@ export async function showLoadoutPreview(
     await showAoAlert(`No ${label} loadout available.`);
     return;
   }
-  const names = sortArtifactsForDisplay(combo.artifacts)
+  const names = artifactsForDisplay(combo)
     .map((artifact) => artifact.displayName)
     .join('\n');
   await showAoAlert(`Equip these on the Showroom:\n\n${names}`, label);

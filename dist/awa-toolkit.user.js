@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         AWA Toolkit
 // @namespace    https://github.com/UpDownLeftDie/AWA-Toolkit
-// @version      2.2.4
+// @version      2.2.5
 // @author       jaredcat
 // @description  Artifact Optimizer, Control Center tasks, giveaway/vault filters, and UCF reading mode
 // @license      AGPL-3.0-or-later
@@ -5436,19 +5436,23 @@
 		return `${formatMs(msUntilUtcMidnight(now))} left`;
 	}
 	function sortArtifactsForDisplay(artifacts) {
+		if (artifacts.every((artifact) => artifact.equippedPosition !== void 0)) return artifacts.toSorted((left, right) => (left.equippedPosition ?? 0) - (right.equippedPosition ?? 0));
 		return artifacts.toSorted((left, right) => left.displayName.localeCompare(right.displayName, void 0, { sensitivity: "base" }));
+	}
+	function artifactsForDisplay(combo) {
+		return combo.displayArtifacts ?? sortArtifactsForDisplay(combo.artifacts);
 	}
 	function loadoutLabel(artifacts) {
 		if (!artifacts || artifacts.length === 0) return "—";
 		return sortArtifactsForDisplay(artifacts).map((artifact) => artifact.displayName).join(" + ");
 	}
+	function comboLabel(result) {
+		if (!result) return "—";
+		return loadoutLabel(artifactsForDisplay(result));
+	}
 	function loadoutSetNames(artifacts) {
 		if (!artifacts || artifacts.length === 0) return [];
 		return activeSets(artifacts.map((artifact) => artifact.familyId)).map((set) => set.name);
-	}
-	function comboLabel(result) {
-		if (!result) return "—";
-		return loadoutLabel(result.artifacts);
 	}
 	function isSameLoadout(left, right) {
 		if (!left || !right || left.length === 0 || right.length === 0) return false;
@@ -5601,6 +5605,60 @@
 			lockedSlots,
 			waitMs
 		};
+	}
+	function artifactsInPlannedSlotOrder(combo, context) {
+		const plan = planLoadoutChanges(combo, context.current, context.settings, context.slotLocks);
+		const bySlot = new Map();
+		const comboById = new Map(combo.map((artifact) => [artifact.instanceId, artifact]));
+		const currentArtifacts = context.current?.artifacts ?? [];
+		for (const artifact of currentArtifacts) if (artifact.equippedPosition !== void 0 && comboById.has(artifact.instanceId)) bySlot.set(artifact.equippedPosition, artifact);
+		for (const change of plan.now) placeComboInSlot(bySlot, comboById, change.artifactId, change.position);
+		const remainingSlots = [
+			1,
+			2,
+			3
+		].filter((position) => !bySlot.has(position));
+		for (const later of plan.later) placeComboInSlot(bySlot, comboById, later.artifactId, remainingSlots.shift());
+		const ordered = [];
+		for (const position of [
+			1,
+			2,
+			3
+		]) {
+			const artifact = bySlot.get(position);
+			if (!artifact) continue;
+			ordered.push({
+				...artifact,
+				equippedPosition: position
+			});
+		}
+		return ordered;
+	}
+	function placeComboInSlot(bySlot, comboById, artifactId, position) {
+		if (position === void 0) return;
+		const incoming = comboById.get(artifactId);
+		if (!incoming) return;
+		bySlot.set(position, incoming);
+	}
+	function attachLoadoutDisplayOrder(result, settings) {
+		const context = {
+			settings,
+			...result.current !== void 0 && { current: result.current },
+			...result.slotLocks !== void 0 && { slotLocks: result.slotLocks }
+		};
+		const decorate = (combo) => {
+			if (!combo) return;
+			combo.displayArtifacts = artifactsInPlannedSlotOrder(combo.artifacts, context);
+		};
+		decorate(result.best);
+		decorate(result.current);
+		for (const combo of result.alternatives) decorate(combo);
+		decorate(result.allArpLoadout);
+		decorate(result.monthlyMetaLoadout);
+		decorate(result.marketDiscountLoadout);
+		if (result.deferredAllArp) result.deferredAllArp.displayArtifacts = artifactsInPlannedSlotOrder(result.deferredAllArp.artifacts, context);
+		if (result.deferredSteam) result.deferredSteam.displayArtifacts = artifactsInPlannedSlotOrder(result.deferredSteam.artifacts, context);
+		return result;
 	}
 	function artifactsAfterImmediateEquip(current, best, plan) {
 		const bySlot = new Map();
@@ -7266,7 +7324,7 @@
 		const { waitMs, artifacts } = deferred;
 		return buildEquipTodo({
 			headline: waitMs > 0 ? `Equip Steam Quests set in ${formatMs(waitMs)}` : "Equip Steam Quests set now",
-			loadout: loadoutLabel(artifacts),
+			loadout: loadoutLabel(artifactsForDisplay(deferred)),
 			reasons: collectEquipReasons(siteState, waitMs, artifacts),
 			urgency: actionUrgency({
 				kind: waitMs > 0 ? "schedule" : "action",
@@ -7278,14 +7336,14 @@
 		});
 	}
 	function deferredAllArpTodo(deferred) {
-		const { waitMs, artifacts, unlock } = deferred;
+		const { waitMs, unlock } = deferred;
 		const parts = [];
 		if (unlock.targetHours !== void 0) parts.push(`Before ${unlock.targetHours.toLocaleString()}h`);
 		if (unlock.etaMs !== void 0) parts.push(`ETA ${formatCommunityEta(unlock.etaMs)}`);
 		parts.push(formatCommunityEventArp(unlock.arpReward));
 		return buildEquipTodo({
 			headline: `Equip All-ARP% in ${formatMs(waitMs)}`,
-			loadout: loadoutLabel(artifacts),
+			loadout: loadoutLabel(artifactsForDisplay(deferred)),
 			reasons: [{ text: parts.join(" · ") }],
 			urgency: actionUrgency({
 				kind: "schedule",
@@ -7336,7 +7394,7 @@
 		const arpReady = battlePassClaimableArp(options.siteState.battlePass);
 		return buildEquipTodo({
 			headline: waitMs > 0 ? `Equip All-ARP% in ${formatMs(waitMs)}` : "Equip All-ARP%",
-			loadout: artifacts ? loadoutLabel(artifacts) : "All-ARP% set",
+			loadout: artifacts ? loadoutLabel(artifactsForDisplay(options.result.allArpLoadout ?? options.result.deferredAllArp ?? { artifacts })) : "All-ARP% set",
 			reasons: [],
 			urgency: actionUrgency({
 				kind: waitMs > 0 ? "schedule" : "action",
@@ -7488,7 +7546,7 @@
 		const nowArtifacts = comboArtifactsByIds(best, nowIds);
 		const laterReasons = collectEquipReasons(siteState, swapWaitMs, laterArtifacts.length > 0 ? laterArtifacts : best.artifacts, isPreloadNextUtcDay);
 		const nowReasons = nowArtifacts.length > 0 ? collectEquipReasons(siteState, 0, nowArtifacts, isPreloadNextUtcDay) : laterReasons;
-		const label = loadoutLabel(best.artifacts);
+		const label = comboLabel(best);
 		const nowUpgrades = upgradeTodosFor(upgrades, new Set(plan.now.map((change) => change.artifactId)));
 		const laterUpgrades = upgradeTodosFor(upgrades, new Set(plan.later.map((change) => change.artifactId)));
 		const partial = buildPartialEquipTodos(plan, label, nowReasons, laterReasons);
@@ -10506,6 +10564,7 @@
 	}
 	var gatheredCache = {};
 	function rememberGathered(data) {
+		attachLoadoutDisplayOrder(data.result, data.settings);
 		gatheredCache.current = data;
 		scheduleBrowserNotifications(data);
 		return data;
@@ -10633,7 +10692,7 @@
 	}
 	function formatEquippedLabel(result) {
 		if (!result.current) return "None detected";
-		return sortArtifactsForDisplay(result.current.artifacts).map((artifact) => {
+		return artifactsForDisplay(result.current).map((artifact) => {
 			return artifact.slotLocked === true ? `${artifact.displayName} (locked)` : artifact.displayName;
 		}).join(" + ");
 	}
@@ -11321,7 +11380,7 @@
 			await showAoAlert(`No ${label} loadout available.`);
 			return;
 		}
-		await showAoAlert(`Equip these on the Showroom:\n\n${sortArtifactsForDisplay(combo.artifacts).map((artifact) => artifact.displayName).join("\n")}`, label);
+		await showAoAlert(`Equip these on the Showroom:\n\n${artifactsForDisplay(combo).map((artifact) => artifact.displayName).join("\n")}`, label);
 	}
 	async function handleUpgradeClick(instanceId, onChanged) {
 		if (!await didAllowAccountActions()) return;

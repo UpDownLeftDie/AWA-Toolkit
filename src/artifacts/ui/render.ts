@@ -36,11 +36,11 @@ import {
 } from "../siteState/battlePass";
 import { wrapArtifactNames } from "./artifactTip";
 import {
+  artifactsForDisplay,
   comboLabel,
   escapeHtml,
   formatLockedSlotParts,
   formatMs,
-  sortArtifactsForDisplay,
 } from "./loadoutPlan";
 
 export function renderSectionDivider(): string {
@@ -146,7 +146,7 @@ export function formatEquippedLabel(result: OptimizerResult): string {
   if (!result.current) {
     return "None detected";
   }
-  return sortArtifactsForDisplay(result.current.artifacts)
+  return artifactsForDisplay(result.current)
     .map((artifact) => {
       const isLocked = artifact.slotLocked === true;
       return isLocked

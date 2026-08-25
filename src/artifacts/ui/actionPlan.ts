@@ -53,16 +53,18 @@ import { STEAM_LIBRARY_PENDING_HINT } from '../steamApp';
 import { wrapArtifactNames } from './artifactTip';
 import {
   artifactsAfterImmediateEquip,
+  artifactsForDisplay,
+  comboLabel,
   escapeHtml,
   formatMs,
   hasAnySlotOnCooldown,
   isSameLoadout,
-  type LoadoutChangePlan,
   loadoutLabel,
   maxSlotCooldownMs,
   msUntilUtcMidnight,
   planLoadoutChanges,
   utcResetDeadlineLabel,
+  type LoadoutChangePlan,
 } from './loadoutPlan';
 
 export type ActionTone = 'default' | 'muted' | 'warn';
@@ -1914,7 +1916,7 @@ function deferredSteamTodo(
       : 'Equip Steam Quests set now';
   return buildEquipTodo({
     headline,
-    loadout: loadoutLabel(artifacts),
+    loadout: loadoutLabel(artifactsForDisplay(deferred)),
     reasons: collectEquipReasons(siteState, waitMs, artifacts),
     urgency: actionUrgency({
       kind: waitMs > 0 ? 'schedule' : 'action',
@@ -1929,7 +1931,7 @@ function deferredSteamTodo(
 function deferredAllArpTodo(
   deferred: NonNullable<OptimizerResult['deferredAllArp']>,
 ): ActionTodo {
-  const { waitMs, artifacts, unlock } = deferred;
+  const { waitMs, unlock } = deferred;
   const parts: string[] = [];
   if (unlock.targetHours !== undefined) {
     parts.push(`Before ${unlock.targetHours.toLocaleString()}h`);
@@ -1940,7 +1942,7 @@ function deferredAllArpTodo(
   parts.push(formatCommunityEventArp(unlock.arpReward));
   return buildEquipTodo({
     headline: `Equip All-ARP% in ${formatMs(waitMs)}`,
-    loadout: loadoutLabel(artifacts),
+    loadout: loadoutLabel(artifactsForDisplay(deferred)),
     reasons: [{ text: parts.join(' · ') }],
     urgency: actionUrgency({
       kind: 'schedule',
@@ -2030,7 +2032,14 @@ function battlePassAllArpEquipTodo(options: {
     waitMs > 0 ? `Equip All-ARP% in ${formatMs(waitMs)}` : 'Equip All-ARP%';
   return buildEquipTodo({
     headline,
-    loadout: artifacts ? loadoutLabel(artifacts) : 'All-ARP% set',
+    loadout: artifacts
+      ? loadoutLabel(
+          artifactsForDisplay(
+            options.result.allArpLoadout ??
+              options.result.deferredAllArp ?? { artifacts },
+          ),
+        )
+      : 'All-ARP% set',
     reasons: [],
     urgency: actionUrgency({
       kind: waitMs > 0 ? 'schedule' : 'action',
@@ -2321,7 +2330,7 @@ function buildSwapEquipTodos(options: {
     nowArtifacts.length > 0
       ? collectEquipReasons(siteState, 0, nowArtifacts, isPreloadNextUtcDay)
       : laterReasons;
-  const label = loadoutLabel(best.artifacts);
+  const label = comboLabel(best);
   const nowUpgrades = upgradeTodosFor(
     upgrades,
     new Set(plan.now.map((change) => change.artifactId)),
