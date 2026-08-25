@@ -208,11 +208,20 @@ export interface LoadoutChangePlan {
   }[];
   later: {
     artifactId: number;
+    position: ArtifactSlot;
     displayName: string;
+    replacedDisplayName?: string;
   }[];
   laterNames: string[];
   lockedSlots: ArtifactSlot[];
   waitMs: number;
+}
+
+export function plannedEquipLabel(change: {
+  displayName: string;
+  position: ArtifactSlot;
+}): string {
+  return `${change.displayName} → slot ${change.position}`;
 }
 
 /**
@@ -413,35 +422,107 @@ export function planLoadoutChanges(
     placedIds.add(artifact.instanceId);
   }
 
-  const laterBasis = [...kept, ...nowArtifacts];
-  const later = sortByMarginalEquipPriority(
-    combo.filter((artifact) => !placedIds.has(artifact.instanceId)),
-    laterBasis,
-  ).map((artifact) => ({
-    artifactId: artifact.instanceId,
-    displayName: artifact.displayName,
-  }));
+  const later = planLaterEquips({
+    combo,
+    placedIds,
+    kept,
+    nowArtifacts,
+    slots,
+    lockedSlots,
+    keptSlots,
+    leftoverFreeSlots: freeSlots,
+    currentBySlot,
+    settings,
+    ...(slotLocks && { slotLocks }),
+  });
+  const waitTargets =
+    later.length > 0 ? later.map((change) => change.position) : lockedSlots;
   const waitMs = Math.max(
     0,
-    ...lockedSlots
-      .filter((position) => later.length === 0 || !keptSlots.has(position))
-      .map((position) => {
-        const equippedSlotLocked = currentBySlot.get(position)?.slotLocked;
-        return showroomCooldownRemainingMs(settings, position, {
-          ...(slotLocks && { slotLocks }),
-          ...(typeof equippedSlotLocked === 'boolean' && {
-            equippedSlotLocked,
-          }),
-        });
-      }),
+    ...waitTargets.map((position) =>
+      slotCooldownRemainingMs(position, currentBySlot, settings, slotLocks),
+    ),
   );
   return {
     now,
     later,
-    laterNames: later.map((item) => item.displayName),
+    laterNames: later.map((item) => plannedEquipLabel(item)),
     lockedSlots,
     waitMs,
   };
+}
+
+function slotCooldownRemainingMs(
+  position: ArtifactSlot,
+  currentBySlot: Map<ArtifactSlot, ScoredCombo['artifacts'][number]>,
+  settings: ArtifactOptimizerSettings,
+  slotLocks?: Partial<Record<ArtifactSlot, boolean>>,
+): number {
+  const equippedSlotLocked = currentBySlot.get(position)?.slotLocked;
+  return showroomCooldownRemainingMs(settings, position, {
+    ...(slotLocks && { slotLocks }),
+    ...(typeof equippedSlotLocked === 'boolean' && {
+      equippedSlotLocked,
+    }),
+  });
+}
+
+function planLaterEquips(options: {
+  combo: ScoredCombo['artifacts'];
+  placedIds: Set<number>;
+  kept: ScoredCombo['artifacts'];
+  nowArtifacts: ScoredCombo['artifacts'];
+  slots: ArtifactSlot[];
+  lockedSlots: ArtifactSlot[];
+  keptSlots: Set<ArtifactSlot>;
+  leftoverFreeSlots: ArtifactSlot[];
+  currentBySlot: Map<ArtifactSlot, ScoredCombo['artifacts'][number]>;
+  settings: ArtifactOptimizerSettings;
+  slotLocks?: Partial<Record<ArtifactSlot, boolean>>;
+}): LoadoutChangePlan['later'] {
+  const laterSlots = options.slots
+    .filter(
+      (position) =>
+        options.lockedSlots.includes(position) &&
+        !options.keptSlots.has(position),
+    )
+    .toSorted(
+      (left, right) =>
+        slotCooldownRemainingMs(
+          left,
+          options.currentBySlot,
+          options.settings,
+          options.slotLocks,
+        ) -
+        slotCooldownRemainingMs(
+          right,
+          options.currentBySlot,
+          options.settings,
+          options.slotLocks,
+        ),
+    );
+  laterSlots.push(...options.leftoverFreeSlots);
+  const laterArtifacts = sortByMarginalEquipPriority(
+    options.combo.filter(
+      (artifact) => !options.placedIds.has(artifact.instanceId),
+    ),
+    [...options.kept, ...options.nowArtifacts],
+  );
+  const later: LoadoutChangePlan['later'] = [];
+  for (const artifact of laterArtifacts) {
+    const position = laterSlots.shift();
+    if (position === undefined) {
+      break;
+    }
+    const replaced = options.currentBySlot.get(position);
+    later.push({
+      artifactId: artifact.instanceId,
+      position,
+      displayName: artifact.displayName,
+      ...(replaced && { replacedDisplayName: replaced.displayName }),
+    });
+  }
+  return later;
 }
 
 /**
@@ -475,16 +556,8 @@ function artifactsInPlannedSlotOrder(
   for (const change of plan.now) {
     placeComboInSlot(bySlot, comboById, change.artifactId, change.position);
   }
-  const remainingSlots: ArtifactSlot[] = ([1, 2, 3] as const).filter(
-    (position) => !bySlot.has(position),
-  );
-  for (const later of plan.later) {
-    placeComboInSlot(
-      bySlot,
-      comboById,
-      later.artifactId,
-      remainingSlots.shift(),
-    );
+  for (const change of plan.later) {
+    placeComboInSlot(bySlot, comboById, change.artifactId, change.position);
   }
   const ordered: ScoredCombo['artifacts'] = [];
   for (const position of [1, 2, 3] as const) {
