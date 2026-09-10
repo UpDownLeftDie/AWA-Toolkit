@@ -448,6 +448,35 @@ export function cooldownRemainingMs(
   return Math.max(0, COOLDOWN_MS - (now - changedAt));
 }
 
+/**
+ * Showroom still paints a lock after the local 24h timer elapsed — AWA's
+ * stuck-lock bug. Distinct from an unknown-duration lock (no GM entry).
+ */
+export function hasElapsedShowroomLock(
+  settings: ArtifactOptimizerSettings,
+  slotLocks: Partial<Record<ArtifactSlotPosition, boolean>> | undefined,
+  now = Date.now(),
+): boolean {
+  if (!slotLocks) {
+    return false;
+  }
+  return ([1, 2, 3] as const).some((position) => {
+    if (slotLocks[position] !== true) {
+      return false;
+    }
+    if (!findCooldownEntry(settings, position)) {
+      return false;
+    }
+    return cooldownRemainingMs(settings, position, now) <= 0;
+  });
+}
+
+/**
+Megumin FAQ fallback when AWA's 24h lock icon doesn't clear after 24h.
+*/
+export const STUCK_SLOT_LOCK_HINT =
+  'Still stuck after Refresh? Upgrade a maxed artifact manually (Warrior Script) — 0 fragments';
+
 export async function recordSlotChange(
   position: ArtifactSlotPosition,
   artifactInstanceId?: number,

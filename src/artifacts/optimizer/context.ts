@@ -306,8 +306,12 @@ export function pinnedEquippedArtifacts(
     if (remaining > 0) {
       return remaining >= horizonMs;
     }
-    // Locked on showroom, duration unknown — keep pinned.
-    return true;
+    // Timer ran out (or never recorded a duration). Don't freeze the 24h pick
+    // just because the Showroom lock icon hasn't cleared yet — that hid the
+    // Discord Poll swap once the GM estimate hit 0.
+    return settings.slotCooldowns.every(
+      (entry) => entry.position !== artifact.equippedPosition,
+    );
   });
 }
 

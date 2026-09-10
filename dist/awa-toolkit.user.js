@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         AWA Toolkit
 // @namespace    https://github.com/UpDownLeftDie/AWA-Toolkit
-// @version      2.2.6
+// @version      2.2.8
 // @author       jaredcat
 // @description  Artifact Optimizer, Control Center tasks, giveaway/vault filters, and UCF reading mode
 // @license      AGPL-3.0-or-later
@@ -2527,6 +2527,19 @@
 		if (Number.isNaN(changedAt)) return 0;
 		return Math.max(0, COOLDOWN_MS - (now - changedAt));
 	}
+	function hasElapsedShowroomLock(settings, slotLocks, now = Date.now()) {
+		if (!slotLocks) return false;
+		return [
+			1,
+			2,
+			3
+		].some((position) => {
+			if (slotLocks[position] !== true) return false;
+			if (!findCooldownEntry(settings, position)) return false;
+			return cooldownRemainingMs(settings, position, now) <= 0;
+		});
+	}
+	var STUCK_SLOT_LOCK_HINT = "Still stuck after Refresh? Upgrade a maxed artifact manually (Warrior Script) — 0 fragments";
 	async function recordSlotChange(position, artifactInstanceId) {
 		const rest = (await getArtifactSettings()).slotCooldowns.filter((entry) => entry.position !== position);
 		const entry = {
@@ -4470,7 +4483,7 @@
 				...typeof artifact.slotLocked === "boolean" && { equippedSlotLocked: artifact.slotLocked }
 			});
 			if (remaining > 0) return remaining >= horizonMs;
-			return true;
+			return settings.slotCooldowns.every((entry) => entry.position !== artifact.equippedPosition);
 		});
 	}
 	function combinationsWithPinned(owned, size, pinned) {
@@ -5059,6 +5072,11 @@
 			unlock
 		};
 	}
+	function isExtraSteamWorthDisplacedDailies(best, steam, remainingQuests) {
+		const extra = (steam.steamQuestsFlat - best.steamQuestsFlat) * remainingQuests;
+		if (extra <= 0) return false;
+		return extra > Math.max(0, best.watchTwitchFlat - steam.watchTwitchFlat) + Math.max(0, best.dailyCalendarFlat - steam.dailyCalendarFlat);
+	}
 	function resolveDeferredSteam(owned, context, best) {
 		if (!isActivityPending(context.siteState.caps, "steamQuests")) return;
 		const remaining = scrapedRemainingSteamQuestRewards(context.siteState);
@@ -5069,6 +5087,7 @@
 		if (isSameLoadout$1(steam.artifacts, equipped)) return;
 		if (best && isSameLoadout$1(steam.artifacts, best.artifacts)) return;
 		if (collectBonuses(equipped).steamQuests >= steam.steamQuestsFlat) return;
+		if (best && !isExtraSteamWorthDisplacedDailies(best, steam, remaining.length)) return;
 		const now = resolveNow(context);
 		let waitMs = comboEquipWaitMs(steam.artifacts, owned, context.settings, context.snapshot.slotLocks, now);
 		if (best) waitMs = Math.max(waitMs, comboEquipWaitMs(best.artifacts, owned, context.settings, context.snapshot.slotLocks, now) + COOLDOWN_MS);
@@ -5589,7 +5608,7 @@
 			});
 			placedIds.add(artifact.instanceId);
 		}
-		const later = planLaterEquips({
+		return assembleLoadoutPlan(now, planLaterEquips({
 			combo,
 			placedIds,
 			kept,
@@ -5601,16 +5620,7 @@
 			currentBySlot,
 			settings,
 			...slotLocks && { slotLocks }
-		});
-		const waitTargets = later.length > 0 ? later.map((change) => change.position) : lockedSlots;
-		const waitMs = Math.max(0, ...waitTargets.map((position) => slotCooldownRemainingMs(position, currentBySlot, settings, slotLocks)));
-		return {
-			now,
-			later,
-			laterNames: later.map((item) => plannedEquipLabel(item)),
-			lockedSlots,
-			waitMs
-		};
+		}), lockedSlots, currentBySlot, settings, slotLocks);
 	}
 	function slotCooldownRemainingMs(position, currentBySlot, settings, slotLocks) {
 		const equippedSlotLocked = currentBySlot.get(position)?.slotLocked;
@@ -5636,6 +5646,19 @@
 			});
 		}
 		return later;
+	}
+	function assembleLoadoutPlan(now, later, lockedSlots, currentBySlot, settings, slotLocks) {
+		const waitTargets = later.length > 0 ? later.map((change) => change.position) : lockedSlots;
+		const waitMs = Math.max(0, ...waitTargets.map((position) => slotCooldownRemainingMs(position, currentBySlot, settings, slotLocks)));
+		const waitingLater = waitMs > 0 ? later : [];
+		if (waitMs <= 0) now.push(...later);
+		return {
+			now,
+			later: waitingLater,
+			laterNames: waitingLater.map((item) => plannedEquipLabel(item)),
+			lockedSlots,
+			waitMs
+		};
 	}
 	function artifactsInPlannedSlotOrder(combo, context) {
 		const plan = planLoadoutChanges(combo, context.current, context.settings, context.slotLocks);
@@ -6893,9 +6916,9 @@
 		return { text: `+${arp} ARP` };
 	}
 	function discordPollActivityLabel(bonus, options) {
+		if (options.phase === "after") return "Vote Discord Poll";
 		const bonusPart = bonus > 0 ? ` (+${bonus} equipped bonus)` : "";
 		const nextPost = formatMs(msUntilNextDiscordPollPost());
-		if (options.phase === "after" && options.waitMs > 0) return `Vote Discord Poll after unlock (${formatMs(options.waitMs)} wait, next post in ${nextPost})${bonusPart}`;
 		if (options.phase === "before") return `Vote Discord Poll now — next post in ${nextPost}${bonusPart}`;
 		return `Vote Discord Poll${options.beforeSwap ? " before swapping" : ""}${bonusPart}`;
 	}
@@ -7311,10 +7334,11 @@
 		if (amount <= 0 || !isDueNow && !isDueAfterReset) return;
 		reasons.push({ text: flatBonusReason(amount, isDueNow ? nowLabel : laterLabel, waitMs) });
 	}
-	function collectEquipReasons(siteState, waitMs, stepArtifacts, isPreloadNextUtcDay = false) {
+	function collectEquipReasons(siteState, waitMs, stepArtifacts, options = {}) {
 		const reasons = [];
 		const caps = siteState.caps;
 		const stats = activityStatsForArtifacts(stepArtifacts);
+		const isPreloadNextUtcDay = options.isPreloadNextUtcDay === true;
 		pushAllArpEquipReasons(reasons, stats.allArpPct, siteState);
 		if (stats.marketDiscountPct >= .1) reasons.push({ text: `${Math.round(stats.marketDiscountPct * 100)}% Game Vault / marketplace discount before buying` });
 		if (isPreloadNextUtcDay) reasons.push({ text: "Start 24h lock before 00:00 UTC reset" });
@@ -7324,7 +7348,7 @@
 		pushFlatEquipReason(reasons, stats.watchTwitchFlat, waitMs, isActivityAvailable(caps, "watchTwitch"), isNextUtcResetInLock, "Watch Twitch cap", "Watch Twitch cap after 00:00 UTC");
 		if (stats.discordPollFlat > 0 && isActivityPending(caps, "discordPoll")) reasons.push({ text: flatBonusReason(stats.discordPollFlat, "Discord Poll", waitMs) });
 		if (stats.dailyCalendarFlat > 0) reasons.push({ text: flatBonusReason(stats.dailyCalendarFlat, "Tomorrow's Daily Calendar ", waitMs) });
-		if (waitMs > 0 && isArtifactsShowroomPage()) reasons.push({ text: "Still stuck after Refresh? Upgrade a maxed artifact manually (Warrior Script) — 0 fragments" });
+		if (options.settings && hasElapsedShowroomLock(options.settings, options.slotLocks)) reasons.push({ text: STUCK_SLOT_LOCK_HINT });
 		return reasons;
 	}
 	function comboArtifactsByIds(combo, ids) {
@@ -7349,7 +7373,7 @@
 	function deferredSteamTodo(deferred, siteState) {
 		const { waitMs, artifacts } = deferred;
 		return buildEquipTodo({
-			headline: waitMs > 0 ? `Equip Steam Quests set in ${formatMs(waitMs)}` : "Equip Steam Quests set now",
+			headline: deferredSteamSetHeadline(waitMs),
 			loadout: loadoutLabel(artifactsForDisplay(deferred)),
 			reasons: collectEquipReasons(siteState, waitMs, artifacts),
 			urgency: actionUrgency({
@@ -7360,6 +7384,28 @@
 				chain: "equip"
 			})
 		});
+	}
+	function deferredSteamSetHeadline(waitMs) {
+		if (waitMs <= 0) return "Equip Steam Quests set now";
+		if (waitMs > 864e5) return "Equip Steam Quests set after this 24h wear";
+		if (waitMs >= 864e5) return "Equip Steam Quests set in 24h";
+		return `Equip Steam Quests set in ${formatMs(waitMs)}`;
+	}
+	function shouldFoldDeferredSteam(best, deferred, isNeedsSwap) {
+		return isNeedsSwap && deferred !== void 0 && (best?.steamQuestsFlat ?? 0) > 0;
+	}
+	function artifactsNotInOther(from, other) {
+		const familyIds = new Set(other.map((artifact) => artifact.familyId));
+		return from.filter((artifact) => !familyIds.has(artifact.familyId));
+	}
+	function deferredSteamFollowUpReason(deferred, best) {
+		const bonus = activityStatsForArtifacts(deferred.artifacts).steamQuestsFlat;
+		const incoming = artifactsNotInOther(deferred.artifacts, best.artifacts);
+		return { text: `Then ${loadoutLabel(incoming.length > 0 ? incoming : artifactsForDisplay(deferred))} for +${bonus} Steam` };
+	}
+	function appendFoldedDeferredSteamReason(laterReasons, best, deferred) {
+		if (!deferred || !shouldFoldDeferredSteam(best, deferred, true)) return;
+		laterReasons.push(deferredSteamFollowUpReason(deferred, best));
 	}
 	function deferredAllArpTodo(deferred) {
 		const { waitMs, unlock } = deferred;
@@ -7530,21 +7576,16 @@
 		});
 		if (allArpTodo) todos.push(allArpTodo);
 	}
-	function nowEquipHeadline(plan) {
-		return `Equip: ${plan.now.map((change) => change.displayName).join(" + ")} now (${plan.now.map((change) => `slot ${change.position}`).join(", ")} free)`;
+	function nowEquipLoadout(plan) {
+		return plan.now.map((change) => plannedEquipLabel(change)).join(" + ");
 	}
-	function buildPartialEquipTodos(plan, fullLabel, nowReasons, laterReasons) {
+	function buildPartialEquipTodos(plan, laterReasons) {
 		if (plan.now.length === 0) return;
-		const nowTodo = {
-			text: nowEquipHeadline(plan),
-			urgency: {
-				kind: "action",
-				readyAtMs: 0,
-				durationMs: 0,
-				chain: "equip"
-			}
-		};
-		if (nowReasons.length > 0) nowTodo.reasons = nowReasons;
+		const nowTodo = buildEquipTodo({
+			headline: "Equip now",
+			loadout: nowEquipLoadout(plan),
+			reasons: []
+		});
 		if (plan.laterNames.length > 0) return [nowTodo, buildEquipTodo({
 			headline: `Equip in ${formatMs(plan.waitMs)}`,
 			loadout: plan.laterNames.join(" + "),
@@ -7556,26 +7597,54 @@
 				chain: "equip"
 			}
 		})];
-		if (plan.lockedSlots.length > 0) return [buildEquipTodo({
-			headline: nowTodo.text,
-			loadout: fullLabel,
-			reasons: nowReasons
-		})];
+		if (plan.lockedSlots.length > 0) return [nowTodo];
+	}
+	function lockedSlotEquipTodos(options) {
+		const { laterLabel, laterReasons, laterUpgrades, nowUpgrades, swapWaitMs, beforeSwapCount } = options;
+		if (swapWaitMs <= 0) return {
+			immediate: [...nowUpgrades, buildEquipTodo({
+				headline: beforeSwapCount > 0 ? "Then equip" : "Equip now",
+				loadout: laterLabel,
+				reasons: laterReasons,
+				urgency: {
+					kind: "action",
+					readyAtMs: 0,
+					durationMs: 0,
+					chain: "equip"
+				}
+			})],
+			later: laterUpgrades
+		};
+		return {
+			immediate: nowUpgrades,
+			later: [...laterUpgrades, buildEquipTodo({
+				headline: `Equip in ${formatMs(swapWaitMs)}`,
+				loadout: laterLabel,
+				reasons: laterReasons,
+				urgency: {
+					kind: "schedule",
+					readyAtMs: swapWaitMs,
+					durationMs: 0,
+					chain: "equip"
+				}
+			})]
+		};
 	}
 	function buildSwapEquipTodos(options) {
-		const { best, current, settings, siteState, slotLocks, isLocked, waitMs, beforeSwapCount, upgrades, isPreloadNextUtcDay = false } = options;
+		const { best, current, settings, siteState, slotLocks, isLocked, waitMs, beforeSwapCount, upgrades, isPreloadNextUtcDay = false, deferredSteam } = options;
 		const plan = planLoadoutChanges(best.artifacts, current, settings, slotLocks);
 		const swapWaitMs = plan.waitMs > 0 ? plan.waitMs : waitMs;
-		const laterIds = new Set(plan.later.map((change) => change.artifactId));
-		const nowIds = new Set(plan.now.map((change) => change.artifactId));
-		const laterArtifacts = comboArtifactsByIds(best, laterIds);
-		const nowArtifacts = comboArtifactsByIds(best, nowIds);
-		const laterReasons = collectEquipReasons(siteState, swapWaitMs, laterArtifacts.length > 0 ? laterArtifacts : best.artifacts, isPreloadNextUtcDay);
-		const nowReasons = nowArtifacts.length > 0 ? collectEquipReasons(siteState, 0, nowArtifacts, isPreloadNextUtcDay) : laterReasons;
+		const laterArtifacts = comboArtifactsByIds(best, new Set(plan.later.map((change) => change.artifactId)));
+		const laterReasons = collectEquipReasons(siteState, swapWaitMs, laterArtifacts.length > 0 ? laterArtifacts : best.artifacts, {
+			isPreloadNextUtcDay,
+			settings,
+			slotLocks
+		});
+		appendFoldedDeferredSteamReason(laterReasons, best, deferredSteam);
 		const label = comboLabel(best);
 		const nowUpgrades = upgradeTodosFor(upgrades, new Set(plan.now.map((change) => change.artifactId)));
 		const laterUpgrades = upgradeTodosFor(upgrades, new Set(plan.later.map((change) => change.artifactId)));
-		const partial = buildPartialEquipTodos(plan, label, nowReasons, laterReasons);
+		const partial = buildPartialEquipTodos(plan, laterReasons);
 		if (partial && partial.length >= 2) {
 			const [nowTodo, ...rest] = partial;
 			return {
@@ -7587,27 +7656,18 @@
 			immediate: [...nowUpgrades, ...partial],
 			later: laterUpgrades
 		};
-		if (isLocked) {
-			const laterLabel = plan.laterNames.length > 0 ? plan.laterNames.join(" + ") : label;
-			return {
-				immediate: nowUpgrades,
-				later: [...laterUpgrades, buildEquipTodo({
-					headline: `Equip in ${formatMs(swapWaitMs)}`,
-					loadout: laterLabel,
-					reasons: laterReasons,
-					urgency: {
-						kind: "schedule",
-						readyAtMs: swapWaitMs,
-						durationMs: 0,
-						chain: "equip"
-					}
-				})]
-			};
-		}
+		if (isLocked) return lockedSlotEquipTodos({
+			laterLabel: plan.laterNames.length > 0 ? plan.laterNames.join(" + ") : label,
+			laterReasons,
+			laterUpgrades,
+			nowUpgrades,
+			swapWaitMs,
+			beforeSwapCount
+		});
 		return {
 			immediate: [...nowUpgrades, buildEquipTodo({
-				headline: beforeSwapCount > 0 ? "Then equip" : "Equip this set",
-				loadout: label,
+				headline: beforeSwapCount > 0 ? "Then equip" : "Equip now",
+				loadout: nowEquipLoadout(plan) || label,
 				reasons: laterReasons,
 				urgency: {
 					kind: "action",
@@ -7688,20 +7748,22 @@
 	}
 	function discordPollSlot(options) {
 		const { needsSwap, waitMs, nextPostMs, isPollBetterAfterSwap, canNowEquipHelpPoll } = options;
-		if (needsSwap && isPollBetterAfterSwap && waitMs > 0 && waitMs < nextPostMs) return "afterFull";
+		if (needsSwap && isPollBetterAfterSwap && waitMs < nextPostMs) return waitMs > 0 ? "afterFull" : "afterNow";
 		if (needsSwap && canNowEquipHelpPoll) return "afterNow";
 		if (needsSwap && isPollBetterAfterSwap) return "before";
 		return "other";
 	}
 	function discordPollTodoText(options) {
-		const { slot, bonus, waitMs, nextPostMs, nowNames } = options;
+		const { slot, bonus, nextPostMs } = options;
+		if (slot === "afterFull" || slot === "afterNow") return "Vote Discord Poll";
 		const bonusPart = bonus > 0 ? ` (+${bonus} equipped bonus)` : "";
 		const nextPost = formatMs(nextPostMs);
-		if (slot === "afterFull") return `Vote Discord Poll after unlock (${formatMs(waitMs)} wait, next post in ${nextPost})${bonusPart}`;
-		if (slot === "afterNow") return `Vote Discord Poll after equipping ${nowNames}${bonusPart}`;
 		if (slot === "before") return `Vote Discord Poll now — next post in ${nextPost}${bonusPart}`;
 		if (bonus > 0) return `Vote Discord Poll (+${bonus} already equipped)`;
 		return "Vote Discord Poll";
+	}
+	function discordPollTodoReasons(slot) {
+		if (slot === "afterFull" || slot === "afterNow") return [{ text: "After equipping" }];
 	}
 	function buildDiscordPollAction(options) {
 		const { result, settings, siteState, needsSwap, waitMs } = options;
@@ -7726,16 +7788,15 @@
 		else if (slot === "before") phase = "before";
 		const bonus = slot === "other" ? currentBonus : bonusForActivityPhase(phase, currentBonus, bestBonus);
 		const chain = slot === "afterFull" || slot === "afterNow" ? "after" : "before";
+		const reasons = discordPollTodoReasons(slot);
 		const todo = {
 			text: discordPollTodoText({
 				slot,
 				bonus,
-				waitMs,
-				nextPostMs,
-				nowNames: plan?.now.map((change) => change.displayName).join(" + ") ?? ""
+				nextPostMs
 			}),
 			urgency: actionUrgency({
-				kind: "action",
+				kind: slot === "afterFull" ? "schedule" : "action",
 				readyAtMs: slot === "afterFull" ? waitMs : 0,
 				durationMs: 0,
 				deadlineMs: nextPostMs,
@@ -7743,6 +7804,7 @@
 				chain
 			})
 		};
+		if (reasons) todo.reasons = reasons;
 		if (slot !== "afterFull" && nextPostMs <= 72e5) todo.tone = "warn";
 		return {
 			slot,
@@ -7753,7 +7815,7 @@
 		return discord?.slot === slot ? [discord.todo] : [];
 	}
 	function pushRecommendedSwapTodos(options) {
-		const { todos, best, current, settings, siteState, slotLocks, isLocked, waitMs, sequenced, discord, upgrades, isPreloadNextUtcDay = false } = options;
+		const { todos, best, current, settings, siteState, slotLocks, isLocked, waitMs, sequenced, discord, upgrades, isPreloadNextUtcDay = false, deferredSteam } = options;
 		const swap = buildSwapEquipTodos({
 			best,
 			current,
@@ -7764,7 +7826,8 @@
 			beforeSwapCount: sequenced.beforeSwap.length + (discord?.slot === "before" ? 1 : 0),
 			upgrades,
 			isPreloadNextUtcDay,
-			...slotLocks && { slotLocks }
+			...slotLocks && { slotLocks },
+			...deferredSteam && { deferredSteam }
 		});
 		todos.push(...swap.immediate, ...sequenced.afterNow, ...discordTodoForSlot(discord, "afterNow"), ...sequenced.other, ...discordTodoForSlot(discord, "other"), ...swap.later);
 	}
@@ -7783,6 +7846,12 @@
 		const plan = best ? planLoadoutChanges(best.artifacts, current, settings, result.slotLocks) : void 0;
 		const waitMs = plan?.waitMs ?? maxSlotCooldownMs(settings, current, result.slotLocks);
 		const isNeedsSwap = Boolean(best && !isMatchingLoadout);
+		if (hasElapsedShowroomLock(settings, result.slotLocks)) todos.push({
+			kind: "caution",
+			tone: "warn",
+			text: "24h lock still showing after the timer hit 0",
+			reasons: [{ text: STUCK_SLOT_LOCK_HINT }]
+		});
 		const hasAllArpEquipped = result.hasAllArpEquipped === true || (current?.allArpPct ?? 0) > 0;
 		const hasOwnedAllArp = result.hasAllArpOwned === true || hasAllArpEquipped || (result.allArpLoadout?.allArpPct ?? 0) > 0 || (best?.allArpPct ?? 0) > 0 || result.alternatives.some((combo) => combo.allArpPct > 0);
 		const shouldDeferBattlePassClaim = result.deferBattlePassClaims === true;
@@ -7824,7 +7893,8 @@
 			discord,
 			upgrades: result.upgrades,
 			isPreloadNextUtcDay: result.preloadNextUtcDay === true,
-			...result.slotLocks && { slotLocks: result.slotLocks }
+			...result.slotLocks && { slotLocks: result.slotLocks },
+			...result.deferredSteam && { deferredSteam: result.deferredSteam }
 		});
 		else pushEquipPlanTodos(todos, {
 			best,
@@ -7845,7 +7915,7 @@
 			hasDeferredAllArp: deferredAllArp !== void 0,
 			hasScheduledAllArp
 		});
-		if (result.deferredSteam) todos.push(deferredSteamTodo(result.deferredSteam, siteState));
+		if (result.deferredSteam && !shouldFoldDeferredSteam(best, result.deferredSteam, isNeedsSwap)) todos.push(deferredSteamTodo(result.deferredSteam, siteState));
 		if (shouldDeferBattlePassClaim) pushBattlePassTodo(todos, siteState, {
 			ownsAllArp: hasOwnedAllArp,
 			hasAllArpEquipped: false,
@@ -8948,9 +9018,10 @@
 	async function ensureArtifactSnapshot(options = {}) {
 		const existing = await loadSnapshot();
 		const isWantsForce = options.force === true;
-		if (!isWantsForce && isSnapshotFresh$1(existing) && areSlotLocksFresh(existing)) return existing;
+		const isElapsedLock = hasElapsedShowroomLock(await getArtifactSettings(), existing?.slotLocks);
+		if (!isWantsForce && !isElapsedLock && isSnapshotFresh$1(existing) && areSlotLocksFresh(existing)) return existing;
 		const showroomPath = resolveShowroomUrl(existing?.username);
-		if (isWantsForce) return scrapeShowroomAfterLockNudge(showroomPath, existing);
+		if (isWantsForce || isElapsedLock) return scrapeShowroomAfterLockNudge(showroomPath, existing);
 		const loaded = await loadRemotePage(showroomPath);
 		if (!loaded) {
 			if (existing?.slotLocks) await syncSlotLocksFromScrape(existing.slotLocks);
@@ -10539,6 +10610,18 @@
 		if (isRemote) return ensureArtifactSnapshot({ force: options.force === true });
 		return loadSnapshot();
 	}
+	async function snapshotAfterElapsedShowroomLock(snapshot, settings, options) {
+		if (options.shouldForceSite || !options.isRemote || !isArtifactsShowroomPage() || !hasElapsedShowroomLock(settings, snapshot?.slotLocks)) return {
+			snapshot,
+			settings
+		};
+		const nextSnapshot = await ensureArtifactSnapshot({ force: true }) ?? snapshot;
+		if (nextSnapshot?.slotLocks) await syncSlotLocksFromScrape(nextSnapshot.slotLocks);
+		return {
+			snapshot: nextSnapshot,
+			settings: await getArtifactSettings()
+		};
+	}
 	function hasGmStorage() {
 		return typeof _GM?.getValue === "function";
 	}
@@ -10552,9 +10635,14 @@
 		const shouldForceSite = options?.forceSite === true;
 		const snapshotPromise = !shouldForceSite && isArtifactsShowroomPage() ? scrapeAndPersist() : loadCachedOrRemoteSnapshot(isRemote || isArtifactsShowroomPage(), { force: shouldForceSite });
 		const siteStatePromise = isRemote ? ensureSiteState({ force: shouldForceSite }) : loadSiteState();
-		const [snapshot, loadedState] = await Promise.all([snapshotPromise, siteStatePromise]);
-		if (snapshot?.slotLocks) await syncSlotLocksFromScrape(snapshot.slotLocks);
-		const settings = await getArtifactSettings();
+		const [loadedSnapshot, loadedState] = await Promise.all([snapshotPromise, siteStatePromise]);
+		if (loadedSnapshot?.slotLocks) await syncSlotLocksFromScrape(loadedSnapshot.slotLocks);
+		const afterLocks = await snapshotAfterElapsedShowroomLock(loadedSnapshot, await getArtifactSettings(), {
+			isRemote,
+			shouldForceSite
+		});
+		const snapshot = afterLocks.snapshot;
+		const settings = afterLocks.settings;
 		const achievementSettings = await getAchievementSettings();
 		const achievements = await gatherAchievements({
 			isRemote,
@@ -10616,6 +10704,7 @@
 	}
 	function requiresBackgroundHydrate(data, options = {}) {
 		if (options.force) return true;
+		if (hasElapsedShowroomLock(data.settings, data.snapshot?.slotLocks)) return true;
 		if (!isArtifactsShowroomPage() && requiresRemoteSnapshotHydrate(data.snapshot)) return true;
 		if (requiresRemoteSiteHydrate(data.siteState)) return true;
 		if (requiresSteamFreeHydrate(data.siteState)) return true;
@@ -10858,7 +10947,9 @@
 			3
 		].filter((position) => slotLocks[position] === true);
 		if (lockedSlots.length === 0) return "";
-		return `<div class="ao-note">24h slot cooldown: ${formatLockedSlotParts(settings, lockedSlots, slotLocks).join(", ")}</div>`;
+		const lockParts = formatLockedSlotParts(settings, lockedSlots, slotLocks);
+		const stuckHint = hasElapsedShowroomLock(settings, slotLocks) ? `. ${STUCK_SLOT_LOCK_HINT}` : "";
+		return `<div class="ao-note">24h slot cooldown: ${lockParts.join(", ")}${stuckHint}</div>`;
 	}
 	function renderArpLogCard(siteState) {
 		const arp = siteState?.arpLog;

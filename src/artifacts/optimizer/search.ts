@@ -677,10 +677,32 @@ export function resolveDeferredAllArp(
 }
 
 /**
+ * Extra Steam ARP this week vs Twitch/calendar lost for one 24h lock.
+ * Warrior Script +1 × 3 quests is not worth dropping Collapsed Star's Twitch day.
+ */
+function isExtraSteamWorthDisplacedDailies(
+  best: ScoredCombo,
+  steam: ScoredCombo,
+  remainingQuests: number,
+): boolean {
+  const extra =
+    (steam.steamQuestsFlat - best.steamQuestsFlat) * remainingQuests;
+  if (extra <= 0) {
+    return false;
+  }
+  const twitchLoss = Math.max(0, best.watchTwitchFlat - steam.watchTwitchFlat);
+  const calendarLoss = Math.max(
+    0,
+    best.dailyCalendarFlat - steam.dailyCalendarFlat,
+  );
+  return extra > twitchLoss + calendarLoss;
+}
+
+/**
  * Steam Quests remaining this week normally win the 24h pick (dailies reset;
  * we pick a lock day). If a higher-value lock beat Steam (community All-ARP%),
  * still offer the Steam-flat set as a side swap after that wear — not instead
- * of it. Today's Watch Twitch on current gear is sequenced before the swap.
+ * of it. Skip when the extra Steam flat costs more daily ARP than it adds.
  */
 export function resolveDeferredSteam(
   owned: OwnedArtifact[],
@@ -710,6 +732,11 @@ export function resolveDeferredSteam(
   ) {
     return undefined;
   }
+  // +1 Steam per quest is not worth locking over a Twitch/calendar day.
+  // Do Steam on the recommended set instead; skip the side swap.
+  if (best && !isExtraSteamWorthDisplacedDailies(best, steam, remaining.length)) {
+    return undefined;
+  }
   const now = resolveNow(context);
   let waitMs = comboEquipWaitMs(
     steam.artifacts,
@@ -720,6 +747,8 @@ export function resolveDeferredSteam(
   );
   // Side swap after the recommended 24h wear — including when that set is
   // already on. Immediate Recycler/Fission would lock over a better lock.
+  // Wait is remaining recommended-equip time + 24h lock, not a >24h slot
+  // cooldown (slots still cap at 24h).
   if (best) {
     waitMs = Math.max(
       waitMs,

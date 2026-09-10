@@ -16,10 +16,12 @@ import {
   type UpgradeSuggestion,
   VAULT_PRIORITY_DISCOUNT_PCT,
 } from '../optimizer';
-import { isArtifactsShowroomPage, type OwnedArtifact } from '../scraper';
+import type { OwnedArtifact } from '../scraper';
 import {
   type ArtifactOptimizerSettings,
   COOLDOWN_MS,
+  hasElapsedShowroomLock,
+  STUCK_SLOT_LOCK_HINT,
   showroomCooldownRemainingMs,
   utcDailyEndBufferMs,
 } from '../settings';
@@ -63,6 +65,7 @@ import {
   maxSlotCooldownMs,
   msUntilUtcMidnight,
   planLoadoutChanges,
+  plannedEquipLabel,
   utcResetDeadlineLabel,
   type LoadoutChangePlan,
 } from './loadoutPlan';
@@ -722,11 +725,11 @@ function discordPollActivityLabel(
     waitMs: number;
   },
 ): string {
+  if (options.phase === 'after') {
+    return 'Vote Discord Poll';
+  }
   const bonusPart = bonus > 0 ? ` (+${bonus} equipped bonus)` : '';
   const nextPost = formatMs(msUntilNextDiscordPollPost());
-  if (options.phase === 'after' && options.waitMs > 0) {
-    return `Vote Discord Poll after unlock (${formatMs(options.waitMs)} wait, next post in ${nextPost})${bonusPart}`;
-  }
   if (options.phase === 'before') {
     return `Vote Discord Poll now — next post in ${nextPost}${bonusPart}`;
   }
@@ -1378,10 +1381,10 @@ function sortTodosByUtcDeadline(items: ActionTodo[]): ActionTodo[] {
 /**
  * Place due activities before or after the recommended swap.
  * Do current-loadout strengths first when a swap would drop that activity's
- * ARP; filling a free slot (or replacing a piece that doesn't help) goes
- * first so the 24h cooldown starts now. After unlock, do activities the new
- * set is better for. UTC-deadline dailies that expire before slots unlock
- * must be done now even if the bonus isn't optimal.
+ * ARP; filling a free slot happens first so that 24h cooldown starts now.
+ * After unlock, do activities the new set is better for. UTC-deadline
+ * dailies that expire before slots unlock must be done now even if the bonus
+ * isn't optimal.
  */
 function upcomingResetAtMs(
   key: ActivityKey,
@@ -1799,11 +1802,16 @@ function collectEquipReasons(
   siteState: SiteState,
   waitMs: number,
   stepArtifacts: OwnedArtifact[],
-  isPreloadNextUtcDay = false,
+  options: {
+    isPreloadNextUtcDay?: boolean;
+    settings?: ArtifactOptimizerSettings;
+    slotLocks?: OptimizerResult['slotLocks'];
+  } = {},
 ): ActionTodoReason[] {
   const reasons: ActionTodoReason[] = [];
   const caps = siteState.caps;
   const stats = activityStatsForArtifacts(stepArtifacts);
+  const isPreloadNextUtcDay = options.isPreloadNextUtcDay === true;
 
   pushAllArpEquipReasons(reasons, stats.allArpPct, siteState);
 
@@ -1860,9 +1868,12 @@ function collectEquipReasons(
       ),
     });
   }
-  if (waitMs > 0 && isArtifactsShowroomPage()) {
+  if (
+    options.settings &&
+    hasElapsedShowroomLock(options.settings, options.slotLocks)
+  ) {
     reasons.push({
-      text: 'Still stuck after Refresh? Upgrade a maxed artifact manually (Warrior Script) — 0 fragments',
+      text: STUCK_SLOT_LOCK_HINT,
     });
   }
 
@@ -1910,12 +1921,8 @@ function deferredSteamTodo(
   siteState: SiteState,
 ): ActionTodo {
   const { waitMs, artifacts } = deferred;
-  const headline =
-    waitMs > 0
-      ? `Equip Steam Quests set in ${formatMs(waitMs)}`
-      : 'Equip Steam Quests set now';
   return buildEquipTodo({
-    headline,
+    headline: deferredSteamSetHeadline(waitMs),
     loadout: loadoutLabel(artifactsForDisplay(deferred)),
     reasons: collectEquipReasons(siteState, waitMs, artifacts),
     urgency: actionUrgency({
@@ -1926,6 +1933,66 @@ function deferredSteamTodo(
       chain: 'equip',
     }),
   });
+}
+
+function deferredSteamSetHeadline(waitMs: number): string {
+  if (waitMs <= 0) {
+    return 'Equip Steam Quests set now';
+  }
+  if (waitMs > COOLDOWN_MS) {
+    return 'Equip Steam Quests set after this 24h wear';
+  }
+  if (waitMs >= COOLDOWN_MS) {
+    return 'Equip Steam Quests set in 24h';
+  }
+  return `Equip Steam Quests set in ${formatMs(waitMs)}`;
+}
+
+/**
+ * Recommended 24h lock already puts Steam flats on. The max Steam set waits
+ * for that wear — fold it into the swap step so quests have one blocker.
+ */
+function shouldFoldDeferredSteam(
+  best: ScoredCombo | undefined,
+  deferred: OptimizerResult['deferredSteam'],
+  isNeedsSwap: boolean,
+): boolean {
+  return (
+    isNeedsSwap && deferred !== undefined && (best?.steamQuestsFlat ?? 0) > 0
+  );
+}
+
+function artifactsNotInOther(
+  from: OwnedArtifact[],
+  other: OwnedArtifact[],
+): OwnedArtifact[] {
+  const familyIds = new Set(other.map((artifact) => artifact.familyId));
+  return from.filter((artifact) => !familyIds.has(artifact.familyId));
+}
+
+function deferredSteamFollowUpReason(
+  deferred: NonNullable<OptimizerResult['deferredSteam']>,
+  best: ScoredCombo,
+): ActionTodoReason {
+  const bonus = activityStatsForArtifacts(deferred.artifacts).steamQuestsFlat;
+  const incoming = artifactsNotInOther(deferred.artifacts, best.artifacts);
+  const incomingLabel = loadoutLabel(
+    incoming.length > 0 ? incoming : artifactsForDisplay(deferred),
+  );
+  return {
+    text: `Then ${incomingLabel} for +${bonus} Steam`,
+  };
+}
+
+function appendFoldedDeferredSteamReason(
+  laterReasons: ActionTodoReason[],
+  best: ScoredCombo,
+  deferred: OptimizerResult['deferredSteam'],
+): void {
+  if (!deferred || !shouldFoldDeferredSteam(best, deferred, true)) {
+    return;
+  }
+  laterReasons.push(deferredSteamFollowUpReason(deferred, best));
 }
 
 function deferredAllArpTodo(
@@ -2235,33 +2302,22 @@ function pushScheduledAllArpTodos(
   }
 }
 
-function nowEquipHeadline(plan: LoadoutChangePlan): string {
-  const nowNames = plan.now.map((change) => change.displayName).join(' + ');
-  const slots = plan.now.map((change) => `slot ${change.position}`).join(', ');
-  return `Equip: ${nowNames} now (${slots} free)`;
+function nowEquipLoadout(plan: LoadoutChangePlan): string {
+  return plan.now.map((change) => plannedEquipLabel(change)).join(' + ');
 }
 
 function buildPartialEquipTodos(
   plan: LoadoutChangePlan,
-  fullLabel: string,
-  nowReasons: ActionTodoReason[],
   laterReasons: ActionTodoReason[],
 ): ActionTodo[] | undefined {
   if (plan.now.length === 0) {
     return undefined;
   }
-  const nowTodo: ActionTodo = {
-    text: nowEquipHeadline(plan),
-    urgency: {
-      kind: 'action',
-      readyAtMs: 0,
-      durationMs: 0,
-      chain: 'equip',
-    },
-  };
-  if (nowReasons.length > 0) {
-    nowTodo.reasons = nowReasons;
-  }
+  const nowTodo = buildEquipTodo({
+    headline: 'Equip now',
+    loadout: nowEquipLoadout(plan),
+    reasons: [],
+  });
   if (plan.laterNames.length > 0) {
     return [
       nowTodo,
@@ -2279,15 +2335,63 @@ function buildPartialEquipTodos(
     ];
   }
   if (plan.lockedSlots.length > 0) {
-    return [
-      buildEquipTodo({
-        headline: nowTodo.text,
-        loadout: fullLabel,
-        reasons: nowReasons,
-      }),
-    ];
+    return [nowTodo];
   }
   return undefined;
+}
+
+function lockedSlotEquipTodos(options: {
+  laterLabel: string;
+  laterReasons: ActionTodoReason[];
+  laterUpgrades: ActionTodo[];
+  nowUpgrades: ActionTodo[];
+  swapWaitMs: number;
+  beforeSwapCount: number;
+}): { immediate: ActionTodo[]; later: ActionTodo[] } {
+  const {
+    laterLabel,
+    laterReasons,
+    laterUpgrades,
+    nowUpgrades,
+    swapWaitMs,
+    beforeSwapCount,
+  } = options;
+  if (swapWaitMs <= 0) {
+    return {
+      immediate: [
+        ...nowUpgrades,
+        buildEquipTodo({
+          headline: beforeSwapCount > 0 ? 'Then equip' : 'Equip now',
+          loadout: laterLabel,
+          reasons: laterReasons,
+          urgency: {
+            kind: 'action',
+            readyAtMs: 0,
+            durationMs: 0,
+            chain: 'equip',
+          },
+        }),
+      ],
+      later: laterUpgrades,
+    };
+  }
+  return {
+    immediate: nowUpgrades,
+    later: [
+      ...laterUpgrades,
+      buildEquipTodo({
+        headline: `Equip in ${formatMs(swapWaitMs)}`,
+        loadout: laterLabel,
+        reasons: laterReasons,
+        urgency: {
+          kind: 'schedule',
+          readyAtMs: swapWaitMs,
+          durationMs: 0,
+          chain: 'equip',
+        },
+      }),
+    ],
+  };
 }
 
 function buildSwapEquipTodos(options: {
@@ -2301,6 +2405,7 @@ function buildSwapEquipTodos(options: {
   beforeSwapCount: number;
   upgrades: UpgradeSuggestion[];
   isPreloadNextUtcDay?: boolean;
+  deferredSteam?: OptimizerResult['deferredSteam'];
 }): { immediate: ActionTodo[]; later: ActionTodo[] } {
   const {
     best,
@@ -2313,23 +2418,23 @@ function buildSwapEquipTodos(options: {
     beforeSwapCount,
     upgrades,
     isPreloadNextUtcDay = false,
+    deferredSteam,
   } = options;
   const plan = planLoadoutChanges(best.artifacts, current, settings, slotLocks);
   const swapWaitMs = plan.waitMs > 0 ? plan.waitMs : waitMs;
   const laterIds = new Set(plan.later.map((change) => change.artifactId));
-  const nowIds = new Set(plan.now.map((change) => change.artifactId));
   const laterArtifacts = comboArtifactsByIds(best, laterIds);
-  const nowArtifacts = comboArtifactsByIds(best, nowIds);
   const laterReasons = collectEquipReasons(
     siteState,
     swapWaitMs,
     laterArtifacts.length > 0 ? laterArtifacts : best.artifacts,
-    isPreloadNextUtcDay,
+    {
+      isPreloadNextUtcDay,
+      settings,
+      slotLocks,
+    },
   );
-  const nowReasons =
-    nowArtifacts.length > 0
-      ? collectEquipReasons(siteState, 0, nowArtifacts, isPreloadNextUtcDay)
-      : laterReasons;
+  appendFoldedDeferredSteamReason(laterReasons, best, deferredSteam);
   const label = comboLabel(best);
   const nowUpgrades = upgradeTodosFor(
     upgrades,
@@ -2339,7 +2444,7 @@ function buildSwapEquipTodos(options: {
     upgrades,
     new Set(plan.later.map((change) => change.artifactId)),
   );
-  const partial = buildPartialEquipTodos(plan, label, nowReasons, laterReasons);
+  const partial = buildPartialEquipTodos(plan, laterReasons);
   if (partial && partial.length >= 2) {
     const [nowTodo, ...rest] = partial;
     return {
@@ -2356,30 +2461,21 @@ function buildSwapEquipTodos(options: {
   if (isLocked) {
     const laterLabel =
       plan.laterNames.length > 0 ? plan.laterNames.join(' + ') : label;
-    return {
-      immediate: nowUpgrades,
-      later: [
-        ...laterUpgrades,
-        buildEquipTodo({
-          headline: `Equip in ${formatMs(swapWaitMs)}`,
-          loadout: laterLabel,
-          reasons: laterReasons,
-          urgency: {
-            kind: 'schedule',
-            readyAtMs: swapWaitMs,
-            durationMs: 0,
-            chain: 'equip',
-          },
-        }),
-      ],
-    };
+    return lockedSlotEquipTodos({
+      laterLabel,
+      laterReasons,
+      laterUpgrades,
+      nowUpgrades,
+      swapWaitMs,
+      beforeSwapCount,
+    });
   }
   return {
     immediate: [
       ...nowUpgrades,
       buildEquipTodo({
-        headline: beforeSwapCount > 0 ? 'Then equip' : 'Equip this set',
-        loadout: label,
+        headline: beforeSwapCount > 0 ? 'Then equip' : 'Equip now',
+        loadout: nowEquipLoadout(plan) || label,
         reasons: laterReasons,
         urgency: {
           kind: 'action',
@@ -2545,8 +2641,8 @@ function discordPollSlot(options: {
     isPollBetterAfterSwap,
     canNowEquipHelpPoll,
   } = options;
-  if (needsSwap && isPollBetterAfterSwap && waitMs > 0 && waitMs < nextPostMs) {
-    return 'afterFull';
+  if (needsSwap && isPollBetterAfterSwap && waitMs < nextPostMs) {
+    return waitMs > 0 ? 'afterFull' : 'afterNow';
   }
   if (needsSwap && canNowEquipHelpPoll) {
     return 'afterNow';
@@ -2560,19 +2656,14 @@ function discordPollSlot(options: {
 function discordPollTodoText(options: {
   slot: DiscordPollSlot;
   bonus: number;
-  waitMs: number;
   nextPostMs: number;
-  nowNames: string;
 }): string {
-  const { slot, bonus, waitMs, nextPostMs, nowNames } = options;
+  const { slot, bonus, nextPostMs } = options;
+  if (slot === 'afterFull' || slot === 'afterNow') {
+    return 'Vote Discord Poll';
+  }
   const bonusPart = bonus > 0 ? ` (+${bonus} equipped bonus)` : '';
   const nextPost = formatMs(nextPostMs);
-  if (slot === 'afterFull') {
-    return `Vote Discord Poll after unlock (${formatMs(waitMs)} wait, next post in ${nextPost})${bonusPart}`;
-  }
-  if (slot === 'afterNow') {
-    return `Vote Discord Poll after equipping ${nowNames}${bonusPart}`;
-  }
   if (slot === 'before') {
     return `Vote Discord Poll now — next post in ${nextPost}${bonusPart}`;
   }
@@ -2580,6 +2671,13 @@ function discordPollTodoText(options: {
     return `Vote Discord Poll (+${bonus} already equipped)`;
   }
   return 'Vote Discord Poll';
+}
+
+function discordPollTodoReasons(slot: DiscordPollSlot): ActionTodoReason[] | undefined {
+  if (slot === 'afterFull' || slot === 'afterNow') {
+    return [{ text: 'After equipping' }];
+  }
+  return undefined;
 }
 
 function buildDiscordPollAction(options: {
@@ -2634,16 +2732,17 @@ function buildDiscordPollAction(options: {
       : bonusForActivityPhase(phase, currentBonus, bestBonus);
   const chain: ActionTodoChain =
     slot === 'afterFull' || slot === 'afterNow' ? 'after' : 'before';
+  const reasons = discordPollTodoReasons(slot);
   const todo: ActionTodo = {
     text: discordPollTodoText({
       slot,
       bonus,
-      waitMs,
       nextPostMs,
-      nowNames: plan?.now.map((change) => change.displayName).join(' + ') ?? '',
     }),
     urgency: actionUrgency({
-      kind: 'action',
+      // Same unlock as the waiting equip — schedule so chain (equip → after)
+      // ranks the vote under that swap instead of jumping to #1 as an "action".
+      kind: slot === 'afterFull' ? 'schedule' : 'action',
       readyAtMs: slot === 'afterFull' ? waitMs : 0,
       durationMs: 0,
       deadlineMs: nextPostMs,
@@ -2651,6 +2750,9 @@ function buildDiscordPollAction(options: {
       chain,
     }),
   };
+  if (reasons) {
+    todo.reasons = reasons;
+  }
   const twoHoursMs = 2 * 3_600_000;
   if (slot !== 'afterFull' && nextPostMs <= twoHoursMs) {
     todo.tone = 'warn';
@@ -2678,6 +2780,7 @@ function pushRecommendedSwapTodos(options: {
   discord: ReturnType<typeof buildDiscordPollAction>;
   upgrades: UpgradeSuggestion[];
   isPreloadNextUtcDay?: boolean;
+  deferredSteam?: OptimizerResult['deferredSteam'];
 }): void {
   const {
     todos,
@@ -2692,6 +2795,7 @@ function pushRecommendedSwapTodos(options: {
     discord,
     upgrades,
     isPreloadNextUtcDay = false,
+    deferredSteam,
   } = options;
   const swap = buildSwapEquipTodos({
     best,
@@ -2705,6 +2809,7 @@ function pushRecommendedSwapTodos(options: {
     upgrades,
     isPreloadNextUtcDay,
     ...(slotLocks && { slotLocks }),
+    ...(deferredSteam && { deferredSteam }),
   });
   todos.push(
     ...swap.immediate,
@@ -2734,10 +2839,9 @@ function pushAfterSwapTodos(
 
 /**
  * Maximize ARP under cooldowns: finish current-set strengths first only when
- * the next equip would drop that activity's ARP. Filling a free slot (or
- * replacing a piece that doesn't help) happens first so the 24h cooldown
- * starts now, then activities the new set is equal/better for. Missing some
- * daily bonuses to locked slots is expected.
+ * the next equip would drop that activity's ARP. Fill free slots now (sooner
+ * cooldowns), remaining pieces when they unlock, then activities the new set
+ * is better for.
  */
 export function buildActionPlan(
   result: OptimizerResult,
@@ -2755,6 +2859,15 @@ export function buildActionPlan(
   const waitMs =
     plan?.waitMs ?? maxSlotCooldownMs(settings, current, result.slotLocks);
   const isNeedsSwap = Boolean(best && !isMatchingLoadout);
+
+  if (hasElapsedShowroomLock(settings, result.slotLocks)) {
+    todos.push({
+      kind: 'caution',
+      tone: 'warn',
+      text: '24h lock still showing after the timer hit 0',
+      reasons: [{ text: STUCK_SLOT_LOCK_HINT }],
+    });
+  }
 
   const hasAllArpEquipped =
     result.hasAllArpEquipped === true || (current?.allArpPct ?? 0) > 0;
@@ -2817,6 +2930,7 @@ export function buildActionPlan(
       upgrades: result.upgrades,
       isPreloadNextUtcDay: result.preloadNextUtcDay === true,
       ...(result.slotLocks && { slotLocks: result.slotLocks }),
+      ...(result.deferredSteam && { deferredSteam: result.deferredSteam }),
     });
   } else {
     pushEquipPlanTodos(todos, {
@@ -2841,7 +2955,10 @@ export function buildActionPlan(
     hasScheduledAllArp,
   });
 
-  if (result.deferredSteam) {
+  if (
+    result.deferredSteam &&
+    !shouldFoldDeferredSteam(best, result.deferredSteam, isNeedsSwap)
+  ) {
     todos.push(deferredSteamTodo(result.deferredSteam, siteState));
   }
 

@@ -11,6 +11,7 @@ import {
 import {
   areAccountActionsEnabled,
   getArtifactSettings,
+  hasElapsedShowroomLock,
   syncSlotLocksFromScrape,
 } from './settings';
 import {
@@ -583,7 +584,8 @@ async function persistShowroomSnapshot(
 
 /**
  * Megumin FAQ: POST Upgrade on a maxed (0-frag) artifact clears AWA's stuck
- * 24h lock bug. Force Refresh does that, then re-fetches Showroom.
+ * 24h lock bug. Force Refresh and elapsed-timer hydrates do that, then
+ * re-fetch Showroom.
  */
 async function scrapeShowroomAfterLockNudge(
   showroomPath: string,
@@ -744,12 +746,16 @@ export async function ensureArtifactSnapshot(
 ): Promise<ArtifactSnapshot | undefined> {
   const existing = await loadSnapshot();
   const isWantsForce = options.force === true;
+  const settings = await getArtifactSettings();
+  const isElapsedLock = hasElapsedShowroomLock(settings, existing?.slotLocks);
 
   // Refresh always re-fetches the Showroom — lock icons are cheap and are the
   // source of truth. Spam-guarding here left Control Center stuck on a stale
-  // all-locked snapshot.
+  // all-locked snapshot. An elapsed GM timer with a still-locked Showroom is
+  // AWA's stuck-lock bug — Megumin's 0-frag upgrade, then re-scrape.
   if (
     !isWantsForce &&
+    !isElapsedLock &&
     isSnapshotFresh(existing) &&
     areSlotLocksFresh(existing)
   ) {
@@ -757,7 +763,7 @@ export async function ensureArtifactSnapshot(
   }
 
   const showroomPath = resolveShowroomUrl(existing?.username);
-  if (isWantsForce) {
+  if (isWantsForce || isElapsedLock) {
     return scrapeShowroomAfterLockNudge(showroomPath, existing);
   }
 

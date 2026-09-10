@@ -121,4 +121,51 @@ describe('Steam lock vs daily Twitch', () => {
       expect(steamQuestIndex).toBeGreaterThan(twitchIndex);
     }
   });
+
+  it('does not lock Warrior Script over Collapsed Star for +1 Steam', () => {
+    vi.stubGlobal('location', { pathname: '/ucf/Giveaway' });
+    const nowMs = MONDAY_AFTER_RESET;
+    const snapshot = makeSnapshot([
+      makeArtifact('chai-stones', ArtifactTier.Interstellar, {
+        equippedPosition: 1,
+      }),
+      makeArtifact('pn295', ArtifactTier.Interstellar, {
+        equippedPosition: 2,
+      }),
+      makeArtifact('flux', ArtifactTier.Interstellar, {
+        equippedPosition: 3,
+      }),
+      makeArtifact('pn295-unstable-battery', ArtifactTier.Interstellar),
+      makeArtifact('sylphin-fission-blade', ArtifactTier.Interstellar),
+      makeArtifact('herkow-warrior-script', ArtifactTier.Rust),
+    ]);
+    const siteState = pendingSteamTwitchState(nowMs);
+    const context = buildContext(
+      snapshot,
+      defaultArtifactSettings,
+      siteState,
+      nowMs,
+    );
+    const result = optimize(context);
+    const bestIds = result.best?.artifacts.map((artifact) => artifact.familyId) ?? [];
+    const todos = buildActionPlan(result, defaultArtifactSettings, siteState);
+    const reasonText = todos
+      .flatMap((todo) => [
+        todo.text,
+        todo.loadout ?? '',
+        ...(todo.reasons ?? []).flatMap((reason) => [
+          reason.text,
+          reason.detail ?? '',
+        ]),
+      ])
+      .join('\n');
+
+    expect(bestIds).toContain('pn295');
+    expect(bestIds).toContain('pn295-unstable-battery');
+    expect(bestIds).toContain('sylphin-fission-blade');
+    expect(bestIds).not.toContain('herkow-warrior-script');
+    expect(result.deferredSteam).toBeUndefined();
+    expect(reasonText).not.toMatch(/warrior script/i);
+    expect(reasonText).toMatch(/\+27 steam/i);
+  });
 });

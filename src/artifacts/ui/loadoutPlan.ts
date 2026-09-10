@@ -348,13 +348,10 @@ function pickImmediateEquips(
 
 /**
  * Keep combo pieces already in place (including locked slots we cannot touch).
- * Fill remaining recommended pieces into unlocked slots only so their 24h
- * cooldown starts now instead of waiting for every slot to unlock.
- *
- * Free-slot fills pick the ARP-max subset (All-ARP% / completed sets when they
- * fit, otherwise best category flats). Within that subset, higher marginal
- * pieces go first so a partial API success still lands the most valuable
- * activator.
+ * Fill free slots now so those 24h cooldowns start immediately. Remaining
+ * pieces wait on locked slots as a second step. If every remaining piece
+ * already has a free slot, do them in one shot — do not split a fully
+ * unlocked board into two equip todos.
  */
 export function planLoadoutChanges(
   combo: ScoredCombo['artifacts'],
@@ -405,7 +402,11 @@ export function planLoadoutChanges(
       !reservedSlots.has(position) && !lockedSlots.includes(position),
   );
 
-  const nowArtifacts = pickImmediateEquips(kept, remaining, freeSlots.length);
+  const nowArtifacts = pickImmediateEquips(
+    kept,
+    remaining,
+    freeSlots.length,
+  );
   const now: LoadoutChangePlan['now'] = [];
   for (const artifact of nowArtifacts) {
     const position = freeSlots.shift();
@@ -435,21 +436,14 @@ export function planLoadoutChanges(
     settings,
     ...(slotLocks && { slotLocks }),
   });
-  const waitTargets =
-    later.length > 0 ? later.map((change) => change.position) : lockedSlots;
-  const waitMs = Math.max(
-    0,
-    ...waitTargets.map((position) =>
-      slotCooldownRemainingMs(position, currentBySlot, settings, slotLocks),
-    ),
-  );
-  return {
+  return assembleLoadoutPlan(
     now,
     later,
-    laterNames: later.map((item) => plannedEquipLabel(item)),
     lockedSlots,
-    waitMs,
-  };
+    currentBySlot,
+    settings,
+    slotLocks,
+  );
 }
 
 function slotCooldownRemainingMs(
@@ -523,6 +517,35 @@ function planLaterEquips(options: {
     });
   }
   return later;
+}
+
+function assembleLoadoutPlan(
+  now: LoadoutChangePlan['now'],
+  later: LoadoutChangePlan['later'],
+  lockedSlots: ArtifactSlot[],
+  currentBySlot: Map<ArtifactSlot, ScoredCombo['artifacts'][number]>,
+  settings: ArtifactOptimizerSettings,
+  slotLocks?: Partial<Record<ArtifactSlot, boolean>>,
+): LoadoutChangePlan {
+  const waitTargets =
+    later.length > 0 ? later.map((change) => change.position) : lockedSlots;
+  const waitMs = Math.max(
+    0,
+    ...waitTargets.map((position) =>
+      slotCooldownRemainingMs(position, currentBySlot, settings, slotLocks),
+    ),
+  );
+  const waitingLater = waitMs > 0 ? later : [];
+  if (waitMs <= 0) {
+    now.push(...later);
+  }
+  return {
+    now,
+    later: waitingLater,
+    laterNames: waitingLater.map((item) => plannedEquipLabel(item)),
+    lockedSlots,
+    waitMs,
+  };
 }
 
 /**

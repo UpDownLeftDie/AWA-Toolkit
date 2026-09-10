@@ -16,11 +16,13 @@ import {
   isAchievementsHelperFeatureEnabled,
   areAccountActionsEnabled,
   areAchievementsEnabled,
+  hasElapsedShowroomLock,
   isNotificationTypeEnabled,
   MAX_UTC_DAILY_END_BUFFER_HOURS,
   NOTIFICATION_TYPE_COPY,
   NOTIFICATION_TYPE_KEYS,
   saveArtifactSettings,
+  STUCK_SLOT_LOCK_HINT,
   type ArtifactOptimizerSettings,
 } from "../settings";
 import {
@@ -414,7 +416,10 @@ export function renderCooldownBlock(
     return "";
   }
   const lockParts = formatLockedSlotParts(settings, lockedSlots, slotLocks);
-  return `<div class="ao-note">24h slot cooldown: ${lockParts.join(", ")}</div>`;
+  const stuckHint = hasElapsedShowroomLock(settings, slotLocks)
+    ? `. ${STUCK_SLOT_LOCK_HINT}`
+    : "";
+  return `<div class="ao-note">24h slot cooldown: ${lockParts.join(", ")}${stuckHint}</div>`;
 }
 
 function renderArpLogCard(siteState: SiteState | undefined): string {

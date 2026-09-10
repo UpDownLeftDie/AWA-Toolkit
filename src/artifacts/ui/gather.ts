@@ -38,6 +38,7 @@ import {
 import {
   isAchievementsHelperFeatureEnabled,
   getArtifactSettings,
+  hasElapsedShowroomLock,
   syncSlotLocksFromScrape,
   type ArtifactOptimizerSettings,
 } from '../settings';
@@ -80,6 +81,38 @@ function loadCachedOrRemoteSnapshot(
     return ensureArtifactSnapshot({ force: options.force === true });
   }
   return loadSnapshot();
+}
+
+/**
+ * Live Showroom scrapes skip ensureArtifactSnapshot, so they never POST
+ * Megumin's 0-frag upgrade. If the GM timer is already 0 and the page still
+ * shows locked, Force-Refresh that path once before optimizing.
+ */
+async function snapshotAfterElapsedShowroomLock(
+  snapshot: ArtifactSnapshot | undefined,
+  settings: ArtifactOptimizerSettings,
+  options: { isRemote: boolean; shouldForceSite: boolean },
+): Promise<{
+  snapshot: ArtifactSnapshot | undefined;
+  settings: ArtifactOptimizerSettings;
+}> {
+  if (
+    options.shouldForceSite ||
+    !options.isRemote ||
+    !isArtifactsShowroomPage() ||
+    !hasElapsedShowroomLock(settings, snapshot?.slotLocks)
+  ) {
+    return { snapshot, settings };
+  }
+  const refreshed = await ensureArtifactSnapshot({ force: true });
+  const nextSnapshot = refreshed ?? snapshot;
+  if (nextSnapshot?.slotLocks) {
+    await syncSlotLocksFromScrape(nextSnapshot.slotLocks);
+  }
+  return {
+    snapshot: nextSnapshot,
+    settings: await getArtifactSettings(),
+  };
 }
 
 export function hasGmStorage(): boolean {
@@ -168,17 +201,26 @@ export async function gatherData(options?: {
     ? ensureSiteState({ force: shouldForceSite })
     : loadSiteState();
 
-  const [snapshot, loadedState] = await Promise.all([
+  const [loadedSnapshot, loadedState] = await Promise.all([
     snapshotPromise,
     siteStatePromise,
   ]);
   // Re-apply Showroom lock icons every gather — including cache-only loads.
   // Otherwise stale GM timers survive browser refresh while snapshot.slotLocks
   // already knows slots are open.
-  if (snapshot?.slotLocks) {
-    await syncSlotLocksFromScrape(snapshot.slotLocks);
+  if (loadedSnapshot?.slotLocks) {
+    await syncSlotLocksFromScrape(loadedSnapshot.slotLocks);
   }
-  const settings = await getArtifactSettings();
+  const afterLocks = await snapshotAfterElapsedShowroomLock(
+    loadedSnapshot,
+    await getArtifactSettings(),
+    {
+      isRemote,
+      shouldForceSite,
+    },
+  );
+  const snapshot = afterLocks.snapshot;
+  const settings = afterLocks.settings;
   const achievementSettings = await getAchievementSettings();
   const achievements = await gatherAchievements({
     isRemote,
@@ -281,6 +323,11 @@ export function requiresBackgroundHydrate(
   options: { force?: boolean } = {},
 ): boolean {
   if (options.force) {
+    return true;
+  }
+  // Timer elapsed + Showroom still locked: hydrate so we can run Megumin's
+  // 0-frag upgrade even when the snapshot is otherwise "fresh".
+  if (hasElapsedShowroomLock(data.settings, data.snapshot?.slotLocks)) {
     return true;
   }
   if (
