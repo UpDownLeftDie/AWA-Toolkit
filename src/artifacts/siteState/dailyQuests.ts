@@ -31,10 +31,7 @@ function dailyQuestStatusFromText(
   if (/^complete$/i.test(trimmed)) {
     return 'complete';
   }
-  if (/^incomplete$/i.test(trimmed)) {
-    return 'incomplete';
-  }
-  return undefined;
+  return /^incomplete$/i.test(trimmed) ? 'incomplete' : undefined;
 }
 
 function dailyQuestKind(name: string, href?: string): DailyQuestKind {
@@ -65,10 +62,7 @@ function questNameFromRow(row: Element): string | undefined {
       return text.length > 0 && !dailyQuestStatusFromText(text);
     })?.textContent;
   const name = raw?.replaceAll(/\s+/g, ' ').trim();
-  if (!name || HEADER_NAME.test(name)) {
-    return undefined;
-  }
-  return name;
+  return !name || HEADER_NAME.test(name) ? undefined : name;
 }
 
 function statusTextFromRow(row: Element): string {
@@ -104,10 +98,7 @@ function parseDailyQuestRowFromStatusCell(
   statusCell: Element,
 ): DailyQuestRow | undefined {
   const row = statusCell.closest('tr') ?? statusCell.parentElement;
-  if (!row) {
-    return undefined;
-  }
-  return buildDailyQuestRow(row, statusCell.textContent?.trim() ?? '');
+  return row ? buildDailyQuestRow(row, statusCell.textContent?.trim() ?? '') : undefined;
 }
 
 function parseDailyQuestRowFromTableRow(row: Element): DailyQuestRow | undefined {
@@ -135,10 +126,7 @@ export function scrapeDailyQuestRowsFromDocument(
   const tableRows = [...card.querySelectorAll('tr')]
     .map((row) => parseDailyQuestRowFromTableRow(row))
     .filter((row): row is DailyQuestRow => row !== undefined);
-  if (tableRows.length > 0) {
-    return tableRows;
-  }
-  return [...card.querySelectorAll('li')]
+  return tableRows.length > 0 ? tableRows : [...card.querySelectorAll('li')]
     .map((row) => parseDailyQuestRowFromTableRow(row))
     .filter((row): row is DailyQuestRow => row !== undefined);
 }

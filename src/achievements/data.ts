@@ -985,10 +985,12 @@ export function matchAchievementInText(
     const names = [achievement.title, ...(achievement.aliases ?? [])];
     for (const name of names) {
       const needle = normalizeAchievementTitle(name);
-      if (needle.length > bestLength && haystack.includes(needle)) {
-        best = achievement;
-        bestLength = needle.length;
+      if (!(needle.length > bestLength && haystack.includes(needle))) {
+        continue;
       }
+
+      best = achievement;
+      bestLength = needle.length;
     }
   }
   return best;

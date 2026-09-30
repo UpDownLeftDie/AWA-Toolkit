@@ -311,10 +311,7 @@ export function parsePreferredTwitchStreamers(raw: string): string[] {
 }
 
 export function clampUtcDailyEndBufferHours(hours: number): number {
-  if (!Number.isFinite(hours)) {
-    return DEFAULT_UTC_DAILY_END_BUFFER_HOURS;
-  }
-  return Math.min(MAX_UTC_DAILY_END_BUFFER_HOURS, Math.max(0, hours));
+  return Number.isFinite(hours) ? Math.min(MAX_UTC_DAILY_END_BUFFER_HOURS, Math.max(0, hours)) : DEFAULT_UTC_DAILY_END_BUFFER_HOURS;
 }
 
 export function utcDailyEndBufferMs(
@@ -404,13 +401,9 @@ export function isShowroomSlotLocked(
     equippedSlotLocked?: boolean;
   } = {},
 ): boolean {
-  if (options.equippedSlotLocked === true) {
-    return true;
-  }
-  if (options.equippedSlotLocked === false) {
-    return false;
-  }
-  return options.slotLocks?.[position] === true;
+  return (
+    options.equippedSlotLocked ?? options.slotLocks?.[position] === true
+  );
 }
 
 /**
@@ -426,10 +419,7 @@ export function showroomCooldownRemainingMs(
     now?: number;
   } = {},
 ): number {
-  if (!isShowroomSlotLocked(position, options)) {
-    return 0;
-  }
-  return cooldownRemainingMs(settings, position, options.now);
+  return isShowroomSlotLocked(position, options) ? cooldownRemainingMs(settings, position, options.now) : 0;
 }
 
 export function cooldownRemainingMs(
@@ -442,10 +432,7 @@ export function cooldownRemainingMs(
     return 0;
   }
   const changedAt = Date.parse(entry.changedAt);
-  if (Number.isNaN(changedAt)) {
-    return 0;
-  }
-  return Math.max(0, COOLDOWN_MS - (now - changedAt));
+  return Number.isNaN(changedAt) ? 0 : Math.max(0, COOLDOWN_MS - (now - changedAt));
 }
 
 /**
@@ -461,13 +448,11 @@ export function hasElapsedShowroomLock(
     return false;
   }
   return ([1, 2, 3] as const).some((position) => {
-    if (slotLocks[position] !== true) {
-      return false;
-    }
-    if (!findCooldownEntry(settings, position)) {
-      return false;
-    }
-    return cooldownRemainingMs(settings, position, now) <= 0;
+    return (
+      slotLocks[position] === true &&
+      findCooldownEntry(settings, position) !== undefined &&
+      cooldownRemainingMs(settings, position, now) <= 0
+    );
   });
 }
 

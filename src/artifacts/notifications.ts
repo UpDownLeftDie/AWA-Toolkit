@@ -61,10 +61,7 @@ function notifyUrlForKind(kind: NotifyKind): string {
   if (kind === "vault") {
     return absoluteAwaUrl(VAULT_PATH);
   }
-  if (kind === "giveaway") {
-    return absoluteAwaUrl(OFFICIAL_GIVEAWAYS_PATH);
-  }
-  return absoluteAwaUrl(CONTROL_CENTER_PATH);
+  return absoluteAwaUrl(kind === "giveaway" ? OFFICIAL_GIVEAWAYS_PATH : CONTROL_CENTER_PATH);
 }
 
 interface ScheduledNotify {
@@ -192,12 +189,9 @@ function scheduledFromUnknown(value: unknown): Record<string, ScheduledNotify> {
 }
 
 function stringListFromUnknown(value: unknown): string[] {
-  if (!Array.isArray(value)) {
-    return [];
-  }
-  return value.filter(
+  return Array.isArray(value) ? value.filter(
     (item): item is string => typeof item === "string" && item.length > 0,
-  );
+  ) : [];
 }
 
 function notifyLogFromUnknown(value: Record<string, unknown>): NotifyLog {
@@ -236,10 +230,7 @@ async function loadNotifyLog(): Promise<NotifyLog> {
   try {
     const parsedUnknown: unknown =
       typeof raw === "string" ? JSON.parse(raw) : raw;
-    if (!isRecord(parsedUnknown)) {
-      return emptyLog();
-    }
-    return notifyLogFromUnknown(parsedUnknown);
+    return isRecord(parsedUnknown) ? notifyLogFromUnknown(parsedUnknown) : emptyLog();
   } catch (error) {
     console.error("[AWA Toolkit] Error parsing notification log:", error);
     return emptyLog();
@@ -346,10 +337,7 @@ function didShowBrowserNotification(options: {
   tag: string;
   url: string;
 }): boolean {
-  if (didShowWebNotification(options)) {
-    return true;
-  }
-  return didShowGmNotification(options);
+  return didShowWebNotification(options) || didShowGmNotification(options);
 }
 
 function sortedIds(ids: Iterable<number>): number[] {
@@ -383,10 +371,7 @@ function pendingSwapTarget(
     };
   }
   const deferred = result.deferredAllArp;
-  if (!deferred || deferred.waitMs <= 0) {
-    return undefined;
-  }
-  return { artifacts: deferred.artifacts, waitMs: deferred.waitMs };
+  return !deferred || deferred.waitMs <= 0 ? undefined : { artifacts: deferred.artifacts, waitMs: deferred.waitMs };
 }
 
 function swapNotifyEvent(
@@ -537,13 +522,12 @@ function pruneSeenIds(ids: string[], keep: string[], max: number): string[] {
 }
 
 function isGiveawayCheckDue(log: NotifyLog, now: number): boolean {
-  if (notifyRuntime.shouldForceGiveawayCheck || !log.hasSeededGiveaways) {
-    return true;
-  }
-  if (log.lastGiveawayCheckAt === undefined) {
-    return true;
-  }
-  return now - log.lastGiveawayCheckAt >= GIVEAWAY_CHECK_MS;
+  return (
+    notifyRuntime.shouldForceGiveawayCheck ||
+    !log.hasSeededGiveaways ||
+    log.lastGiveawayCheckAt === undefined ||
+    now - log.lastGiveawayCheckAt >= GIVEAWAY_CHECK_MS
+  );
 }
 
 async function collectNewGiveaways(
@@ -623,10 +607,7 @@ function isVaultStillRelevant(
   event: ScheduledNotify,
   source: NotificationSource,
 ): boolean {
-  if (event.id.startsWith("vault-item:")) {
-    return true;
-  }
-  return gameVaultOpensAtMs(source.siteState) !== undefined;
+  return event.id.startsWith("vault-item:") || gameVaultOpensAtMs(source.siteState) !== undefined;
 }
 
 function isEventStillRelevant(
@@ -639,13 +620,7 @@ function isEventStillRelevant(
   if (event.kind === "swap") {
     return isSwapStillRelevant(event, source);
   }
-  if (event.kind === "vault") {
-    return isVaultStillRelevant(event, source);
-  }
-  if (event.kind === "community") {
-    return isCommunityStillRelevant(source);
-  }
-  return true;
+  return event.kind === "vault" ? isVaultStillRelevant(event, source) : event.kind !== "community" || isCommunityStillRelevant(source);
 }
 
 function mergeUpcomingIntoLog(
@@ -734,10 +709,7 @@ function armGiveawayPoll(): void {
   }
   notifyRuntime.giveawayPollId = setInterval(() => {
     const source = notifyRuntime.lastSource;
-    if (!source?.settings.browserNotifications) {
-      return;
-    }
-    if (!isNotificationTypeEnabled(source.settings, "giveaways")) {
+    if (!source?.settings.browserNotifications || !isNotificationTypeEnabled(source.settings, "giveaways")) {
       return;
     }
     void syncBrowserNotifications(source);

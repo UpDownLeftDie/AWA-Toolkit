@@ -43,10 +43,7 @@ export function scrapeRedeemableArpFromDocument(
   document_: Document,
 ): number | undefined {
   const fromPage = readPageRedeemableArp(document_);
-  if (fromPage !== undefined) {
-    return fromPage;
-  }
-  return parseRedeemableArpText(pageText(document_));
+  return fromPage === undefined ? parseRedeemableArpText(pageText(document_)) : fromPage;
 }
 
 export function applyRedeemableArpFromDocument(
@@ -147,23 +144,17 @@ function scrapeArpLogRowsFromText(body: string): ArpLogEntry[] {
  * Poll completion is only visible here, so that miss sticks until Refresh.
  */
 export function isArpLogDocumentReady(document_: Document): boolean {
-  if (!document_.body) {
-    return false;
-  }
-  return Boolean(
+  return document_.body ? Boolean(
     document_.querySelector(
       `${ARP_LOG_ROW_SELECTOR}, ${ARP_LOG_AFTER_ROWS_SELECTOR}`,
     ),
-  );
+  ) : false;
 }
 
 export function arpLogSignature(document_: Document): string {
-  if (!isArpLogDocumentReady(document_)) {
-    return "";
-  }
-  return scrapeArpLogFromDocument(document_)
+  return isArpLogDocumentReady(document_) ? scrapeArpLogFromDocument(document_)
     .recent.map((entry) => `${entry.date ?? ""}|${entry.action}|${entry.arp}`)
-    .join(";");
+    .join(";") : "";
 }
 
 export async function waitForArpLogDocument(timeoutMs = 12_000): Promise<void> {
@@ -245,10 +236,7 @@ function mergeArpLogScrapedAt(
   if (scraped.recent.length > 0) {
     return scraped.scrapedAt;
   }
-  if (previous.recent.length > 0) {
-    return previous.scrapedAt;
-  }
-  return ARP_LOG_UNSEEN_SCRAPED_AT;
+  return previous.recent.length > 0 ? previous.scrapedAt : ARP_LOG_UNSEEN_SCRAPED_AT;
 }
 
 /**
@@ -274,10 +262,7 @@ export function mergeArpLogScrape(
   previous: ArpLogState | undefined,
 ): ArpLogState {
   if (!previous) {
-    if (scraped.recent.length === 0) {
-      return { ...scraped, scrapedAt: ARP_LOG_UNSEEN_SCRAPED_AT };
-    }
-    return scraped;
+    return scraped.recent.length === 0 ? { ...scraped, scrapedAt: ARP_LOG_UNSEEN_SCRAPED_AT } : scraped;
   }
   const seen = new Set<string>();
   const recent: ArpLogEntry[] = [];

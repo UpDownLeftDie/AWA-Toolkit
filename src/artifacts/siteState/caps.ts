@@ -86,10 +86,7 @@ function parseTwitchArpStatus(document_: Document): {
   if (completeArp?.[1] !== undefined) {
     return { cap: 'capped', earnedArp: Number(completeArp[1]) };
   }
-  if (/^Complete\b/i.test(status)) {
-    return { cap: 'capped' };
-  }
-  return {};
+  return /^Complete\b/i.test(status) ? { cap: 'capped' } : {};
 }
 
 function readWatchTwitchCapFromDocument(
@@ -108,15 +105,9 @@ function readWatchTwitchCapFromDocument(
   const maxReached = document_.querySelector(
     '#control-center__twitch-max-reached',
   );
-  if (
-    maxReached &&
+  return maxReached &&
     !isElementVisiblyHidden(maxReached) &&
-    /Max Cap Reached/i.test(maxReached.textContent ?? '')
-  ) {
-    return 'capped';
-  }
-
-  return readWatchTwitchCap(pageText(document_));
+    /Max Cap Reached/i.test(maxReached.textContent ?? '') ? 'capped' : readWatchTwitchCap(pageText(document_));
 }
 
 function readWatchTwitchCap(body: string): CapStatus | undefined {
@@ -134,10 +125,7 @@ function readWatchTwitchCap(body: string): CapStatus | undefined {
   ) {
     return 'capped';
   }
-  if (/Watch Twitch[\s\S]{0,80}\bComplete\b/i.test(body)) {
-    return 'capped';
-  }
-  return undefined;
+  return /Watch Twitch[\s\S]{0,80}\bComplete\b/i.test(body) ? 'capped' : undefined;
 }
 
 /**
@@ -192,13 +180,7 @@ function parseDailyArpTwitchData(
 }
 
 function isTwitchUnderCapFromData(data: Record<string, unknown>): boolean {
-  if (typeof data.underCap === 'boolean') {
-    return data.underCap;
-  }
-  if (typeof data.isUnderCap === 'boolean') {
-    return data.isUnderCap;
-  }
-  return true;
+  return typeof data.underCap === 'boolean' ? data.underCap : typeof data.isUnderCap !== 'boolean' || data.isUnderCap;
 }
 
 /**
@@ -318,10 +300,7 @@ function readQuestStatusesFromCard(card: Element): CapStatus | undefined {
   if (/Incomplete/i.test(text)) {
     return 'available';
   }
-  if (/\bComplete\b/i.test(text)) {
-    return 'capped';
-  }
-  return undefined;
+  return /\bComplete\b/i.test(text) ? 'capped' : undefined;
 }
 
 function readSteamQuestsCap(body: string): CapStatus | undefined {
@@ -337,10 +316,7 @@ function readSteamQuestsCap(body: string): CapStatus | undefined {
   if (/Incomplete/i.test(section)) {
     return 'available';
   }
-  if (/\bComplete\b/i.test(section)) {
-    return 'capped';
-  }
-  return undefined;
+  return /\bComplete\b/i.test(section) ? 'capped' : undefined;
 }
 
 function readCapFromCardOrText(
@@ -349,10 +325,7 @@ function readCapFromCardOrText(
   textFallback: (body: string) => CapStatus | undefined,
 ): CapStatus | undefined {
   const card = findActivityCard(document_, cardTitle);
-  if (card) {
-    return readQuestStatusesFromCard(card) ?? textFallback(pageText(document_));
-  }
-  return textFallback(pageText(document_));
+  return card ? readQuestStatusesFromCard(card) ?? textFallback(pageText(document_)) : textFallback(pageText(document_));
 }
 
 function readSteamQuestsCapFromDocument(
@@ -361,10 +334,7 @@ function readSteamQuestsCapFromDocument(
   const fromRows = steamQuestsCapFromRows(
     scrapeSteamQuestRowsFromDocument(document_),
   );
-  if (fromRows) {
-    return fromRows;
-  }
-  return readCapFromCardOrText(
+  return fromRows || readCapFromCardOrText(
     document_,
     /^Steam Quests$/i,
     readSteamQuestsCap,
@@ -382,10 +352,7 @@ function readDailyQuestsCap(body: string): CapStatus | undefined {
   if (/Incomplete/i.test(section[1])) {
     return 'available';
   }
-  if (/\bComplete\b/i.test(section[1])) {
-    return 'capped';
-  }
-  return undefined;
+  return /\bComplete\b/i.test(section[1]) ? 'capped' : undefined;
 }
 
 function readDailyQuestsCapFromDocument(
@@ -394,10 +361,7 @@ function readDailyQuestsCapFromDocument(
   const fromRows = dailyQuestsCapFromRows(
     scrapeDailyQuestRowsFromDocument(document_),
   );
-  if (fromRows) {
-    return fromRows;
-  }
-  return readCapFromCardOrText(
+  return fromRows || readCapFromCardOrText(
     document_,
     /^Daily Quests$/i,
     readDailyQuestsCap,
@@ -450,10 +414,7 @@ function readDailyCalendarCapFromDocument(
   if (claimControl instanceof HTMLButtonElement && claimControl.disabled) {
     return 'capped';
   }
-  if (claimControl.getAttribute('aria-disabled') === 'true') {
-    return 'capped';
-  }
-  return 'available';
+  return claimControl.getAttribute('aria-disabled') === 'true' ? 'capped' : 'available';
 }
 
 function isDiscordPollEntry(entry: { action: string }): boolean {
@@ -461,15 +422,24 @@ function isDiscordPollEntry(entry: { action: string }): boolean {
 }
 
 /**
+ * Daily Login Calendar / Streak stamp at 00:00 UTC, so they sit *under* a
+ * Discord Poll voted later that morning. They must not disqualify a
+ * day-boundary carryover once today's 16:00 UTC poll posts.
+ */
+function isUtcMidnightDailyEntry(entry: { action: string }): boolean {
+  return /Daily Login (?:Calendar|Streak)/i.test(entry.action);
+}
+
+/**
  * ARP Log only stores a UTC date, not a time. Voting the previous weekday
  * poll after 00:00 UTC stamps today's date — and once today's poll posts at
  * 16:00 UTC that row looks like a vote for the new poll.
  *
- * Detect that carryover when the Discord Poll row sits on the day boundary
- * (newest-first: immediately older neighbor is a prior date, and nothing
- * older on the same date exists beneath it). A real same-day vote after the
- * post usually lands above other same-day earns, or the previous cycle
- * already has its own Discord Poll row.
+ * Detect that carryover when the Discord Poll row is the first *daytime*
+ * stamp of the UTC day (newest-first: the next older non-login row is a
+ * prior date). Midnight login rows beneath it are ignored. A real same-day
+ * vote after the post usually has Time on Site / Twitch / quests beneath
+ * it, or the previous cycle already has its own Discord Poll row.
  */
 function isLatePreviousPollStamp(
   recent: ArpLogState['recent'],
@@ -480,26 +450,24 @@ function isLatePreviousPollStamp(
   if (!entry || entry.date !== pollStartDate) {
     return false;
   }
-  const older = recent[index + 1];
-  if (!older?.date || older.date >= pollStartDate) {
-    // Older neighbor is missing or same-day — not a day-boundary carryover.
-    return false;
-  }
-  // Any same-day row below this one means the poll wasn't the first stamp of
-  // the UTC day (vote happened after other same-day activity).
+  let isSawPreviousDay = false;
   for (let cursor = index + 1; cursor < recent.length; cursor += 1) {
     const row = recent[cursor];
     if (!row?.date) {
       continue;
     }
     if (row.date < pollStartDate) {
+      isSawPreviousDay = true;
       break;
     }
-    if (row.date === pollStartDate) {
+    if (
+      row.date === pollStartDate &&
+      !isUtcMidnightDailyEntry(row)
+    ) {
       return false;
     }
   }
-  return true;
+  return isSawPreviousDay;
 }
 
 function previousDiscordPollStartDate(pollStart: Date): string {
@@ -537,10 +505,7 @@ export function hasVotedCurrentDiscordPoll(
   );
 
   return recent.some((entry, index) => {
-    if (!isDiscordPollEntry(entry) || entry.date === undefined) {
-      return false;
-    }
-    if (entry.date < pollStartDate) {
+    if (!isDiscordPollEntry(entry) || entry.date === undefined || (entry.date < pollStartDate)) {
       return false;
     }
     if (entry.date > pollStartDate) {
@@ -548,10 +513,7 @@ export function hasVotedCurrentDiscordPoll(
       return true;
     }
     // entry.date === pollStartDate
-    if (hasVotedPreviousCycle) {
-      return true;
-    }
-    return !isLatePreviousPollStamp(recent, index, pollStartDate);
+    return hasVotedPreviousCycle || !isLatePreviousPollStamp(recent, index, pollStartDate);
   });
 }
 
@@ -639,13 +601,7 @@ export function isControlCenterTwitchDataReady(document_: Document): boolean {
   const status = document_
     .querySelector('#control-center__twitch-arp-status')
     ?.textContent?.trim();
-  if (status) {
-    return true;
-  }
-  if (document_ !== document) {
-    return parseDailyArpTwitchData(document_) !== undefined;
-  }
-  return false;
+  return status ? true : document_ !== document && parseDailyArpTwitchData(document_) !== undefined;
 }
 
 export function isControlCenterActivityReady(document_: Document): boolean {

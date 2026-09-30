@@ -14,10 +14,7 @@ function isElementDisplayNone(element: Element): boolean {
 }
 
 export function isElementVisiblyHidden(element: Element): boolean {
-  if (isElementDisplayNone(element) || element.hasAttribute('hidden')) {
-    return true;
-  }
-  if (element.getAttribute('aria-hidden') === 'true') {
+  if (isElementDisplayNone(element) || element.hasAttribute('hidden') || (element.getAttribute('aria-hidden') === 'true')) {
     return true;
   }
   const className = element.getAttribute('class') ?? '';
@@ -45,16 +42,13 @@ export function findActivityCard(
   const header = [...document_.querySelectorAll('h2, h3, h4')].find((element) =>
     title.test(element.textContent?.trim() ?? ''),
   );
-  if (!header) {
-    return undefined;
-  }
-  return (
+  return header ? (
     header.closest(
       '.user-profile__profile-card, .aa-card, [class*="profile-card"]',
     ) ??
     header.parentElement?.parentElement ??
     undefined
-  );
+  ) : undefined;
 }
 
 export function utcDateString(date = new Date()): string {

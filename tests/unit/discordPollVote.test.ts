@@ -23,6 +23,25 @@ describe('hasVotedCurrentDiscordPoll', () => {
     expect(hasVotedCurrentDiscordPoll(arpLog, afterThursdayPost)).toBe(false);
   });
 
+  it('still treats that stamp as yesterday when UTC-midnight logins sit under it', () => {
+    // Newest-first, after Tuesday 16:00 UTC: afternoon earns, then a Discord
+    // Poll dated today, then Daily Login Calendar/Streak (00:00 UTC). Those
+    // login rows used to make the poll look like today's 16:00 vote.
+    const afterTuesdayPost = new Date('2026-09-15T20:39:00.000Z');
+    const arpLog = log([
+      { action: 'Game Prize', arp: 14, date: '2026-09-15' },
+      { action: 'Steam Quest', arp: 94, date: '2026-09-15' },
+      { action: 'Twitch Passive', arp: 30, date: '2026-09-15' },
+      { action: 'Complete Quest', arp: 10, date: '2026-09-15' },
+      { action: 'Time On Site', arp: 5, date: '2026-09-15' },
+      { action: 'Discord Poll', arp: 5, date: '2026-09-15' },
+      { action: 'Daily Login Streak', arp: 1, date: '2026-09-15' },
+      { action: 'Daily Login Calendar', arp: 3, date: '2026-09-15' },
+      { action: 'Daily Login Streak', arp: 1, date: '2026-09-14' },
+    ]);
+    expect(hasVotedCurrentDiscordPoll(arpLog, afterTuesdayPost)).toBe(false);
+  });
+
   it('still counts that late stamp against the previous poll before the new post', () => {
     const arpLog = log([
       { action: 'Discord Poll', arp: 5, date: '2026-08-20' },

@@ -73,16 +73,6 @@ export function isSiteStatePage(): boolean {
   );
 }
 
-function loadCachedOrRemoteSnapshot(
-  isRemote: boolean,
-  options: { force?: boolean } = {},
-): Promise<ArtifactSnapshot | undefined> {
-  if (isRemote) {
-    return ensureArtifactSnapshot({ force: options.force === true });
-  }
-  return loadSnapshot();
-}
-
 /**
  * Live Showroom scrapes skip ensureArtifactSnapshot, so they never POST
  * Megumin's 0-frag upgrade. If the GM timer is already 0 and the page still
@@ -191,12 +181,14 @@ export async function gatherData(options?: {
   // after that finishes, or Refresh can paint stale cooldowns.
   // On the Showroom page, still go through ensureArtifactSnapshot so Force
   // Refresh can run the stuck-lock nudge before scraping.
-  const snapshotPromise =
-    !shouldForceSite && isArtifactsShowroomPage()
-      ? scrapeAndPersist()
-      : loadCachedOrRemoteSnapshot(isRemote || isArtifactsShowroomPage(), {
-          force: shouldForceSite,
-        });
+  let snapshotPromise: Promise<ArtifactSnapshot | undefined>;
+  if (!shouldForceSite && isArtifactsShowroomPage()) {
+    snapshotPromise = scrapeAndPersist();
+  } else if (isRemote || isArtifactsShowroomPage()) {
+    snapshotPromise = ensureArtifactSnapshot({ force: shouldForceSite });
+  } else {
+    snapshotPromise = loadSnapshot();
+  }
   const siteStatePromise = isRemote
     ? ensureSiteState({ force: shouldForceSite })
     : loadSiteState();
@@ -309,12 +301,10 @@ export function snapshotForOptimize(data: GatheredData): ArtifactSnapshot {
 }
 
 function requiresAsceHydrate(state: SiteState): boolean {
-  if (!state.communityEvent?.isLive) {
-    return false;
-  }
   return (
-    state.communityEvent.communityHoursSource !== 'asce' ||
-    hasPendingAsceRefresh()
+    state.communityEvent?.isLive === true &&
+    (state.communityEvent.communityHoursSource !== 'asce' ||
+      hasPendingAsceRefresh())
   );
 }
 
@@ -336,23 +326,17 @@ export function requiresBackgroundHydrate(
   ) {
     return true;
   }
-  if (requiresRemoteSiteHydrate(data.siteState)) {
-    return true;
-  }
-  if (requiresSteamFreeHydrate(data.siteState)) {
-    return true;
-  }
-  if (
-    isAchievementsHelperFeatureEnabled &&
-    data.settings.achievementsEnabled &&
-    requiresAchievementHydrate(
-      data.achievements,
-      data.settings.achievementsEnabled,
-    )
-  ) {
-    return true;
-  }
-  return requiresAsceHydrate(data.siteState);
+  return (
+    requiresRemoteSiteHydrate(data.siteState) ||
+    requiresSteamFreeHydrate(data.siteState) ||
+    (isAchievementsHelperFeatureEnabled &&
+      data.settings.achievementsEnabled &&
+      requiresAchievementHydrate(
+        data.achievements,
+        data.settings.achievementsEnabled,
+      )) ||
+    requiresAsceHydrate(data.siteState)
+  );
 }
 
 async function hydrateAsceData(

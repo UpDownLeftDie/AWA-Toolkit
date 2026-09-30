@@ -80,10 +80,7 @@ function monthlyUpgradeGain(
     return Math.round(delta * MONTHLY_ARP_FOR_PCT);
   }
   const uses = MONTHLY_CATEGORY_USES[family.effectType];
-  if (uses === undefined) {
-    return 0;
-  }
-  return Math.round(delta * uses);
+  return uses === undefined ? 0 : Math.round(delta * uses);
 }
 
 function withUpgradedArtifact(
@@ -160,10 +157,7 @@ function nextUpgradeCandidate(
     if (rankDelta !== 0) {
       return rankDelta;
     }
-    if (right.arpGain !== left.arpGain) {
-      return right.arpGain - left.arpGain;
-    }
-    return left.fragmentCost - right.fragmentCost;
+    return right.arpGain === left.arpGain ? left.fragmentCost - right.fragmentCost : right.arpGain - left.arpGain;
   })[0];
 }
 
@@ -438,10 +432,12 @@ function bestFlatBonusesForLock(
       return;
     }
     const scored = scoreCombo(combo, context, waitMs).weeklyArp;
-    if (!best || scored > bestArp) {
-      best = bonuses;
-      bestArp = scored;
+    if (best && scored <= bestArp) {
+      return;
     }
+
+    best = bonuses;
+    bestArp = scored;
   };
   for (const combo of combinationsWithPinned(owned, size, pinned)) {
     consider(combo);
@@ -457,10 +453,7 @@ function utcDayBounds(
   dayStartMs: number,
   midnight: number,
 ): { fromMs: number; untilMs: number } {
-  if (dayStartMs <= 0) {
-    return { fromMs: 0, untilMs: midnight };
-  }
-  return { fromMs: dayStartMs, untilMs: dayStartMs + MS_PER_DAY };
+  return dayStartMs <= 0 ? { fromMs: 0, untilMs: midnight } : { fromMs: dayStartMs, untilMs: dayStartMs + MS_PER_DAY };
 }
 
 function isAutoClaimForcedIntoLock(dayStartMs: number, waitMs: number): boolean {
@@ -583,15 +576,15 @@ function forcedDailyArpDelta(
   const questDays = [0, midnight, midnight + MS_PER_DAY].filter((dayStart) => {
     const isTodayDue =
       dayStart === 0 && isActivityAvailable(siteState.caps, 'dailyQuests');
-    if (dayStart === 0 && !isTodayDue) {
-      return false;
-    }
-    return isTimedDailyForcedIntoLock(
-      dayStart,
-      waitMs,
-      0,
-      midnight,
-      deadlineBufferMs,
+    return (
+      (dayStart !== 0 || isTodayDue) &&
+      isTimedDailyForcedIntoLock(
+        dayStart,
+        waitMs,
+        0,
+        midnight,
+        deadlineBufferMs,
+      )
     );
   });
   for (const dayStart of questDays) {
@@ -670,10 +663,7 @@ export function resolveDeferredAllArp(
   if (laterEta !== undefined) {
     unlock.etaMs = laterEta.etaMs;
   }
-  if (!isAllArpWorthTheLock(artifacts, owned, context, waitMs)) {
-    return undefined;
-  }
-  return { waitMs, artifacts, unlock };
+  return isAllArpWorthTheLock(artifacts, owned, context, waitMs) ? { waitMs, artifacts, unlock } : undefined;
 }
 
 /**
@@ -761,10 +751,7 @@ export function resolveDeferredSteam(
       ) + COOLDOWN_MS,
     );
   }
-  if (isWeeklyForcedIntoLock(msUntilNextSteamQuestWeek(now), waitMs)) {
-    return undefined;
-  }
-  return { waitMs, artifacts: steam.artifacts };
+  return isWeeklyForcedIntoLock(msUntilNextSteamQuestWeek(now), waitMs) ? undefined : { waitMs, artifacts: steam.artifacts };
 }
 
 /**
@@ -816,17 +803,17 @@ export function findBestComboBy(
       continue;
     }
     const score = primary(scored);
-    if (
-      !best ||
+    if (!(!best ||
       score > bestPrimary ||
       (score === bestPrimary && scored.totalScore > best.totalScore) ||
       (score === bestPrimary &&
         scored.totalScore === best.totalScore &&
-        comboTieBreakDelta(scored, best, equipped) > 0)
-    ) {
-      best = scored;
-      bestPrimary = score;
+        comboTieBreakDelta(scored, best, equipped) > 0))) {
+      continue;
     }
+
+    best = scored;
+    bestPrimary = score;
   }
   return best;
 }
@@ -875,18 +862,16 @@ export function findBestMarketDiscountCombo(
 }
 
 export function hasMarketDiscount(combo: ScoredCombo | undefined): boolean {
-  if (!combo || combo.artifacts.length === 0) {
-    return false;
-  }
-  return combo.marketDiscountPct >= VAULT_PRIORITY_DISCOUNT_PCT;
+  return (
+    combo !== undefined &&
+    combo.artifacts.length > 0 &&
+    combo.marketDiscountPct >= VAULT_PRIORITY_DISCOUNT_PCT
+  );
 }
 
 function isMonthlyMetaEligible(artifact: OwnedArtifact): boolean {
   const family = getArtifactById(artifact.familyId);
-  if (!family || family.effectUnit === 'cosmetic') {
-    return false;
-  }
-  if (family.effectType === ArtifactEffectType.None) {
+  if (!family || family.effectUnit === 'cosmetic' || (family.effectType === ArtifactEffectType.None)) {
     return false;
   }
   if (
@@ -945,10 +930,7 @@ export function findMonthlyMetaCombo(
   for (const familyId of fillOrder) {
     tryAddFamily(familyId);
   }
-  if (picked.length === 0) {
-    return undefined;
-  }
-  return scoreCombo(picked, context);
+  return picked.length === 0 ? undefined : scoreCombo(picked, context);
 }
 
 export function suggestDailySwap(
@@ -1004,10 +986,12 @@ export function unconstrainedAllArpCombo(
   let bestPct = 0;
   for (const combo of combinations(owned, size)) {
     const pct = collectBonuses(combo).allArpPct;
-    if (pct > bestPct) {
-      bestPct = pct;
-      best = combo;
+    if (pct <= bestPct) {
+      continue;
     }
+
+    bestPct = pct;
+    best = combo;
   }
   return bestPct > 0 ? best : undefined;
 }
@@ -1025,10 +1009,7 @@ export function allArpEquipWaitMs(
     return 0;
   }
   const combo = unconstrainedAllArpCombo(owned);
-  if (!combo) {
-    return undefined;
-  }
-  return comboEquipWaitMs(combo, owned, settings, slotLocks, now);
+  return combo ? comboEquipWaitMs(combo, owned, settings, slotLocks, now) : undefined;
 }
 
 /**
@@ -1044,13 +1025,7 @@ export function shouldWaitForAllArpBeforeBattlePass(
   siteState: SiteState,
   slotLocks?: Partial<Record<ArtifactSlotPosition, boolean>>,
 ): boolean {
-  if (!hasInventoryAllArp(owned)) {
-    return false;
-  }
-  if (hasAllArpEffect(currentLoadout(owned))) {
-    return false;
-  }
-  if (battlePassClaimableArp(siteState.battlePass) <= 0) {
+  if (!hasInventoryAllArp(owned) || hasAllArpEffect(currentLoadout(owned)) || (battlePassClaimableArp(siteState.battlePass) <= 0)) {
     return false;
   }
   const waitMs = allArpEquipWaitMs(owned, settings, slotLocks);
@@ -1058,10 +1033,7 @@ export function shouldWaitForAllArpBeforeBattlePass(
     return false;
   }
   const bpLeft = battlePassRemainingMs(siteState.battlePass);
-  if (bpLeft === undefined) {
-    return true;
-  }
-  return waitMs + BP_CLAIM_BUFFER_MS < bpLeft;
+  return bpLeft === undefined || waitMs + BP_CLAIM_BUFFER_MS < bpLeft;
 }
 
 export function shouldDeferBattlePassForContext(

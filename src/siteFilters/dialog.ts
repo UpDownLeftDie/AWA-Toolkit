@@ -296,10 +296,12 @@ function setFilterSettingsOpen(isOpen: boolean): void {
   const backdrop = getFilterSettingsBackdrop();
   modal.style.display = isOpen ? 'block' : 'none';
   modal.hidden = !isOpen;
-  if (backdrop) {
-    backdrop.style.display = isOpen ? 'block' : 'none';
-    backdrop.hidden = !isOpen;
+  if (!backdrop) {
+    return;
   }
+
+  backdrop.style.display = isOpen ? 'block' : 'none';
+  backdrop.hidden = !isOpen;
 }
 
 function readFilterModeFromForm(id: string, fallback: FilterMode): FilterMode {

@@ -126,10 +126,7 @@ function readFragmentBalance(document_: Document): number {
   }
   const text = document_.body?.textContent ?? "";
   const match = /Fragments:\s*([\d,]+)/i.exec(text);
-  if (match?.[1]) {
-    return Number(match[1].replaceAll(",", ""));
-  }
-  return 0;
+  return match?.[1] ? Number(match[1].replaceAll(",", "")) : 0;
 }
 
 function readUsernameFrom(
@@ -173,10 +170,7 @@ export function resolveShowroomUrl(username?: string | undefined): string {
   const link = document.querySelector<HTMLAnchorElement>(
     'a[href*="/member/"][href$="/artifacts"]',
   );
-  if (link?.pathname) {
-    return link.pathname;
-  }
-  return USER_ARTIFACTS_ROOM_PATH;
+  return link?.pathname || USER_ARTIFACTS_ROOM_PATH;
 }
 
 function parseEquippedPosition(card: Element): ArtifactSlotIndex | undefined {
@@ -189,10 +183,7 @@ function parseEquippedPosition(card: Element): ArtifactSlotIndex | undefined {
   const match = /unequipArtifact\s*\(\s*\d+\s*,\s*([123])\s*\)/.exec(
     unequip.getAttribute("onclick") ?? "",
   );
-  if (!match?.[1]) {
-    return undefined;
-  }
-  return Number(match[1]) as ArtifactSlotIndex;
+  return match?.[1] ? (Number(match[1]) as ArtifactSlotIndex) : undefined;
 }
 
 function normalizeName(value: string): string {
@@ -210,10 +201,7 @@ interface ShowcaseSlot {
  * `fa-lock` token), so "has fa-lock and not fa-lock-open" is the locked state.
  */
 function isShowcaseSlotLocked(slot: Element): boolean {
-  if (slot.querySelector(":scope i.fa-lock-open, :scope i.fa-unlock")) {
-    return false;
-  }
-  return Boolean(slot.querySelector(":scope i.fa-lock"));
+  return !slot.querySelector(":scope i.fa-lock-open, :scope i.fa-unlock") && Boolean(slot.querySelector(":scope i.fa-lock"));
 }
 
 /**

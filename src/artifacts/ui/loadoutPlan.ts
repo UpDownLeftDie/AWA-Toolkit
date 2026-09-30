@@ -25,10 +25,7 @@ export function formatMs(ms: number): string {
   if (hours > 0) {
     return `${hours}h`;
   }
-  if (mins > 0) {
-    return `${mins}m`;
-  }
-  return '<1m';
+  return mins > 0 ? `${mins}m` : '<1m';
 }
 
 /**
@@ -87,28 +84,19 @@ export function artifactsForDisplay(
 export function loadoutLabel(
   artifacts: { displayName: string; equippedPosition?: number }[] | undefined,
 ): string {
-  if (!artifacts || artifacts.length === 0) {
-    return '—';
-  }
-  return sortArtifactsForDisplay(artifacts)
+  return !artifacts || artifacts.length === 0 ? '—' : sortArtifactsForDisplay(artifacts)
     .map((artifact) => artifact.displayName)
     .join(' + ');
 }
 
 export function comboLabel(result: OptimizerResult['best']): string {
-  if (!result) {
-    return '—';
-  }
-  return loadoutLabel(artifactsForDisplay(result));
+  return result ? loadoutLabel(artifactsForDisplay(result)) : '—';
 }
 
 export function loadoutSetNames(
   artifacts: { familyId: string }[] | undefined,
 ): string[] {
-  if (!artifacts || artifacts.length === 0) {
-    return [];
-  }
-  return activeSets(artifacts.map((artifact) => artifact.familyId)).map(
+  return !artifacts || artifacts.length === 0 ? [] : activeSets(artifacts.map((artifact) => artifact.familyId)).map(
     (set) => set.name,
   );
 }
@@ -124,7 +112,7 @@ export function isSameLoadout(
   const rightIds = new Set(right.map((artifact) => artifact.instanceId));
   return (
     leftIds.size === rightIds.size &&
-    [...leftIds].every((id) => rightIds.has(id))
+    leftIds.isSubsetOf(rightIds)
   );
 }
 
@@ -164,10 +152,7 @@ export function formatLockedSlotParts(
       (slot) => slot.position === position,
     );
     const estimateTag = entry?.estimated === true ? ', estimated' : '';
-    if (remaining <= 0) {
-      return `slot ${position} (locked${estimateTag})`;
-    }
-    return `slot ${position} (${formatMs(remaining)} left${estimateTag})`;
+    return remaining <= 0 ? `slot ${position} (locked${estimateTag})` : `slot ${position} (${formatMs(remaining)} left${estimateTag})`;
   });
 }
 
@@ -278,10 +263,7 @@ function sortByMarginalEquipPriority(
   return pieces.toSorted((left, right) => {
     const scoreDelta =
       marginalEquipScore(right, basis) - marginalEquipScore(left, basis);
-    if (scoreDelta !== 0) {
-      return scoreDelta;
-    }
-    return compareByName(left, right);
+    return scoreDelta === 0 ? compareByName(left, right) : scoreDelta;
   });
 }
 
@@ -331,10 +313,7 @@ function pickImmediateEquips(
     pool.sort((left, right) => {
       const scoreDelta =
         marginalEquipScore(right, basis) - marginalEquipScore(left, basis);
-      if (scoreDelta !== 0) {
-        return scoreDelta;
-      }
-      return compareByName(left, right);
+      return scoreDelta === 0 ? compareByName(left, right) : scoreDelta;
     });
     const next = pool.shift();
     if (!next) {

@@ -60,16 +60,8 @@ export function suggestVaultDiscount(
   cycleId: string,
 ): VaultDiscountGuard {
   const vaultDiscount = { cycleId, note, dismissed: false };
-  if (
-    discountCombo &&
-    !isSameLoadout(best.artifacts, discountCombo.artifacts)
-  ) {
-    return { best, marketDiscountLoadout: discountCombo, vaultDiscount };
-  }
-  if (hasMarketDiscount(best)) {
-    return { best, vaultDiscount };
-  }
-  return { best, vaultDiscount };
+  return discountCombo &&
+    !isSameLoadout(best.artifacts, discountCombo.artifacts) ? { best, marketDiscountLoadout: discountCombo, vaultDiscount } : { best, vaultDiscount };
 }
 
 export function resolvePreOpenVaultDiscount(
@@ -123,16 +115,12 @@ export function resolvePreOpenVaultDiscount(
     );
   }
 
-  if (discountCombo) {
-    return suggestVaultDiscount(
+  return discountCombo ? suggestVaultDiscount(
       discountCombo,
       discountCombo,
       `Equip market-discount before Game Vault opens (${eta}) — a 24h ARP swap would still be locked at open.`,
       cycleId,
-    );
-  }
-
-  return { best: arpBest };
+    ) : { best: arpBest };
 }
 
 export function resolveOpenVaultDiscount(
@@ -223,16 +211,12 @@ export function resolveVaultDiscountBest(
   }
 
   const opensAt = gameVaultOpensAtMs(context.siteState);
-  if (opensAt !== undefined && opensAt > now) {
-    return resolvePreOpenVaultDiscount(
+  return opensAt !== undefined && opensAt > now ? resolvePreOpenVaultDiscount(
       arpBest,
       current,
       discountCombo,
       context,
       cycleId ?? context.siteState.gameVaultOpensAt ?? 'upcoming',
       now,
-    );
-  }
-
-  return { best: arpBest };
+    ) : { best: arpBest };
 }

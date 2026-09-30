@@ -125,10 +125,7 @@ export function canCompleteInWearWindow(
     waitMs,
     horizonMs,
   );
-  if (durationMs <= 0) {
-    return overlap > 0;
-  }
-  return overlap >= durationMs;
+  return durationMs <= 0 ? overlap > 0 : overlap >= durationMs;
 }
 
 /**
@@ -265,10 +262,7 @@ export function pinHorizonMs(siteState: SiteState, now = Date.now()): number {
     return untilReset;
   }
   const eta = estimateNextCommunityUnlock(event, now);
-  if (eta === undefined || eta.etaMs > COOLDOWN_MS) {
-    return untilReset;
-  }
-  return Math.min(untilReset, eta.etaMs);
+  return eta === undefined || eta.etaMs > COOLDOWN_MS ? untilReset : Math.min(untilReset, eta.etaMs);
 }
 
 export function pinnedEquippedArtifacts(

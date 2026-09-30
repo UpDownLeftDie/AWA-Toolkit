@@ -126,10 +126,7 @@ export async function saveSettings(
 
 export function extractTier(text: string): number | undefined {
   const match = /Tier\s*(\d+)/i.exec(text);
-  if (match?.[1]) {
-    return Number(match[1]);
-  }
-  return undefined;
+  return match?.[1] ? Number(match[1]) : undefined;
 }
 
 function readPageUserTier(): number | undefined {

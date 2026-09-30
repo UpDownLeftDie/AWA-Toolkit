@@ -299,10 +299,7 @@ function requiresIframeFallback(path: string, fetched: Document): boolean {
       !fetched.querySelector('.carousel-cell') || !hasPersonalHours(fetched)
     );
   }
-  if (/\/steam\/quests\/.+/.test(path)) {
-    return !hasSteamPlayEligibilitySignal(fetched);
-  }
-  return false;
+  return /\/steam\/quests\/.+/.test(path) && !hasSteamPlayEligibilitySignal(fetched);
 }
 
 function hasSteamPlayEligibilitySignal(document_: Document): boolean {
@@ -316,23 +313,15 @@ function hasSteamPlayEligibilitySignal(document_: Document): boolean {
   const labels = [...document_.querySelectorAll('a, button')].map((element) =>
     (element.textContent ?? '').replaceAll(/\s+/g, ' ').trim(),
   );
-  if (
-    labels.some((label) =>
+  return labels.some((label) =>
       /^(Check Game|Visit Steam|Sync Games|Launch Game)$/i.test(label),
-    )
-  ) {
-    return true;
-  }
-  return /completed this quest/i.test(document_.body?.textContent ?? '');
+    ) || /completed this quest/i.test(document_.body?.textContent ?? '');
 }
 
 async function loadRemotePage(path: string): Promise<LoadedPage | undefined> {
   const fetched = await fetchDocument(path);
   if (fetched?.document.querySelector('a.artifact-list-item, body')) {
-    if (requiresIframeFallback(path, fetched.document)) {
-      return openPageDocument(path);
-    }
-    return fetched;
+    return requiresIframeFallback(path, fetched.document) ? openPageDocument(path) : fetched;
   }
   return openPageDocument(path);
 }
@@ -351,27 +340,18 @@ function isSnapshotFresh(snapshot: ArtifactSnapshot | undefined): boolean {
     return false;
   }
   const scrapedAt = Date.parse(snapshot.scrapedAt);
-  if (Number.isNaN(scrapedAt)) {
-    return false;
-  }
-  return Date.now() - scrapedAt < STALE_MS;
+  return !Number.isNaN(scrapedAt) && Date.now() - scrapedAt < STALE_MS;
 }
 
 function areSlotLocksFresh(snapshot: ArtifactSnapshot | undefined): boolean {
-  if (!snapshot?.slotLocks) {
-    return false;
-  }
-  return isScrapedWithin(snapshot.scrapedAt, SLOT_LOCK_STALE_MS);
+  return snapshot?.slotLocks ? isScrapedWithin(snapshot.scrapedAt, SLOT_LOCK_STALE_MS) : false;
 }
 
 function isCapsFresh(
   state: SiteState | undefined,
   now = new Date(),
 ): boolean {
-  if (!state) {
-    return false;
-  }
-  if (!isScrapedWithin(state.updatedAt, STALE_MS)) {
+  if (!state || !isScrapedWithin(state.updatedAt, STALE_MS)) {
     return false;
   }
   // Twitch / calendar / dailies / time-on-site all reset at 00:00 UTC — a
@@ -405,10 +385,7 @@ function shouldRescrapeBattlePass(state: SiteState | undefined): boolean {
     return true;
   }
   const scrapedAt = Date.parse(bp.scrapedAt ?? '');
-  if (Number.isNaN(scrapedAt)) {
-    return true;
-  }
-  return Date.now() - scrapedAt > BATTLE_PASS_STALE_MS;
+  return Number.isNaN(scrapedAt) || Date.now() - scrapedAt > BATTLE_PASS_STALE_MS;
 }
 
 async function refreshBattlePassOnly(next: SiteState): Promise<void> {
@@ -460,10 +437,7 @@ function isScrapedWithin(
     return false;
   }
   const at = Date.parse(scrapedAt);
-  if (Number.isNaN(at)) {
-    return false;
-  }
-  return Date.now() - at < maxAgeMs;
+  return !Number.isNaN(at) && Date.now() - at < maxAgeMs;
 }
 
 function utcDayStartMs(now = new Date()): number {
@@ -485,10 +459,7 @@ function isScrapedSinceUtcMidnight(
     return false;
   }
   const at = Date.parse(scrapedAt);
-  if (Number.isNaN(at)) {
-    return false;
-  }
-  return at >= utcDayStartMs(now);
+  return !Number.isNaN(at) && at >= utcDayStartMs(now);
 }
 
 /**
@@ -514,10 +485,7 @@ function isArpLogFresh(
     return false;
   }
   const scrapedAt = arpLog.scrapedAt;
-  if (!isScrapedWithin(scrapedAt, ARP_LOG_STALE_MS)) {
-    return false;
-  }
-  if (!isScrapedSinceUtcMidnight(scrapedAt, now)) {
+  if (!isScrapedWithin(scrapedAt, ARP_LOG_STALE_MS) || !isScrapedSinceUtcMidnight(scrapedAt, now)) {
     return false;
   }
   const scrapedAtMs = Date.parse(scrapedAt);
@@ -531,10 +499,7 @@ function isCommunityEventFresh(
   const event = state?.communityEvent;
   if (!event?.isLive) {
     // A LIVE banner with a wrongly-ended cache must refetch, not sit on TTL.
-    if (state?.caps.steamCommunityEvent === 'available') {
-      return false;
-    }
-    return isCapsFresh(state, now);
+    return state?.caps.steamCommunityEvent !== 'available' && isCapsFresh(state, now);
   }
   // Banner-only cache (no carousel yet) — still need the event page.
   if (event.milestones.length === 0) {
@@ -721,10 +686,7 @@ export async function confirmShowroomLoadout(
 
   const didConfirm = async (): Promise<boolean> => {
     const snapshot = await fetchShowroomSnapshot();
-    if (!snapshot) {
-      return false;
-    }
-    if (!hasSnapshotLoadout(snapshot, applied)) {
+    if (!snapshot || !hasSnapshotLoadout(snapshot, applied)) {
       return false;
     }
     await persistConfirmedShowroomSnapshot(snapshot);
@@ -952,10 +914,7 @@ async function loadControlCenterDocument(): Promise<Document | undefined> {
     return document;
   }
   await waitForControlCenterDocument();
-  if (isControlCenterDocumentReady(document)) {
-    return document;
-  }
-  return loadRemoteDocument(CONTROL_CENTER_PATH);
+  return isControlCenterDocumentReady(document) ? document : loadRemoteDocument(CONTROL_CENTER_PATH);
 }
 
 function applyControlCenterDocument(
@@ -1062,19 +1021,19 @@ async function refreshArpLog(
     );
   }
   // New log rewards often mean milestones just auto-awarded — refresh event.
-  if (options.refreshLiveEventAfter && next.communityEvent?.isLive) {
-    const eventDocument = await loadRemoteDocument(next.communityEvent.url);
-    if (eventDocument) {
-      next.communityEvent = mergeCommunityEventScrape(
-        scrapeCommunityEventFromDocument(
-          eventDocument,
-          next.communityEvent.url,
-        ),
-        next.communityEvent,
-        { source: 'remote' },
-      );
-    }
+  const communityEvent = next.communityEvent;
+  if (!options.refreshLiveEventAfter || !communityEvent?.isLive) {
+    return;
   }
+  const eventDocument = await loadRemoteDocument(communityEvent.url);
+  if (!eventDocument) {
+    return;
+  }
+  next.communityEvent = mergeCommunityEventScrape(
+    scrapeCommunityEventFromDocument(eventDocument, communityEvent.url),
+    communityEvent,
+    { source: 'remote' },
+  );
 }
 
 export function requiresRemoteSnapshotHydrate(
@@ -1087,10 +1046,9 @@ export function requiresRemoteSiteHydrate(
   state: SiteState | undefined,
   options: { force?: boolean } = {},
 ): boolean {
-  if (!state || options.force) {
-    return true;
-  }
   return (
+    !state ||
+    options.force ||
     !isCapsFresh(state) ||
     shouldRescrapeBattlePass(state) ||
     !isArpLogFresh(state) ||

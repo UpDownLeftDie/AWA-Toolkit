@@ -194,10 +194,7 @@ function namedLoadout(
   label: string,
   activeSetNames: string[] | undefined,
 ): string {
-  if (!activeSetNames || activeSetNames.length === 0) {
-    return label;
-  }
-  return `${label} (${activeSetNames.join(', ')})`;
+  return !activeSetNames || activeSetNames.length === 0 ? label : `${label} (${activeSetNames.join(', ')})`;
 }
 
 async function explainNothingToEquip(
@@ -245,10 +242,7 @@ function allArpTargetArtifacts(
     return deferred;
   }
   const loadout = result?.allArpLoadout?.artifacts;
-  if (loadout && loadout.length > 0) {
-    return loadout;
-  }
-  return undefined;
+  return loadout && loadout.length > 0 ? loadout : undefined;
 }
 
 /**
@@ -646,6 +640,29 @@ export function bindDynamicBody(
   bindVaultDiscountActions(root, onChanged);
   bindAchievementOpenButtons(root, onChanged);
   bindAchievementAutomationSwitches(root, onChanged);
+  const gathered = gatheredCache.current;
+  if (gathered) {
+    bindEquipTodoButtons(root, gathered.result, gathered.settings);
+  }
+}
+
+export function bindEquipTodoButtons(
+  root: ParentNode,
+  result: OptimizerResult,
+  settings: ArtifactOptimizerSettings,
+): void {
+  for (const button of root.querySelectorAll<HTMLButtonElement>('.ao-equip-btn')) {
+    button.addEventListener('click', () => {
+      const isAllArp = button.dataset.equip === 'allArp';
+      void confirmAndApplyCombo(
+        isAllArp ? result.allArpLoadout : result.best,
+        result.current,
+        settings,
+        isAllArp ? 'All-ARP%' : 'recommended',
+        result,
+      );
+    });
+  }
 }
 
 export function bindUpgradeButtons(

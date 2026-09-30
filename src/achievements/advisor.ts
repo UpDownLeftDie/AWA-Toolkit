@@ -72,13 +72,7 @@ function isSatisfiedForCurrentInterval(
     if (BORDER_GROUPS.has(achievement.group)) {
       return cooldowns.borderRotatedDate === today;
     }
-    if (AVATAR_GROUPS.has(achievement.group)) {
-      return cooldowns.avatarRotatedDate === today;
-    }
-    if (achievement.id === "add-about-me") {
-      return cooldowns.aboutMeSubmittedMonth !== undefined;
-    }
-    return false;
+    return AVATAR_GROUPS.has(achievement.group) ? cooldowns.avatarRotatedDate === today : achievement.id === "add-about-me" && cooldowns.aboutMeSubmittedMonth !== undefined;
   }
   if (key === "visitPages") {
     return cooldowns.visitPagesDate === today;
@@ -86,13 +80,7 @@ function isSatisfiedForCurrentInterval(
   if (key === "watchVideos") {
     return cooldowns.watchVideosDate === today;
   }
-  if (key === "readArticles") {
-    return cooldowns.readArticlesDate === today;
-  }
-  if (key === "gameVault") {
-    return cooldowns.gameVaultDate === today;
-  }
-  return false;
+  return key === "readArticles" ? cooldowns.readArticlesDate === today : key === "gameVault" && cooldowns.gameVaultDate === today;
 }
 
 function buildTodo(
@@ -179,17 +167,11 @@ export function buildAchievementTodos(
       actions.push(todo);
     }
   }
-  if (actions.length === 0 && infos.length === 0) {
-    return emptyTodos(snapshot);
-  }
-  return [...actions, ...infos];
+  return actions.length === 0 && infos.length === 0 ? emptyTodos(snapshot) : [...actions, ...infos];
 }
 
 export function achievementProgressLabel(
   snapshot: AchievementSnapshot | undefined,
 ): string {
-  if (!snapshot || snapshot.totalCount <= 0) {
-    return "progress unknown";
-  }
-  return `${snapshot.earnedCount}/${snapshot.totalCount} earned`;
+  return !snapshot || snapshot.totalCount <= 0 ? "progress unknown" : `${snapshot.earnedCount}/${snapshot.totalCount} earned`;
 }

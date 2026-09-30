@@ -252,10 +252,7 @@ function watchLiveSiteStatePage(options: {
   onPersist?: (state: SiteState) => void | Promise<void>;
   clickSelector?: string;
 }): void {
-  if (!options.isPage) {
-    return;
-  }
-  if (document.documentElement.dataset[options.datasetFlag] === "1") {
+  if (!options.isPage || (document.documentElement.dataset[options.datasetFlag] === "1")) {
     return;
   }
   document.documentElement.dataset[options.datasetFlag] = "1";
@@ -422,15 +419,13 @@ export function isActivityPending(
   key: ActivityKey,
 ): boolean {
   const status = caps[key];
-  if (status === "available") {
-    return true;
-  }
-  if (status === "capped") {
-    return false;
-  }
   return (
-    ["steamQuests", "dailyQuests", "steamCommunityEvent"] as ActivityKey[]
-  ).includes(key);
+    status === "available" ||
+    (status !== "capped" &&
+      (
+        ["steamQuests", "dailyQuests", "steamCommunityEvent"] as ActivityKey[]
+      ).includes(key))
+  );
 }
 
 export type {

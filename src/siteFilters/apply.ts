@@ -52,10 +52,7 @@ function combineFilterMode(
   if (!isMatching || mode === 'off') {
     return current;
   }
-  if (mode === 'hide' || current === 'hide') {
-    return 'hide';
-  }
-  return 'dim';
+  return mode === 'hide' || current === 'hide' ? 'hide' : 'dim';
 }
 
 function marketplaceFilterTarget(item: HTMLElement): HTMLElement {
@@ -207,14 +204,15 @@ export function watchPageFilters(): void {
     void filterGiveaways();
     return;
   }
-  if (currentPath.startsWith('/marketplace')) {
-    const observer = new MutationObserver(() => {
-      void filterMarketplace();
-    });
-    observer.observe(document.body, {
-      childList: true,
-      subtree: true,
-    });
-    void filterMarketplace();
+  if (!currentPath.startsWith('/marketplace')) {
+    return;
   }
+  const observer = new MutationObserver(() => {
+    void filterMarketplace();
+  });
+  observer.observe(document.body, {
+    childList: true,
+    subtree: true,
+  });
+  void filterMarketplace();
 }

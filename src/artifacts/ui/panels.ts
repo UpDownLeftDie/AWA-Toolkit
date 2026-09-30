@@ -25,6 +25,7 @@ import {
 } from "./actionPlan";
 import {
   bindDynamicBody,
+  bindEquipTodoButtons,
   bindUpgradeButtons,
   confirmAndApplyCombo,
   confirmAndApplyLoadout,
@@ -170,10 +171,7 @@ function resolveShowroomInsertTarget():
     target = link;
   }
   const parent = target.parentElement;
-  if (!parent) {
-    return undefined;
-  }
-  return { parent, before: target.nextSibling };
+  return parent ? { parent, before: target.nextSibling } : undefined;
 }
 
 function bindModalEvents(
@@ -649,6 +647,12 @@ function renderControlCenterPanelBody(
     areActionsEnabled && !summary.hideRecommendedEquip
       ? '<button type="button" id="ao-cc-equip">Equip Recommended</button>'
       : "";
+  const allArpButton =
+    areActionsEnabled &&
+    data.result.allArpLoadout &&
+    (data.result.current?.allArpPct ?? 0) <= 0
+      ? '<button type="button" id="ao-cc-equip-allarp" class="ao-secondary">Equip All-ARP%</button>'
+      : "";
   const claimBpButton = areActionsEnabled ? compactClaimAllBpButton(data) : "";
   const actionsOffNote = areActionsEnabled
     ? ""
@@ -676,8 +680,9 @@ function renderControlCenterPanelBody(
     ${actionsOffNote}
     <div class="ao-actions">
       ${equipButton}
+      ${allArpButton}
       ${
-        equipButton
+        equipButton || allArpButton
           ? '<span class="ao-actions-sep" aria-hidden="true"></span>'
           : ""
       }
@@ -923,31 +928,38 @@ function paintControlCenterPanel(
     panel,
     renderControlCenterPanelBody(data, { isHydrating }),
   );
+  const tree = panelTree(panel);
   bindInlinePanelActions(panel, data, {
     equipId: "ao-cc-equip",
     openId: "ao-cc-open",
   });
+  bindEquipTodoButtons(tree, data.result, data.settings);
+  tree.querySelector("#ao-cc-equip-allarp")?.addEventListener("click", () => {
+    void confirmAndApplyCombo(
+      data.result.allArpLoadout,
+      data.result.current,
+      data.settings,
+      "All-ARP%",
+      data.result,
+    );
+  });
   // No-op: handleUpgradeClick already force-reinjects this same panel after
   // onChanged resolves, so refreshing it here too would just double-fetch.
-  bindUpgradeButtons(panelTree(panel), async () => {});
-  bindClaimAllButtons(panelTree(panel));
-  bindOpenTwitchButtons(panelTree(panel));
-  bindVaultDiscountActions(panelTree(panel), () => {
+  bindUpgradeButtons(tree, async () => {});
+  bindClaimAllButtons(tree);
+  bindOpenTwitchButtons(tree);
+  bindVaultDiscountActions(tree, () => {
     void injectControlCenterPanel({ force: true });
   });
-  bindAchievementOpenButtons(panelTree(panel), async () => {
+  bindAchievementOpenButtons(tree, async () => {
     void injectControlCenterPanel({ force: true });
   });
-  panelTree(panel)
-    .querySelector("#ao-cc-artifacts")
-    ?.addEventListener("click", () => {
-      location.assign("/user-artifacts-room");
-    });
-  panelTree(panel)
-    .querySelector("#ao-cc-refresh")
-    ?.addEventListener("click", () => {
-      void injectControlCenterPanel({ force: true });
-    });
+  tree.querySelector("#ao-cc-artifacts")?.addEventListener("click", () => {
+    location.assign("/user-artifacts-room");
+  });
+  tree.querySelector("#ao-cc-refresh")?.addEventListener("click", () => {
+    void injectControlCenterPanel({ force: true });
+  });
 }
 
 function syncControlCenterFromGathered(): void {

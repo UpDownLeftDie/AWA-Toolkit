@@ -99,10 +99,7 @@ async function loadAsceCache(): Promise<AsceCache> {
   }
   try {
     const parsed: unknown = JSON.parse(raw);
-    if (!isAsceCache(parsed)) {
-      return { at: '' };
-    }
-    return parsed;
+    return isAsceCache(parsed) ? parsed : { at: '' };
   } catch {
     return { at: '' };
   }
@@ -114,10 +111,7 @@ async function saveAsceCache(cache: AsceCache): Promise<void> {
 
 function cacheAgeMs(cache: AsceCache): number {
   const at = Date.parse(cache.at);
-  if (Number.isNaN(at)) {
-    return Number.POSITIVE_INFINITY;
-  }
-  return Date.now() - at;
+  return Number.isNaN(at) ? Number.POSITIVE_INFINITY : Date.now() - at;
 }
 
 function isCacheFresh(cache: AsceCache): boolean {
@@ -133,10 +127,7 @@ function communityEventSlug(url: string): string | undefined {
     const path = new URL(url, 'https://na.alienwarearena.com').pathname;
     const parts = path.split('/').filter(Boolean);
     const index = parts.indexOf('community-event');
-    if (index === -1) {
-      return undefined;
-    }
-    return parts[index + 1];
+    return index === -1 ? undefined : parts[index + 1];
   } catch {
     return undefined;
   }
@@ -186,10 +177,7 @@ function parseAsceHourPoint(
     return;
   }
   const slotMs = asceSlotMs(timestamp, hour);
-  if (slotMs === undefined) {
-    return undefined;
-  }
-  return { slotMs, hours };
+  return slotMs === undefined ? undefined : { slotMs, hours };
 }
 
 function parseAsceHours(raw: unknown): CommunityHoursSample[] {
@@ -212,10 +200,7 @@ function parseAsceHours(raw: unknown): CommunityHoursSample[] {
     at: new Date(slotMs).toISOString(),
     hours: bySlot.get(slotMs) ?? 0,
   }));
-  if (samples.length > ASCE_SAMPLE_MAX) {
-    return samples.slice(-ASCE_SAMPLE_MAX);
-  }
-  return samples;
+  return samples.length > ASCE_SAMPLE_MAX ? samples.slice(-ASCE_SAMPLE_MAX) : samples;
 }
 
 function parseAsceArpReward(message: string): number {
@@ -366,10 +351,7 @@ function applyAsceUnlocks(
       return milestone;
     }
     const requiredHours = milestone.communityHoursRequired;
-    if (requiredHours === undefined || !unlocked.has(requiredHours)) {
-      return milestone;
-    }
-    return { ...milestone, isCommunityUnlocked: true };
+    return requiredHours === undefined || !unlocked.has(requiredHours) ? milestone : { ...milestone, isCommunityUnlocked: true };
   });
 }
 
@@ -380,10 +362,7 @@ function resolveCommunityHours(
   if (scraped === undefined) {
     return asceHours;
   }
-  if (asceHours === undefined) {
-    return scraped;
-  }
-  return Math.max(scraped, asceHours);
+  return asceHours === undefined ? scraped : Math.max(scraped, asceHours);
 }
 
 function withLiveHoursSample(
@@ -528,8 +507,5 @@ export async function didRefreshAsceCommunityHours(
   }
   applyFeedIfLive(state, feed);
   const next = state.communityEvent;
-  if (!next) {
-    return false;
-  }
-  return asceEventSignature(next) !== before;
+  return next ? asceEventSignature(next) !== before : false;
 }

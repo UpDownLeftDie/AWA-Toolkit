@@ -182,10 +182,7 @@ export function applySequentialCommunityAwards(
     return milestones;
   }
   return milestones.map((milestone) => {
-    if (milestone.isAwarded || milestoneSortKey(milestone) >= lastAwardedKey) {
-      return milestone;
-    }
-    return { ...milestone, isAwarded: true, isCommunityUnlocked: true };
+    return milestone.isAwarded || milestoneSortKey(milestone) >= lastAwardedKey ? milestone : { ...milestone, isAwarded: true, isCommunityUnlocked: true };
   });
 }
 
@@ -221,10 +218,7 @@ export function isCommunityEventMilestonePending(
   personalHours: number,
   communityHours?: number,
 ): boolean {
-  if (milestone.isAwarded || milestone.arpReward <= 0) {
-    return false;
-  }
-  return (
+  return !milestone.isAwarded && milestone.arpReward > 0 && (
     isPersonalHoursMet(milestone, personalHours) ||
     isCommunityGateMet(milestone, communityHours)
   );
@@ -318,10 +312,7 @@ export function formatCommunityEventArp(
   baseArp: number,
   allArpPct = 0,
 ): string {
-  if (allArpPct > 0) {
-    return `~${Math.round(baseArp * (1 + allArpPct))} ARP`;
-  }
-  return `${baseArp} ARP`;
+  return allArpPct > 0 ? `~${Math.round(baseArp * (1 + allArpPct))} ARP` : `${baseArp} ARP`;
 }
 
 function describeWaitingPersonalArp(
@@ -344,10 +335,7 @@ function describeWaitingPersonalArp(
   }
   const moreHours = Math.max(0, needHours - event.personalHours);
   const head = formatCommunityEventArp(waitingPersonalArp, allArpPct);
-  if (moreHours <= 0 || needHours <= 0) {
-    return `${head} unlocked — not awarded yet`;
-  }
-  return `${head} unlocked — play ${moreHours}h more (${event.personalHours}h / ${needHours}h)`;
+  return moreHours <= 0 || needHours <= 0 ? `${head} unlocked — not awarded yet` : `${head} unlocked — play ${moreHours}h more (${event.personalHours}h / ${needHours}h)`;
 }
 
 export function describeCommunityEventPending(
@@ -355,10 +343,7 @@ export function describeCommunityEventPending(
   allArpPct = 0,
 ): string {
   const { text, later } = describeCommunityEventPendingParts(event, allArpPct);
-  if (!later) {
-    return text;
-  }
-  return `${text} (${later})`;
+  return later ? `${text} (${later})` : text;
 }
 
 export function describeCommunityEventPendingParts(
@@ -509,10 +494,7 @@ export function appendCommunityHoursSample(
   }
 
   next.push({ at: atIso, hours });
-  if (next.length > COMMUNITY_SAMPLE_MAX) {
-    return next.slice(-COMMUNITY_SAMPLE_MAX);
-  }
-  return next;
+  return next.length > COMMUNITY_SAMPLE_MAX ? next.slice(-COMMUNITY_SAMPLE_MAX) : next;
 }
 
 /**
@@ -537,10 +519,7 @@ export function mergeCommunityEventScrape(
   previous: CommunityEventState | undefined,
   options: { source?: CommunityHoursSampleSource } = {},
 ): CommunityEventState {
-  if (previous && isSparseCommunityEventScrape(scraped, previous)) {
-    return previous;
-  }
-  return mergeLiveCommunityEventScrape(scraped, previous, options);
+  return previous && isSparseCommunityEventScrape(scraped, previous) ? previous : mergeLiveCommunityEventScrape(scraped, previous, options);
 }
 
 function mergeLiveCommunityEventScrape(
@@ -688,10 +667,7 @@ function inferPersonalHoursRequired(
   const known = existing
     .filter((milestone) => milestone.arpReward > 0)
     .map((milestone) => milestone.personalHoursRequired);
-  if (known.length === 0) {
-    return 1;
-  }
-  return Math.max(...known);
+  return known.length === 0 ? 1 : Math.max(...known);
 }
 
 function splitMilestonesByHours(existing: CommunityEventMilestone[]): {
@@ -857,13 +833,12 @@ export function lockedCommunityArpMilestones(
 ): CommunityEventMilestone[] {
   return event.milestones
     .filter((milestone) => {
-      if (milestone.isAwarded || milestone.arpReward <= 0) {
-        return false;
-      }
-      if (milestone.communityHoursRequired === undefined) {
-        return false;
-      }
-      return !isCommunityGateMet(milestone, event.communityHours);
+      return (
+        !milestone.isAwarded &&
+        milestone.arpReward > 0 &&
+        milestone.communityHoursRequired !== undefined &&
+        !isCommunityGateMet(milestone, event.communityHours)
+      );
     })
     .toSorted(
       (left, right) =>
@@ -971,10 +946,7 @@ export function estimateNextCommunityUnlock(
   nowMs = Date.now(),
 ): CommunityUnlockEstimate | undefined {
   const targetHours = nextCommunityUnlockTarget(event);
-  if (targetHours === undefined) {
-    return undefined;
-  }
-  return estimateCommunityUnlockAt(event, targetHours, nowMs);
+  return targetHours === undefined ? undefined : estimateCommunityUnlockAt(event, targetHours, nowMs);
 }
 
 export interface ReachableCommunityUnlock {
@@ -1025,10 +997,12 @@ function sampleAtOrBefore(
   let bestMs = Number.NEGATIVE_INFINITY;
   for (const sample of samples) {
     const ms = parseCommunitySampleMs(sample);
-    if (ms !== undefined && ms <= tMs && ms >= bestMs) {
-      best = sample;
-      bestMs = ms;
+    if (!(ms !== undefined && ms <= tMs && ms >= bestMs)) {
+      continue;
     }
+
+    best = sample;
+    bestMs = ms;
   }
   return best;
 }
@@ -1047,10 +1021,7 @@ function communityHoursPerMsBetween(
     return undefined;
   }
   const deltaHours = end.hours - start.hours;
-  if (deltaHours <= 0) {
-    return undefined;
-  }
-  return deltaHours / (endMs - startMs);
+  return deltaHours <= 0 ? undefined : deltaHours / (endMs - startMs);
 }
 
 /**
@@ -1132,17 +1103,11 @@ function communityDayOverDayRatio(
     return undefined;
   }
   const ratio = recent / previous;
-  if (!Number.isFinite(ratio)) {
-    return undefined;
-  }
-  return Math.min(COMMUNITY_RATIO_MAX, Math.max(COMMUNITY_RATIO_MIN, ratio));
+  return Number.isFinite(ratio) ? Math.min(COMMUNITY_RATIO_MAX, Math.max(COMMUNITY_RATIO_MIN, ratio)) : undefined;
 }
 
 function optimisticCommunityRatio(measured: number): number {
-  if (measured >= 1) {
-    return measured;
-  }
-  return 1 - (1 - measured) * COMMUNITY_DECAY_TRUST;
+  return measured >= 1 ? measured : 1 - (1 - measured) * COMMUNITY_DECAY_TRUST;
 }
 
 /**
@@ -1166,10 +1131,7 @@ function communityEtaMs(
     return linearMs;
   }
   const days = Math.log(root) / lnRatio;
-  if (!Number.isFinite(days) || days <= 0) {
-    return linearMs;
-  }
-  return days * 86_400_000;
+  return !Number.isFinite(days) || days <= 0 ? linearMs : days * 86_400_000;
 }
 
 export function formatCommunityEta(etaMs: number): string {
@@ -1287,12 +1249,9 @@ export function isCommunityEventRewardAction(action: string): boolean {
 export function sumCommunityEventRewardsFromArpLog(
   arpLog: ArpLogState | undefined,
 ): number {
-  if (!arpLog) {
-    return 0;
-  }
-  return arpLog.recent
+  return arpLog ? arpLog.recent
     .filter((entry) => isCommunityEventRewardAction(entry.action))
-    .reduce((sum, entry) => sum + entry.arp, 0);
+    .reduce((sum, entry) => sum + entry.arp, 0) : 0;
 }
 
 /**
@@ -1391,10 +1350,7 @@ function isLabeledRowComplete(cell: Element, label: string): boolean {
       (node.textContent ?? '').includes(needle),
     );
   const scope = row ?? cell;
-  if (scope.querySelector('.fa-check, .fa-check-circle, .bi-check, .bi-check-lg')) {
-    return true;
-  }
-  return /[✓✔]/.test(scope.textContent ?? '');
+  return scope.querySelector('.fa-check, .fa-check-circle, .bi-check, .bi-check-lg') ? true : /[✓✔]/.test(scope.textContent ?? '');
 }
 
 function milestoneCellText(cell: Element): string {
@@ -1481,11 +1437,7 @@ export function parseCommunityEventPersonalHours(document_: Document): number {
   const minutesMatch =
     /personalPlaytime\s*=\s*(\d+)/i.exec(scriptSource) ??
     /personalPlaytime\s*=\s*(\d+)/i.exec(body);
-  if (minutesMatch?.[1]) {
-    return Math.floor(Number(minutesMatch[1]) / 60);
-  }
-
-  return 0;
+  return minutesMatch?.[1] ? Math.floor(Number(minutesMatch[1]) / 60) : 0;
 }
 
 function isAsciiWhitespace(char: string): boolean {
@@ -1506,10 +1458,7 @@ function trailingNumberToken(value: string): string | undefined {
     }
     break;
   }
-  if (start === end) {
-    return undefined;
-  }
-  return value.slice(start, end);
+  return start === end ? undefined : value.slice(start, end);
 }
 
 function leadingNumberToken(value: string): string | undefined {
@@ -1526,10 +1475,7 @@ function leadingNumberToken(value: string): string | undefined {
     }
     break;
   }
-  if (start === end) {
-    return undefined;
-  }
-  return value.slice(start, end);
+  return start === end ? undefined : value.slice(start, end);
 }
 
 /**
@@ -1572,16 +1518,10 @@ function parseHoursOfCap(text: string):
 
   const hours = Number(leftToken.replaceAll(',', ''));
   const cap = Number(rightToken.replaceAll(',', ''));
-  if (
-    !Number.isFinite(hours) ||
+  return !Number.isFinite(hours) ||
     !Number.isFinite(cap) ||
     hours < 0 ||
-    cap <= 0
-  ) {
-    return undefined;
-  }
-
-  return { hours, cap };
+    cap <= 0 ? undefined : { hours, cap };
 }
 
 export function parseCommunityEventProgress(document_: Document): {
@@ -1642,19 +1582,12 @@ function parseCommunityEventTitle(document_: Document): string | undefined {
     )
     ?.textContent?.replaceAll(/\s+/g, ' ')
     .trim();
-  if (fromEventLabel && !isCommunityEventLiveDateBar(fromEventLabel)) {
-    return fromEventLabel;
-  }
-
-  return undefined;
+  return fromEventLabel && !isCommunityEventLiveDateBar(fromEventLabel) ? fromEventLabel : undefined;
 }
 
 function isCommunityEventLiveDateBar(text: string): boolean {
   const normalized = text.replaceAll(/\s+/g, ' ').trim();
-  if (!/\bLIVE\b/i.test(normalized)) {
-    return false;
-  }
-  return (
+  return /\bLIVE\b/i.test(normalized) && (
     /\b(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\b/i.test(
       normalized,
     ) || /\bLIVE\s*\|/i.test(normalized)
@@ -1677,10 +1610,7 @@ function readCommunityEventLiveBadge(document_: Document): boolean | undefined {
     '.event-title-date, .live-container',
   );
   const dateBarText = dateBar?.textContent?.replaceAll(/\s+/g, ' ').trim() ?? '';
-  if (isCommunityEventLiveDateBar(dateBarText)) {
-    return true;
-  }
-  return undefined;
+  return isCommunityEventLiveDateBar(dateBarText) || undefined;
 }
 
 /**
@@ -1755,8 +1685,5 @@ export function scrapeCommunityEventFromDocument(
 }
 
 export function scrapeCommunityEvent(): CommunityEventState | undefined {
-  if (!location.pathname.includes('/steam/community-event')) {
-    return undefined;
-  }
-  return scrapeCommunityEventFromDocument(document, location.pathname);
+  return location.pathname.includes('/steam/community-event') ? scrapeCommunityEventFromDocument(document, location.pathname) : undefined;
 }

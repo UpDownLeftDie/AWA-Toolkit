@@ -94,18 +94,12 @@ function describeDefinitionEffect(
   if (definition.effectType === ArtifactEffectType.None) {
     return { effect: "No ARP bonus" };
   }
-  if (typeof raw !== "number") {
-    return { effect: "No ARP bonus" };
-  }
-  return describeNumericEffect(definition.effectType, raw);
+  return typeof raw === "number" ? describeNumericEffect(definition.effectType, raw) : { effect: "No ARP bonus" };
 }
 
 function describeSetEffects(set: ArtifactSetDefinition): string {
   const parts = set.effects.map((effect) => {
-    if (effect.unit === "cosmetic") {
-      return "username color";
-    }
-    return describeNumericEffect(effect.type, effect.value).effect;
+    return effect.unit === "cosmetic" ? "username color" : describeNumericEffect(effect.type, effect.value).effect;
   });
   return parts.join(", ");
 }

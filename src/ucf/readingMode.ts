@@ -388,18 +388,19 @@ function syncToggleUi(state: UcfLayoutState): void {
   }
 
   const action = document.querySelector<HTMLButtonElement>(`#${ACTION_ID}`);
-  if (action) {
-    action.setAttribute('aria-pressed', state.isReading ? 'true' : 'false');
-    const actionIcon = action.querySelector('i');
-    if (actionIcon) {
-      actionIcon.className = expandIconClass(state.isReading);
-    }
-    const actionLabel = action.querySelector('.awa-ucf-reading-action-label');
-    if (actionLabel) {
-      actionLabel.textContent = state.isReading
-        ? 'Exit reading mode'
-        : 'Reading mode';
-    }
+  if (!action) {
+    return;
+  }
+  action.setAttribute('aria-pressed', state.isReading ? 'true' : 'false');
+  const actionIcon = action.querySelector('i');
+  if (actionIcon) {
+    actionIcon.className = expandIconClass(state.isReading);
+  }
+  const actionLabel = action.querySelector('.awa-ucf-reading-action-label');
+  if (actionLabel) {
+    actionLabel.textContent = state.isReading
+      ? 'Exit reading mode'
+      : 'Reading mode';
   }
 }
 

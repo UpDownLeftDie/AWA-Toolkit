@@ -76,10 +76,7 @@ function scoreSteamQuestBases(
   freq: number,
   bases: number[],
 ): number {
-  if (bases.length === 0) {
-    return 0;
-  }
-  return setBreakdownParts(
+  return bases.length === 0 ? 0 : setBreakdownParts(
     breakdown,
     'steamQuests',
     bases.reduce((sum, base) => sum + base, 0) * freq,
@@ -405,10 +402,7 @@ export function vaultListPrice(
   context: OptimizerContext,
   discountPct = 0,
 ): number {
-  if (context.settings.pendingVaultPurchaseArp > 0) {
-    return context.settings.pendingVaultPurchaseArp;
-  }
-  return gameVaultCatalogPrice(
+  return context.settings.pendingVaultPurchaseArp > 0 ? context.settings.pendingVaultPurchaseArp : gameVaultCatalogPrice(
     context.siteState,
     discountPct,
     resolveNow(context),
@@ -427,18 +421,10 @@ export function vaultPurchasePriceNow(
     return 0;
   }
   const price = vaultListPrice(context, discountPct);
-  if (price <= 0) {
-    return 0;
-  }
-  if (
-    !canAffordVaultPrice(
+  return (price <= 0) || !canAffordVaultPrice(
       context.siteState.arpLog?.redeemableArp,
       vaultPayArp(price, discountPct),
-    )
-  ) {
-    return 0;
-  }
-  return price;
+    ) ? 0 : price;
 }
 
 /**

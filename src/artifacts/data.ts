@@ -616,10 +616,7 @@ export function upgradeFocusOrder(
   if (ownedFamilyIds.has("herkow-plasma-chamber")) {
     return END_GAME_HPC_UPGRADE_ORDER;
   }
-  if (ownedFamilyIds.has("pn295")) {
-    return END_GAME_NO_HPC_UPGRADE_ORDER;
-  }
-  return NEW_GAME_UPGRADE_ORDER;
+  return ownedFamilyIds.has("pn295") ? END_GAME_NO_HPC_UPGRADE_ORDER : NEW_GAME_UPGRADE_ORDER;
 }
 
 /**
@@ -769,10 +766,7 @@ export function getNumericEffect(
 export function fragmentCostToUpgradeFrom(
   tier: ArtifactTier,
 ): number | undefined {
-  if (tier >= ArtifactTier.Interstellar) {
-    return undefined;
-  }
-  return FRAGMENT_COST_TO_TIER[(tier + 1) as ArtifactTier];
+  return tier >= ArtifactTier.Interstellar ? undefined : FRAGMENT_COST_TO_TIER[(tier + 1) as ArtifactTier];
 }
 
 export function displayNameFor(

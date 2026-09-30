@@ -129,10 +129,7 @@ function describeCommunityEventPendingNote(
   if (nextLocked) {
     return describeWaitingCommunityArpLine(event, nextLocked.arpReward);
   }
-  if (breakdown.imminentArp > 0) {
-    return `${formatCommunityEventArp(breakdown.imminentArp)} unlocked — not awarded yet`;
-  }
-  return `${formatCommunityEventArp(event.pendingArp)} still open`;
+  return breakdown.imminentArp > 0 ? `${formatCommunityEventArp(breakdown.imminentArp)} unlocked — not awarded yet` : `${formatCommunityEventArp(event.pendingArp)} still open`;
 }
 
 export function collectNotes(

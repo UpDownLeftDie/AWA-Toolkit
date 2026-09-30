@@ -393,6 +393,7 @@ function buildPanelShadowCss(variant: PanelShadowVariant): string {
       padding-top: 1px;
     }
     .ao-todo-item > .ao-upgrade-btn,
+    .ao-todo-item > .ao-equip-btn,
     .ao-todo-item > .ao-claim-btn,
     .ao-todo-item > .ao-twitch-btn {
       flex: 0 0 auto;

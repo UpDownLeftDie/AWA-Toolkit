@@ -187,10 +187,7 @@ function formatBreakdownLine(entry: BreakdownLine): string {
   if (entry.allArpBonus !== 0) {
     parts.push(entry.allArpBonus);
   }
-  if (parts.length === 1) {
-    return `~${entry.total} ARP`;
-  }
-  return `~${entry.total} (${parts.join(" + ")})`;
+  return parts.length === 1 ? `~${entry.total} ARP` : `~${entry.total} (${parts.join(" + ")})`;
 }
 
 export function renderBreakdown(result: OptimizerResult["best"]): string {
@@ -518,14 +515,11 @@ export function formatSwapMessage(result: OptimizerResult): string {
   const isMatch =
     bestIds.size > 0 &&
     bestIds.size === currentIds.size &&
-    [...bestIds].every((id) => currentIds.has(id));
+    bestIds.isSubsetOf(currentIds);
   if (isMatch) {
     return `<div class="ao-row ao-muted">Current loadout matches the recommendation.</div>`;
   }
-  if ((result.current?.artifacts.length ?? 0) < 3) {
-    return `<div class="ao-row ao-muted">Equipped slots are incomplete (${result.current?.artifacts.length ?? 0}/3) — use Equip Recommended to fill empty slots.</div>`;
-  }
-  return `<div class="ao-row ao-muted">Could not compute a single-piece swap — use Equip Recommended.</div>`;
+  return (result.current?.artifacts.length ?? 0) < 3 ? `<div class="ao-row ao-muted">Equipped slots are incomplete (${result.current?.artifacts.length ?? 0}/3) — use Equip Recommended to fill empty slots.</div>` : `<div class="ao-row ao-muted">Could not compute a single-piece swap — use Equip Recommended.</div>`;
 }
 
 export function renderUpgradePath(

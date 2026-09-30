@@ -32,10 +32,7 @@ function twitchLoginFromHref(href: string): string | undefined {
       return undefined;
     }
     const login = url.pathname.replace(/^\//, "").split("/", 1)[0];
-    if (!login) {
-      return undefined;
-    }
-    return login.toLowerCase();
+    return login ? login.toLowerCase() : undefined;
   } catch {
     return undefined;
   }
@@ -52,10 +49,7 @@ function headingGroup(text: string): TwitchStreamGroup | undefined {
   if (/^nexus\b/i.test(label)) {
     return "nexus";
   }
-  if (/^partners?\b/i.test(label)) {
-    return "partner";
-  }
-  return undefined;
+  return /^partners?\b/i.test(label) ? "partner" : undefined;
 }
 
 function twitchWatchUrl(href: string, login: string): string {
@@ -163,10 +157,8 @@ function isPreferredMatch(
   stream: TwitchStream,
   preferredLogin: string,
 ): boolean {
-  if (stream.login === preferredLogin) {
-    return true;
-  }
   return (
+    stream.login === preferredLogin ||
     stream.displayName.replaceAll(/\s+/g, "").toLowerCase() === preferredLogin
   );
 }
@@ -177,10 +169,7 @@ function pickFromPool(
   isMatch: (stream: TwitchStream) => boolean,
 ): TwitchPick | undefined {
   const stream = pickRandom(streams.filter((candidate) => isMatch(candidate)));
-  if (!stream) {
-    return undefined;
-  }
-  return { stream, reason };
+  return stream ? { stream, reason } : undefined;
 }
 
 export function pickTwitchStream(
@@ -216,10 +205,7 @@ function doubleArpGroupLabel(stream: TwitchStream): string {
   if (stream.group === "featured") {
     return "Featured";
   }
-  if (stream.group === "nexus") {
-    return "Nexus";
-  }
-  return "Hive";
+  return stream.group === "nexus" ? "Nexus" : "Hive";
 }
 
 function pickReasonLabel(pick: TwitchPick): string {
@@ -232,10 +218,7 @@ function pickReasonLabel(pick: TwitchPick): string {
   if (pick.reason === "doubleArp") {
     return `${doubleArpGroupLabel(pick.stream)}, 2x ARP`;
   }
-  if (pick.reason === "drops") {
-    return "drops";
-  }
-  return "random";
+  return pick.reason === "drops" ? "drops" : "random";
 }
 
 function isQuestsPage(): boolean {
@@ -254,10 +237,7 @@ async function loadTwitchStreamsDocument(): Promise<Document | undefined> {
     const response = await fetch(QUESTS_PATH, {
       headers: { Accept: "text/html" },
     });
-    if (!response.ok) {
-      return undefined;
-    }
-    return new DOMParser().parseFromString(await response.text(), "text/html");
+    return response.ok ? new DOMParser().parseFromString(await response.text(), "text/html") : undefined;
   } catch (error) {
     console.warn("[AWA Toolkit] Failed to fetch Twitch streams", error);
     return undefined;

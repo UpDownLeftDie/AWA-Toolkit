@@ -51,10 +51,7 @@ function parseSteamAppId(value: string | undefined): number | undefined {
     return undefined;
   }
   const id = Number(value);
-  if (!Number.isSafeInteger(id) || id <= 0) {
-    return undefined;
-  }
-  return id;
+  return !Number.isSafeInteger(id) || id <= 0 ? undefined : id;
 }
 
 /**
@@ -107,10 +104,7 @@ function cacheTtlMs(entry: SteamFreeCacheEntry): number {
   if (entry.error) {
     return STEAM_FREE_TTL_ERROR_MS;
   }
-  if (entry.permanent) {
-    return STEAM_FREE_TTL_PERMANENT_MS;
-  }
-  return STEAM_FREE_TTL_PRICE_MS;
+  return entry.permanent ? STEAM_FREE_TTL_PERMANENT_MS : STEAM_FREE_TTL_PRICE_MS;
 }
 
 function isCacheFresh(entry: SteamFreeCacheEntry | undefined): boolean {
@@ -118,10 +112,7 @@ function isCacheFresh(entry: SteamFreeCacheEntry | undefined): boolean {
     return false;
   }
   const cachedAt = Date.parse(entry.at);
-  if (!Number.isFinite(cachedAt)) {
-    return false;
-  }
-  return Date.now() - cachedAt < cacheTtlMs(entry);
+  return Number.isFinite(cachedAt) && Date.now() - cachedAt < cacheTtlMs(entry);
 }
 
 async function loadSteamFreeCache(): Promise<SteamFreeCache> {
@@ -291,10 +282,7 @@ export function requiresSteamFreeHydrate(state: SiteState): boolean {
   if (quests.some((quest) => requiresSteamFreeLookup(quest))) {
     return true;
   }
-  if (!state.communityEvent) {
-    return false;
-  }
-  return requiresSteamFreeLookup(communityEventFreeGate(state.communityEvent));
+  return state.communityEvent ? requiresSteamFreeLookup(communityEventFreeGate(state.communityEvent)) : false;
 }
 
 function communityEventFreeGate(
@@ -320,10 +308,7 @@ function applySteamFreeLookup<T extends SteamFreeGate>(
       libraryPending: true,
     };
   }
-  if (isFree === false) {
-    return { ...item, isFree: false };
-  }
-  return item;
+  return isFree === false ? { ...item, isFree: false } : item;
 }
 
 /**
@@ -359,10 +344,7 @@ export async function resolveSiteStateSteamFreeToPlay(
     next.steamQuests = {
       scrapedAt: next.steamQuests?.scrapedAt ?? new Date().toISOString(),
       quests: quests.map((quest) => {
-        if (!requiresSteamFreeLookup(quest) || quest.steamAppId === undefined) {
-          return quest;
-        }
-        return applySteamFreeLookup(quest, freeByAppId.get(quest.steamAppId));
+        return !requiresSteamFreeLookup(quest) || quest.steamAppId === undefined ? quest : applySteamFreeLookup(quest, freeByAppId.get(quest.steamAppId));
       }),
     };
   }

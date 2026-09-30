@@ -127,10 +127,7 @@ export function battlePassRemainingMs(
   }
   const parsed = parseBattlePassCountdownMs(battlePass.endsInText);
   const scrapedAt = Date.parse(battlePass.scrapedAt);
-  if (parsed === undefined || Number.isNaN(scrapedAt)) {
-    return undefined;
-  }
-  return Math.max(0, parsed - (now - scrapedAt));
+  return parsed === undefined || Number.isNaN(scrapedAt) ? undefined : Math.max(0, parsed - (now - scrapedAt));
 }
 
 export function mergeBattlePassScrape(
@@ -219,10 +216,7 @@ function readyClaimFromButton(
 function readyClaimsFromPopup(popup: HTMLElement): BattlePassReadyClaim[] {
   return [...popup.querySelectorAll('.bp-popup__claim-btn')].flatMap(
     (button) => {
-      if (!(button instanceof HTMLElement)) {
-        return [];
-      }
-      return [readyClaimFromButton(button, popup)];
+      return (button instanceof HTMLElement) ? [readyClaimFromButton(button, popup)] : [];
     },
   );
 }
@@ -610,10 +604,7 @@ async function fetchBattlePassDocument(): Promise<Document | undefined> {
     const response = await fetch('/control-center/battle-pass/1', {
       headers: { Accept: 'text/html' },
     });
-    if (!response.ok) {
-      return undefined;
-    }
-    return new DOMParser().parseFromString(await response.text(), 'text/html');
+    return response.ok ? new DOMParser().parseFromString(await response.text(), 'text/html') : undefined;
   } catch {
     return undefined;
   }
@@ -676,10 +667,7 @@ function resolveClaimPath(
     return endpoint.path;
   }
   const trimmed = endpoint.path.replace(/\/$/, '');
-  if (trimmed.endsWith(`/${milestoneId}`)) {
-    return trimmed;
-  }
-  return `${trimmed}/${milestoneId}`;
+  return trimmed.endsWith(`/${milestoneId}`) ? trimmed : `${trimmed}/${milestoneId}`;
 }
 
 function resolveClaimBody(
@@ -707,10 +695,7 @@ function claimPostPath(
   if (claim.claimPath) {
     return claim.claimPath;
   }
-  if (endpoint && claim.milestoneId) {
-    return resolveClaimPath(endpoint, claim.milestoneId);
-  }
-  return undefined;
+  return endpoint && claim.milestoneId ? resolveClaimPath(endpoint, claim.milestoneId) : undefined;
 }
 
 async function claimReadyViaApi(
@@ -959,10 +944,7 @@ export function battlePassClaimButtonLabel(
 }
 
 export function scrapeBattlePass(): BattlePassState | undefined {
-  if (!location.pathname.includes('/battle-pass')) {
-    return undefined;
-  }
-  return scrapeBattlePassFromDocument(document);
+  return location.pathname.includes('/battle-pass') ? scrapeBattlePassFromDocument(document) : undefined;
 }
 
 export function isBattlePassDocumentReady(document_: Document): boolean {

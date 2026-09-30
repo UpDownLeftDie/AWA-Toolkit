@@ -34,10 +34,7 @@ const STEAM_OWNERSHIP_DENIAL =
   /do not own|don['’]t own|not in your steam library|not in your library|must own this game/i;
 
 function hasSteamLibrarySyncControl(document_: Document): boolean {
-  if (document_.querySelector('.btn-check-owned-games')) {
-    return true;
-  }
-  return [...document_.querySelectorAll('a, button')].some((element) =>
+  return document_.querySelector('.btn-check-owned-games') ? true : [...document_.querySelectorAll('a, button')].some((element) =>
     STEAM_LIBRARY_SYNC_LABEL.test(controlLabel(element)),
   );
 }
@@ -62,10 +59,7 @@ function steamQuestStatusFromText(
   if (/^complete$/i.test(trimmed)) {
     return 'complete';
   }
-  if (/^incomplete$/i.test(trimmed)) {
-    return 'incomplete';
-  }
-  return undefined;
+  return /^incomplete$/i.test(trimmed) ? 'incomplete' : undefined;
 }
 
 function steamQuestEligibilityFromStatusText(
@@ -75,10 +69,7 @@ function steamQuestEligibilityFromStatusText(
   if (/unavailable|ineligible|locked|not owned|unowned/i.test(text.trim())) {
     return 'ineligible';
   }
-  if (isChooseYourOwnGameQuest(quest)) {
-    return 'eligible';
-  }
-  return 'unknown';
+  return isChooseYourOwnGameQuest(quest) ? 'eligible' : 'unknown';
 }
 
 function parseSteamQuestRewardArp(text: string): number | undefined {
@@ -204,10 +195,7 @@ export function scrapeSteamQuestRowsFromDocument(
   ]
     .map((cell) => parseSteamQuestRowFromStatusCell(card, cell))
     .filter((row): row is SteamQuestRow => row !== undefined);
-  if (fromStatusIds.length > 0) {
-    return fromStatusIds;
-  }
-  return [...card.querySelectorAll('tr')]
+  return fromStatusIds.length > 0 ? fromStatusIds : [...card.querySelectorAll('tr')]
     .map((row) => parseSteamQuestRowFromTableRow(row))
     .filter((row): row is SteamQuestRow => row !== undefined);
 }
@@ -282,10 +270,7 @@ export function remainingSteamQuestRows(siteState: SiteState): SteamQuestRow[] {
  */
 export function remainingSteamQuestRewards(siteState: SiteState): number[] {
   const scraped = scrapedRemainingSteamQuestRewards(siteState);
-  if (scraped !== undefined) {
-    return scraped;
-  }
-  return [...BASE_ACTIVITY.steamQuestBases];
+  return scraped === undefined ? [...BASE_ACTIVITY.steamQuestBases] : scraped;
 }
 
 /**
@@ -296,27 +281,21 @@ export function scrapedRemainingSteamQuestRewards(
   siteState: SiteState,
 ): number[] | undefined {
   const quests = siteState.steamQuests?.quests;
-  if (!quests || quests.length === 0) {
-    return undefined;
-  }
-  return remainingSteamQuestRowsFromList(quests).map(
+  return !quests || quests.length === 0 ? undefined : remainingSteamQuestRowsFromList(quests).map(
     (quest) => quest.rewardArp,
   );
 }
 
 export function requiresSteamQuestEligibilityFetch(state: SiteState): boolean {
   return (state.steamQuests?.quests ?? []).some((quest) => {
-    if (
-      quest.status !== 'incomplete' ||
-      !quest.href ||
-      isChooseYourOwnGameQuest(quest)
-    ) {
-      return false;
-    }
-    if (quest.eligibility === 'unknown') {
-      return true;
-    }
-    return quest.eligibility === 'ineligible' && quest.isFree === undefined;
+    return (
+      quest.status === 'incomplete' &&
+      quest.href !== undefined &&
+      quest.href.length > 0 &&
+      !isChooseYourOwnGameQuest(quest) &&
+      (quest.eligibility === 'unknown' ||
+        (quest.eligibility === 'ineligible' && quest.isFree === undefined))
+    );
   });
 }
 
@@ -339,10 +318,7 @@ export function scrapeSteamPlayEligibilityFromDocument(
     return 'eligible';
   }
   const body = pageText(document_);
-  if (/completed this quest/i.test(body)) {
-    return 'eligible';
-  }
-  if (document_.querySelector('.btn-start-quest, a[href^="steam://"]')) {
+  if (/completed this quest/i.test(body) || document_.querySelector('.btn-start-quest, a[href^="steam://"]')) {
     return 'eligible';
   }
   const hasLaunchGame = [...document_.querySelectorAll('a, button')].some(
@@ -358,13 +334,8 @@ export function scrapeSteamPlayEligibilityFromDocument(
   if (Number.isFinite(played) && played > 0) {
     return 'eligible';
   }
-  if (
-    hasSteamLibrarySyncControl(document_) ||
-    hasSteamOwnershipDenialText(document_)
-  ) {
-    return 'ineligible';
-  }
-  return 'unknown';
+  return hasSteamLibrarySyncControl(document_) ||
+    hasSteamOwnershipDenialText(document_) ? 'ineligible' : 'unknown';
 }
 
 export function applySteamQuestsFromDocument(

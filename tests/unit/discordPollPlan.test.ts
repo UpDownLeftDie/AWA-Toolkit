@@ -9,7 +9,7 @@ import {
   COOLDOWN_MS,
   defaultArtifactSettings,
 } from '../../src/artifacts/settings';
-import { buildActionPlan } from '../../src/artifacts/ui/actionPlan';
+import { buildActionPlan, renderActionPlan } from '../../src/artifacts/ui/actionPlan';
 import { makeArtifact, makeSnapshot } from '../fixtures/artifactFactory';
 import { isoAt, utcAt } from '../fixtures/scenarios/shared';
 
@@ -88,6 +88,10 @@ describe('Discord Poll action-plan order', () => {
     ]);
     expect(texts[1]).not.toMatch(/after unlock/i);
     expect(texts[1]).not.toMatch(/next post/i);
+    expect(numbered[0]?.equipCombo).toBe('best');
+    expect(
+      renderActionPlan(todos, { allowAccountActions: true }),
+    ).toContain('data-equip="best"');
   });
 
   it('still recommends the Discord equip after the GM timer hits 0 while Showroom is locked', () => {

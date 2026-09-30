@@ -98,18 +98,12 @@ export function readUsernameFromDocument(
   const hrefMatch = /\/member\/([^/]+)\//i.exec(
     link?.getAttribute('href') ?? '',
   );
-  if (hrefMatch?.[1]) {
-    return decodeURIComponent(hrefMatch[1]);
-  }
-  return undefined;
+  return hrefMatch?.[1] ? decodeURIComponent(hrefMatch[1]) : undefined;
 }
 
 export function resolveAchievementsUrl(username?: string): string | undefined {
   const name = username ?? readUsernameFromDocument(document);
-  if (!name) {
-    return undefined;
-  }
-  return `/member/${encodeURIComponent(name)}/achievements`;
+  return name ? `/member/${encodeURIComponent(name)}/achievements` : undefined;
 }
 
 function emptySnapshot(username: string | undefined): AchievementSnapshot {
@@ -265,10 +259,12 @@ function segmentForAchievement(
     if (index === -1) {
       continue;
     }
-    if (start === -1 || index < start) {
-      start = index;
-      matchedLength = name.length;
+    if (!(start === -1 || index < start)) {
+      continue;
     }
+
+    start = index;
+    matchedLength = name.length;
   }
   if (start === -1) {
     return undefined;
@@ -305,13 +301,11 @@ function recordProgress(
 }
 
 function isCardUnearned(card: Element): boolean {
-  if (card.classList.contains('unachieved')) {
-    return true;
-  }
-  if (card.classList.contains('achieved')) {
-    return false;
-  }
-  return !isEarnedCardText(card.textContent ?? '');
+  return (
+    card.classList.contains('unachieved') ||
+    (!card.classList.contains('achieved') &&
+      !isEarnedCardText(card.textContent ?? ''))
+  );
 }
 
 function scrapeFromCards(
@@ -321,7 +315,10 @@ function scrapeFromCards(
   // Prefer leaf cards — parent rows match too many class substrings and mix
   // earned/unearned text into one blob.
   const preferred = document_.querySelectorAll('.achievement-card');
-  const nodes = preferred.length > 0 ? preferred : document_.querySelectorAll(CARD_SELECTOR);
+  const nodes =
+    preferred.length > 0
+      ? preferred
+      : document_.querySelectorAll(CARD_SELECTOR);
   for (const card of nodes) {
     const nestedCards = card.querySelectorAll('.achievement-card');
     // Skip wrappers that contain multiple child cards
@@ -361,10 +358,7 @@ function isEarnedFromCollapsedText(
   achievement: AchievementDefinition,
 ): boolean | undefined {
   const segment = segmentForAchievement(collapsed, achievement);
-  if (segment === undefined) {
-    return undefined;
-  }
-  return isEarnedCardText(segment);
+  return segment === undefined ? undefined : isEarnedCardText(segment);
 }
 
 function scrapeFromBodyText(
@@ -400,7 +394,10 @@ function scrapeOptions(options: {
 
 export function scrapeAchievementsFromDocument(
   document_: Document,
-  options: { username?: string | undefined; pathHint?: string | undefined } = {},
+  options: {
+    username?: string | undefined;
+    pathHint?: string | undefined;
+  } = {},
 ): AchievementSnapshot {
   const username =
     options.username ?? readUsernameFromDocument(document_, options.pathHint);
@@ -433,10 +430,7 @@ function isSnapshotFresh(
     return false;
   }
   const scrapedAt = Date.parse(snapshot.scrapedAt);
-  if (Number.isNaN(scrapedAt)) {
-    return false;
-  }
-  return now - scrapedAt < STALE_MS;
+  return !Number.isNaN(scrapedAt) && now - scrapedAt < STALE_MS;
 }
 
 export async function loadAchievementSnapshot(): Promise<
@@ -453,13 +447,10 @@ export async function loadAchievementSnapshot(): Promise<
       return undefined;
     }
     const snapshot = parsed as AchievementSnapshot;
-    if (
-      typeof snapshot.scrapedAt !== 'string' ||
+    return typeof snapshot.scrapedAt !== 'string' ||
       typeof snapshot.items !== 'object'
-    ) {
-      return undefined;
-    }
-    return snapshot;
+      ? undefined
+      : snapshot;
   } catch {
     return undefined;
   }
@@ -523,10 +514,9 @@ async function loadAchievementsDocument(
   if (fetched && parseCount(fetched)) {
     return fetched;
   }
-  if (fetched && matchAchievementInText(fetched.body?.textContent ?? '')) {
-    return fetched;
-  }
-  return openPageDocument(path);
+  return fetched && matchAchievementInText(fetched.body?.textContent ?? '')
+    ? fetched
+    : openPageDocument(path);
 }
 
 function unearthedWithAutomation(
@@ -534,10 +524,10 @@ function unearthedWithAutomation(
   key: AchievementAutomationKey,
 ): AchievementDefinition[] {
   return ACHIEVEMENTS.filter((achievement) => {
-    if (achievement.automation !== key) {
-      return false;
-    }
-    return snapshot.items[achievement.id]?.isEarned !== true;
+    return (
+      achievement.automation === key &&
+      snapshot.items[achievement.id]?.isEarned !== true
+    );
   });
 }
 
@@ -688,10 +678,9 @@ function pickNextItemId(
   if (currentIndex === -1) {
     return sorted[0];
   }
-  if (sorted.length === 1) {
-    return undefined;
-  }
-  return sorted[(currentIndex + 1) % sorted.length];
+  return sorted.length === 1
+    ? undefined
+    : sorted[(currentIndex + 1) % sorted.length];
 }
 
 function stripHtmlTags(html: string): string {
@@ -1054,10 +1043,9 @@ export async function runAchievementAutomations(
   if (!settings.runAutomatically) {
     return snapshot;
   }
-  if (!(await didApplyAchievementAutomations(snapshot, settings))) {
-    return snapshot;
-  }
-  return refreshSnapshotAfterAutomation(snapshot, snapshot.username);
+  return (await didApplyAchievementAutomations(snapshot, settings))
+    ? refreshSnapshotAfterAutomation(snapshot, snapshot.username)
+    : snapshot;
 }
 
 export function requiresAchievementHydrate(
@@ -1068,10 +1056,7 @@ export function requiresAchievementHydrate(
   if (!isEnabled) {
     return false;
   }
-  if (isForce) {
-    return true;
-  }
-  return !isSnapshotFresh(snapshot);
+  return isForce || !isSnapshotFresh(snapshot);
 }
 
 async function scrapeAchievementsSnapshot(
@@ -1089,13 +1074,12 @@ async function scrapeAchievementsSnapshot(
     return emptySnapshot(username);
   }
   const document_ = await loadAchievementsDocument(path);
-  if (!document_) {
-    return undefined;
-  }
-  return scrapeAchievementsFromDocument(
-    document_,
-    scrapeOptions({ username, pathHint: path }),
-  );
+  return document_
+    ? scrapeAchievementsFromDocument(
+        document_,
+        scrapeOptions({ username, pathHint: path }),
+      )
+    : undefined;
 }
 
 async function refreshSnapshotAfterAutomation(
@@ -1127,10 +1111,10 @@ async function refreshSnapshotAfterAutomation(
 
 function isForceWithinCooldown(existing: AchievementSnapshot): boolean {
   const scrapedAt = Date.parse(existing.scrapedAt);
-  if (Number.isNaN(scrapedAt)) {
-    return false;
-  }
-  return Date.now() - scrapedAt < FORCE_REFRESH_COOLDOWN_MS;
+  return (
+    !Number.isNaN(scrapedAt) &&
+    Date.now() - scrapedAt < FORCE_REFRESH_COOLDOWN_MS
+  );
 }
 
 export async function ensureAchievementSnapshot(

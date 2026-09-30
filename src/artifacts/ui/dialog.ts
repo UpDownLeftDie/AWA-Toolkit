@@ -18,11 +18,13 @@ function onDialogKeydown(event: KeyboardEvent): void {
     closeAoDialog(dialogState.doesEscapeConfirm === true);
     return;
   }
-  if (event.key === 'Enter') {
-    event.preventDefault();
-    event.stopImmediatePropagation();
-    closeAoDialog(true);
+  if (event.key !== 'Enter') {
+    return;
   }
+
+  event.preventDefault();
+  event.stopImmediatePropagation();
+  closeAoDialog(true);
 }
 
 function closeAoDialog(isConfirmed: boolean): void {

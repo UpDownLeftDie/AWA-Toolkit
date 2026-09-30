@@ -25,10 +25,7 @@ function delay(ms: number): Promise<void> {
 
 function titleFromSlug(slug: string): string {
   const words = slug.replaceAll("-", " ").trim();
-  if (!words) {
-    return "New giveaway";
-  }
-  return words.replaceAll(/\b\w/g, (letter) => letter.toUpperCase());
+  return words ? words.replaceAll(/\b\w/g, (letter) => letter.toUpperCase()) : "New giveaway";
 }
 
 function titleFromCard(element: HTMLElement): string {
@@ -40,10 +37,7 @@ function titleFromCard(element: HTMLElement): string {
     return headingText;
   }
   const titled = element.title.trim();
-  if (titled) {
-    return titled;
-  }
-  return "";
+  return titled || "";
 }
 
 function giveawayFromHref(
@@ -82,10 +76,7 @@ function withClaimed(
   giveaway: OfficialGiveaway,
   isClaimed: boolean | undefined,
 ): OfficialGiveaway {
-  if (isClaimed !== true) {
-    return giveaway;
-  }
-  return { ...giveaway, isClaimed: true };
+  return isClaimed === true ? { ...giveaway, isClaimed: true } : giveaway;
 }
 
 function mergeGiveaways(

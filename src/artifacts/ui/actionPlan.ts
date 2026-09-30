@@ -73,6 +73,11 @@ import {
 export type ActionTone = 'default' | 'muted' | 'warn';
 
 /**
+ * Ready-now loadout the Equip button on a What-to-do step should apply.
+ */
+export type EquipComboKey = 'best' | 'allArp';
+
+/**
  * How a step competes in the final "What to do" order.
  *
  * Sort: kind → readyAt → chain → duration → deadline slack → ARP.
@@ -159,6 +164,11 @@ export interface ActionTodo {
   */
   kind?: 'caution';
   /**
+  Ready-now loadout swap — renders a confirm+Equip button on this step.
+  `best` is the recommended/partial plan; `allArp` is the 0% All-ARP% set.
+  */
+  equipCombo?: EquipComboKey;
+  /**
   Affordable META upgrade — renders a confirm+Upgrade button on this step.
   */
   upgradeInstanceId?: number;
@@ -229,17 +239,11 @@ function compareActionTodoUrgency(
   }
   const leftSlack = urgencyDeadlineMs(left) - left.durationMs;
   const rightSlack = urgencyDeadlineMs(right) - right.durationMs;
-  if (leftSlack !== rightSlack) {
-    return leftSlack - rightSlack;
-  }
-  return (right.arp ?? 0) - (left.arp ?? 0);
+  return leftSlack === rightSlack ? (right.arp ?? 0) - (left.arp ?? 0) : leftSlack - rightSlack;
 }
 
 function defaultTodoUrgency(todo: ActionTodo): ActionTodoUrgency {
-  if (todo.tone === 'muted' && !todo.loadout) {
-    return { kind: 'info', readyAtMs: 0, durationMs: 0 };
-  }
-  return { kind: 'action', readyAtMs: 0, durationMs: 0 };
+  return ({ kind: todo.tone === 'muted' && !todo.loadout ? 'info' : 'action', readyAtMs: 0, durationMs: 0 });
 }
 
 /**
@@ -257,10 +261,7 @@ function sortActionTodosByUrgency(todos: ActionTodo[]): ActionTodo[] {
 function phaseChain(phase: ActivityPhase): ActionTodoChain {
   // afterNow = after the immediate equip, not tied with it (ARP would rank
   // Steam Quests above "Equip … now").
-  if (phase === 'afterNow' || phase === 'after') {
-    return 'after';
-  }
-  return 'before';
+  return phase === 'afterNow' || phase === 'after' ? 'after' : 'before';
 }
 
 type ActivityTodoRule = {
@@ -306,10 +307,7 @@ function activityDurationMs(
   if (key === 'watchTwitch') {
     return Math.max(0, watchRemainingMs);
   }
-  if (key === 'timeOnSite') {
-    return TIME_ON_SITE_DURATION_MS;
-  }
-  return 0;
+  return key === 'timeOnSite' ? TIME_ON_SITE_DURATION_MS : 0;
 }
 
 function twitchFullDayMs(
@@ -329,10 +327,7 @@ function loadoutStats(combo: LoadoutLike): ActivityLoadoutStats | undefined {
   if ('artifacts' in combo && combo.artifacts.length > 0) {
     return activityStatsForArtifacts(combo.artifacts);
   }
-  if ('timeOnSiteFlat' in combo) {
-    return combo;
-  }
-  return undefined;
+  return 'timeOnSiteFlat' in combo ? combo : undefined;
 }
 
 type PlannedWear = {
@@ -686,10 +681,7 @@ function twitchActivityLabel(options: {
     return 'Watch Twitch now';
   }
   const swapPart = options.beforeSwap ? ' before swapping' : '';
-  if (options.utcDeadline) {
-    return `Watch Twitch${swapPart} (${utcResetDeadlineLabel()})`;
-  }
-  return `Watch Twitch${swapPart}`;
+  return options.utcDeadline ? `Watch Twitch${swapPart} (${utcResetDeadlineLabel()})` : `Watch Twitch${swapPart}`;
 }
 
 function twitchArpReason(options: {
@@ -740,10 +732,7 @@ function steamQuestCountLabel(count: number): string {
   if (count === 1) {
     return '1 Steam Quest';
   }
-  if (count > 1) {
-    return `${count} Steam Quests`;
-  }
-  return 'Steam Quest(s)';
+  return count > 1 ? `${count} Steam Quests` : 'Steam Quest(s)';
 }
 
 function steamQuestsActivityLabel(
@@ -787,10 +776,7 @@ function dailyQuestsActivityLabel(
 ): string {
   const beforePart = options.beforeSwap ? ' before swapping' : '';
   const questsName = dailyQuestCountLabel(pending);
-  if (options.utcDeadline) {
-    return `Complete ${questsName} (${utcResetDeadlineLabel()})`;
-  }
-  return `Complete ${questsName}${beforePart}`;
+  return options.utcDeadline ? `Complete ${questsName} (${utcResetDeadlineLabel()})` : `Complete ${questsName}${beforePart}`;
 }
 
 function activityLabel(
@@ -969,10 +955,7 @@ function resolveUtcDailyPhase(options: {
         );
   // Wait for All-ARP% (deferred or recommended) when that lock still covers
   // this UTC day — repeating dailies must not beat a later one-shot multiplier.
-  if (isFitsAfterFuture && futureArp > currentArp) {
-    return 'after';
-  }
-  return 'before';
+  return isFitsAfterFuture && futureArp > currentArp ? 'after' : 'before';
 }
 
 function resolveActivityPhase(options: {
@@ -1083,10 +1066,7 @@ function allArpPctForPhase(
   if (phase === 'after') {
     return plannedWear?.stats.allArpPct ?? best?.allArpPct ?? 0;
   }
-  if (phase === 'afterNow') {
-    return afterNow?.allArpPct ?? current?.allArpPct ?? 0;
-  }
-  return current?.allArpPct ?? 0;
+  return phase === 'afterNow' ? afterNow?.allArpPct ?? current?.allArpPct ?? 0 : current?.allArpPct ?? 0;
 }
 
 function bonusForActivityPhase(
@@ -1101,10 +1081,7 @@ function bonusForActivityPhase(
   if (phase === 'afterNow') {
     return afterNowBonus;
   }
-  if (phase === 'before') {
-    return currentBonus;
-  }
-  return 0;
+  return phase === 'before' ? currentBonus : 0;
 }
 
 function activityTodoArp(options: {
@@ -1117,12 +1094,9 @@ function activityTodoArp(options: {
   if (key === 'watchTwitch') {
     return twitchArp;
   }
-  if (key === 'timeOnSite') {
-    return Math.round(
+  return key === 'timeOnSite' ? Math.round(
       (BASE_ACTIVITY.timeOnSiteBasePerDay + bonusForText) * (1 + allArpPct),
-    );
-  }
-  return bonusForText;
+    ) : bonusForText;
 }
 
 function activityTodoUrgency(options: {
@@ -1175,24 +1149,14 @@ function steamQuestsTodoExtras(
   if (pending.some((quest) => quest.libraryPending === true)) {
     reasons.push({ text: STEAM_LIBRARY_PENDING_HINT });
   }
-  if (reasons.length === 0) {
-    return { count: pending.length };
-  }
-  return { count: pending.length, reasons };
+  return reasons.length === 0 ? { count: pending.length } : { count: pending.length, reasons };
 }
 
 function dailyQuestsTodoExtras(siteState: SiteState): {
   pending: ReturnType<typeof remainingDailyQuestRows>;
   reasons?: ActionTodoReason[];
 } {
-  const pending = remainingDailyQuestRows(siteState);
-  const pendingNames = pending
-    .map((quest) => quest.name)
-    .filter((name) => name.length > 0);
-  if (pendingNames.length === 0) {
-    return { pending };
-  }
-  return { pending };
+  return { pending: remainingDailyQuestRows(siteState) };
 }
 
 function activityTodoReasons(options: {
@@ -1361,20 +1325,14 @@ function utcResetTodoRank(todo: ActionTodo): number {
   if (/(Daily|Weekend) quest/i.test(todo.text)) {
     return 0;
   }
-  if (/Watch Twitch/i.test(todo.text)) {
-    return 1;
-  }
-  return 2;
+  return /Watch Twitch/i.test(todo.text) ? 1 : 2;
 }
 
 function sortTodosByUtcDeadline(items: ActionTodo[]): ActionTodo[] {
   return items.toSorted((left, right) => {
     const leftUrgent = /00:00 UTC/i.test(left.text) ? 0 : 1;
     const rightUrgent = /00:00 UTC/i.test(right.text) ? 0 : 1;
-    if (leftUrgent !== rightUrgent) {
-      return leftUrgent - rightUrgent;
-    }
-    return utcResetTodoRank(left) - utcResetTodoRank(right);
+    return leftUrgent === rightUrgent ? utcResetTodoRank(left) - utcResetTodoRank(right) : leftUrgent - rightUrgent;
   });
 }
 
@@ -1400,17 +1358,12 @@ function upcomingResetAtMs(
       return undefined;
     }
     const monday = msUntilNextSteamQuestWeek();
-    if (
-      !canCompleteInWearWindow(
+    return canCompleteInWearWindow(
         monday,
         monday + STEAM_WEEK_MS,
         plannedWear.waitMs,
         0,
-      )
-    ) {
-      return undefined;
-    }
-    return monday;
+      ) ? monday : undefined;
   }
   if (!isUtcDailyActivity(key)) {
     return undefined;
@@ -1420,17 +1373,12 @@ function upcomingResetAtMs(
     key === 'watchTwitch'
       ? twitchFullDayMs(plannedWear.stats, siteState)
       : activityDurationMs(key, 0);
-  if (
-    !canCompleteInWearWindow(
+  return canCompleteInWearWindow(
       midnight,
       midnight + 86_400_000,
       plannedWear.waitMs,
       duration,
-    )
-  ) {
-    return undefined;
-  }
-  return midnight;
+    ) ? midnight : undefined;
 }
 
 function waitMsForActivityPhase(
@@ -1441,10 +1389,7 @@ function waitMsForActivityPhase(
   if (phase === 'afterNow') {
     return 0;
   }
-  if (phase === 'after') {
-    return delayWaitMs;
-  }
-  return waitMs;
+  return phase === 'after' ? delayWaitMs : waitMs;
 }
 
 function appendDueActivityTodo(options: {
@@ -1605,12 +1550,9 @@ function isSequencedActivityDue(
   if (!isActivityEnabled(settings, rule.key)) {
     return false;
   }
-  if (rule.key === 'watchTwitch') {
-    return (
+  return rule.key === 'watchTwitch' ? (
       watchRemainingMs > 0 && isActivityAvailable(siteState.caps, 'watchTwitch')
-    );
-  }
-  return rule.isDue(siteState.caps);
+    ) : rule.isDue(siteState.caps);
 }
 
 function buildSequencedActivityTodos(
@@ -1893,25 +1835,35 @@ function buildEquipTodo(options: {
   reasons: ActionTodoReason[];
   tone?: ActionTone;
   urgency?: ActionTodoUrgency;
+  equipCombo?: EquipComboKey;
 }): ActionTodo {
-  const { headline, loadout, reasons, tone, urgency } = options;
+  const { headline, loadout, reasons, tone, urgency, equipCombo } = options;
   // Keep loadout on the dedicated field — renderActionTodoBody prints it as its
   // own line; embedding it in `text` duplicated the artifact names.
+  const resolvedUrgency = urgency ?? {
+    kind: 'action' as const,
+    readyAtMs: 0,
+    durationMs: 0,
+    chain: 'equip' as const,
+  };
   const todo: ActionTodo = {
     text: headline,
     loadout,
-    urgency: urgency ?? {
-      kind: 'action',
-      readyAtMs: 0,
-      durationMs: 0,
-      chain: 'equip',
-    },
+    urgency: resolvedUrgency,
   };
   if (reasons.length > 0) {
     todo.reasons = reasons;
   }
   if (tone) {
     todo.tone = tone;
+  }
+  if (
+    equipCombo &&
+    resolvedUrgency.kind === 'action' &&
+    resolvedUrgency.readyAtMs <= 0 &&
+    resolvedUrgency.chain === 'equip'
+  ) {
+    todo.equipCombo = equipCombo;
   }
   return todo;
 }
@@ -1942,10 +1894,7 @@ function deferredSteamSetHeadline(waitMs: number): string {
   if (waitMs > COOLDOWN_MS) {
     return 'Equip Steam Quests set after this 24h wear';
   }
-  if (waitMs >= COOLDOWN_MS) {
-    return 'Equip Steam Quests set in 24h';
-  }
-  return `Equip Steam Quests set in ${formatMs(waitMs)}`;
+  return waitMs >= COOLDOWN_MS ? 'Equip Steam Quests set in 24h' : `Equip Steam Quests set in ${formatMs(waitMs)}`;
 }
 
 /**
@@ -2030,10 +1979,7 @@ function allArpArtifactsFromResult(
     return loadout.artifacts;
   }
   const deferred = result.deferredAllArp?.artifacts;
-  if (deferred && deferred.length > 0) {
-    return deferred;
-  }
-  return undefined;
+  return deferred && deferred.length > 0 ? deferred : undefined;
 }
 
 function battlePassAllArpEquipWaitMs(options: {
@@ -2115,6 +2061,7 @@ function battlePassAllArpEquipTodo(options: {
       ...(arpReady > 0 && { arp: arpReady }),
       chain: 'equip',
     }),
+    equipCombo: 'allArp',
   });
 }
 
@@ -2185,6 +2132,7 @@ function pushCommunityAllArpGuards(
   siteState: SiteState,
   isLocked: boolean,
   hasDeferredAllArp: boolean,
+  allArpLoadout: OptimizerResult['allArpLoadout'],
 ): void {
   if (hasDeferredAllArp) {
     return;
@@ -2195,7 +2143,7 @@ function pushCommunityAllArpGuards(
   }
   const pending = breakDownCommunityEventPending(event);
   if (pending.waitingPersonalArp > 0) {
-    todos.push({
+    const todo: ActionTodo = {
       tone: 'warn',
       text: `Equip All-ARP% before playing more Community Event hours (${formatCommunityEventArp(pending.waitingPersonalArp)} community-unlocked)`,
       urgency: {
@@ -2205,7 +2153,12 @@ function pushCommunityAllArpGuards(
         arp: pending.waitingPersonalArp,
         chain: 'equip',
       },
-    });
+    };
+    if (allArpLoadout && allArpLoadout.allArpPct > 0) {
+      todo.loadout = loadoutLabel(artifactsForDisplay(allArpLoadout));
+      todo.equipCombo = 'allArp';
+    }
+    todos.push(todo);
     return;
   }
   if (pending.waitingCommunityArp <= 0) {
@@ -2234,6 +2187,7 @@ function pushAllArpGuardTodos(
     hasPlannedAllArp?: boolean;
     hasDeferredAllArp?: boolean;
     hasScheduledAllArp?: boolean;
+    allArpLoadout?: OptimizerResult['allArpLoadout'];
   },
 ): void {
   const { ownsAllArp, hasAllArpEquipped, isLocked, deferBattlePassClaims } =
@@ -2267,6 +2221,7 @@ function pushAllArpGuardTodos(
     siteState,
     isLocked,
     options.hasDeferredAllArp === true,
+    options.allArpLoadout,
   );
 }
 
@@ -2317,6 +2272,7 @@ function buildPartialEquipTodos(
     headline: 'Equip now',
     loadout: nowEquipLoadout(plan),
     reasons: [],
+    equipCombo: 'best',
   });
   if (plan.laterNames.length > 0) {
     return [
@@ -2334,10 +2290,7 @@ function buildPartialEquipTodos(
       }),
     ];
   }
-  if (plan.lockedSlots.length > 0) {
-    return [nowTodo];
-  }
-  return undefined;
+  return plan.lockedSlots.length > 0 ? [nowTodo] : undefined;
 }
 
 function lockedSlotEquipTodos(options: {
@@ -2370,6 +2323,7 @@ function lockedSlotEquipTodos(options: {
             durationMs: 0,
             chain: 'equip',
           },
+          equipCombo: 'best',
         }),
       ],
       later: laterUpgrades,
@@ -2483,6 +2437,7 @@ function buildSwapEquipTodos(options: {
           durationMs: 0,
           chain: 'equip',
         },
+        equipCombo: 'best',
       }),
     ],
     later: laterUpgrades,
@@ -2647,10 +2602,7 @@ function discordPollSlot(options: {
   if (needsSwap && canNowEquipHelpPoll) {
     return 'afterNow';
   }
-  if (needsSwap && isPollBetterAfterSwap) {
-    return 'before';
-  }
-  return 'other';
+  return needsSwap && isPollBetterAfterSwap ? 'before' : 'other';
 }
 
 function discordPollTodoText(options: {
@@ -2667,17 +2619,11 @@ function discordPollTodoText(options: {
   if (slot === 'before') {
     return `Vote Discord Poll now — next post in ${nextPost}${bonusPart}`;
   }
-  if (bonus > 0) {
-    return `Vote Discord Poll (+${bonus} already equipped)`;
-  }
-  return 'Vote Discord Poll';
+  return bonus > 0 ? `Vote Discord Poll (+${bonus} already equipped)` : 'Vote Discord Poll';
 }
 
 function discordPollTodoReasons(slot: DiscordPollSlot): ActionTodoReason[] | undefined {
-  if (slot === 'afterFull' || slot === 'afterNow') {
-    return [{ text: 'After equipping' }];
-  }
-  return undefined;
+  return slot === 'afterFull' || slot === 'afterNow' ? [{ text: 'After equipping' }] : undefined;
 }
 
 function buildDiscordPollAction(options: {
@@ -2953,6 +2899,7 @@ export function buildActionPlan(
     hasPlannedAllArp,
     hasDeferredAllArp: deferredAllArp !== undefined,
     hasScheduledAllArp,
+    allArpLoadout: result.allArpLoadout,
   });
 
   if (
@@ -3015,10 +2962,7 @@ function actionTodoToneClass(tone: ActionTodo['tone']): string {
   if (tone === 'warn') {
     return ' ao-todo-warn';
   }
-  if (tone === 'muted') {
-    return ' ao-todo-muted';
-  }
-  return '';
+  return tone === 'muted' ? ' ao-todo-muted' : '';
 }
 
 function renderActionTodoBody(todo: ActionTodo): string {
@@ -3044,25 +2988,26 @@ function renderActionTodoBody(todo: ActionTodo): string {
   return parts.join('');
 }
 
-function renderTodoActionButton(
-  todo: ActionTodo,
-  options: { allowAccountActions?: boolean } = {},
-): string {
-  const areActionsEnabled = options.allowAccountActions === true;
+function renderAccountTodoButton(todo: ActionTodo): string {
+  if (todo.equipCombo) {
+    const label = todo.equipCombo === 'allArp' ? 'Equip All-ARP%' : 'Equip';
+    return `<button type="button" class="ao-equip-btn" data-equip="${todo.equipCombo}">${label}</button>`;
+  }
   if (todo.upgradeInstanceId !== undefined) {
-    if (!areActionsEnabled) {
-      return '';
-    }
     return `<button type="button" class="ao-upgrade-btn" data-id="${todo.upgradeInstanceId}">Upgrade</button>`;
   }
   if (todo.claimBattlePass === true) {
-    if (!areActionsEnabled) {
-      return '';
-    }
     const skipArp =
       todo.claimBattlePassSkipArp === true ? ' data-skip-arp="1"' : '';
     return `<button type="button" class="ao-claim-btn"${skipArp}>${battlePassClaimButtonLabel(todo.claimBattlePassSkipArp === true)}</button>`;
   }
+  return '';
+}
+
+function renderTodoActionButton(
+  todo: ActionTodo,
+  options: { allowAccountActions?: boolean } = {},
+): string {
   if (todo.openTwitchStream === true) {
     return '<button type="button" class="ao-twitch-btn">Open stream</button>';
   }
@@ -3071,7 +3016,7 @@ function renderTodoActionButton(
     const label = todo.openHrefLabel ?? 'Open';
     return `<button type="button" class="ao-ach-open-btn" data-href="${escapeHtml(todo.openHref)}"${visit}>${escapeHtml(label)}</button>`;
   }
-  return '';
+  return options.allowAccountActions === true ? renderAccountTodoButton(todo) : '';
 }
 
 function isCautionTodo(todo: ActionTodo): boolean {
