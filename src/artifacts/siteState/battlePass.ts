@@ -38,8 +38,219 @@ export interface BattlePassState {
   scrapedAt: string;
 }
 
+const BATTLE_PASS_SEASON_RE = /\/battle-pass\/(\d+)/;
+/**
+Seasons are about one quarter apart. Walk this far past the last known id so
+a season that ended (public page redirects to login, like `/battle-pass/1`)
+does not hide the next live pass.
+*/
+const BATTLE_PASS_SEASON_LOOKAHEAD = 6;
+const BATTLE_PASS_PATH_CACHE_MS = 15 * 60 * 1000;
+
+const battlePassPathCache: { at: number; path?: string } = { at: 0 };
+
+export function battlePassSeasonId(href: string | undefined): number | undefined {
+  if (!href) {
+    return undefined;
+  }
+  const match = BATTLE_PASS_SEASON_RE.exec(href);
+  if (!match?.[1]) {
+    return undefined;
+  }
+  const seasonId = Number(match[1]);
+  return Number.isSafeInteger(seasonId) && seasonId > 0 ? seasonId : undefined;
+}
+
+/**
+ * Personal track. Public `/battle-pass/{id}` is the rewards preview.
+ */
+export function battlePassControlCenterPath(
+  href: string | undefined,
+): string | undefined {
+  const seasonId = battlePassSeasonId(href);
+  return seasonId === undefined
+    ? undefined
+    : `/control-center/battle-pass/${seasonId}`;
+}
+
+function highestBattlePassSeasonId(
+  document_: Document,
+  selector: string,
+): number | undefined {
+  let newest: number | undefined;
+  for (const node of document_.querySelectorAll(selector)) {
+    const seasonId = battlePassSeasonId(node.getAttribute('href') ?? undefined);
+    if (seasonId === undefined) {
+      continue;
+    }
+    if (newest === undefined || seasonId > newest) {
+      newest = seasonId;
+    }
+  }
+  return newest;
+}
+
+/**
+ * Current season from the site's own links.
+ * Logged-in Control Center puts it on the account menu (`a.um-nav-link`).
+ * The homepage widget (`.bp-widget a`) is the same pointer when that tile is
+ * present. Other `/battle-pass/{id}` links are a fallback; the highest id wins.
+ */
+export function battlePassPathFromDocument(
+  document_: Document | undefined,
+): string | undefined {
+  if (!document_) {
+    return undefined;
+  }
+  const seasonId =
+    highestBattlePassSeasonId(
+      document_,
+      'a.um-nav-link[href*="/battle-pass/"]',
+    ) ??
+    highestBattlePassSeasonId(
+      document_,
+      '.bp-widget a[href*="/battle-pass/"]',
+    ) ??
+    highestBattlePassSeasonId(document_, 'a[href*="/battle-pass/"]');
+  return seasonId === undefined
+    ? undefined
+    : `/control-center/battle-pass/${seasonId}`;
+}
+
+/**
+ * Control Center sometimes links the live season the public pages have not
+ * caught up to. Never step backwards onto an ended pass.
+ */
+export function newerBattlePassPath(
+  current: string | undefined,
+  document_: Document | undefined,
+): string | undefined {
+  const linked = battlePassPathFromDocument(document_);
+  const linkedId = battlePassSeasonId(linked);
+  const currentId = battlePassSeasonId(current);
+  if (
+    linked &&
+    linkedId !== undefined &&
+    (currentId === undefined || linkedId > currentId)
+  ) {
+    return linked;
+  }
+  return current;
+}
+
+export function isPublicBattlePassSeasonPage(options: {
+  ok: boolean;
+  finalUrl: string;
+  html: string;
+}): boolean {
+  if (!options.ok || isLoginUrl(options.finalUrl)) {
+    return false;
+  }
+  return /class=["'][^"']*\bbp-(?:landing|popup)\b/.test(options.html);
+}
+
+function isLoginUrl(finalUrl: string): boolean {
+  try {
+    const pathname = new URL(finalUrl, 'https://www.alienwarearena.com').pathname;
+    return pathname === '/login' || pathname.startsWith('/login/');
+  } catch {
+    return false;
+  }
+}
+
+async function isLivePublicBattlePassSeason(seasonId: number): Promise<boolean> {
+  const response = await fetch(`/battle-pass/${seasonId}`, {
+    headers: { Accept: 'text/html' },
+  });
+  const html = response.ok ? await response.text() : '';
+  return isPublicBattlePassSeasonPage({
+    ok: response.ok,
+    finalUrl: response.url || `/battle-pass/${seasonId}`,
+    html,
+  });
+}
+
+async function newestLiveSeasonId(
+  startId: number,
+  isLiveSeason: (seasonId: number) => Promise<boolean>,
+): Promise<number | undefined> {
+  let newest: number | undefined;
+  const lastId = startId + BATTLE_PASS_SEASON_LOOKAHEAD;
+  for (let seasonId = startId; seasonId <= lastId; seasonId += 1) {
+    let isLive: boolean;
+    try {
+      isLive = await isLiveSeason(seasonId);
+    } catch {
+      return newest;
+    }
+    if (!isLive) {
+      if (newest !== undefined) {
+        return newest;
+      }
+      continue;
+    }
+    newest = seasonId;
+  }
+  return newest;
+}
+
+/**
+ * Control-center path of the newest live season. Ended passes (public URL
+ * redirects to login) are skipped. A known url is only the floor we search
+ * from; a newer `/battle-pass/{id}` replaces it.
+ */
+export async function discoverBattlePassPath(
+  options: {
+    knownUrl?: string | undefined;
+    hintDocument?: Document;
+    force?: boolean;
+    isLiveSeason?: (seasonId: number) => Promise<boolean>;
+  } = {},
+): Promise<string | undefined> {
+  const shouldRememberPath = options.isLiveSeason === undefined;
+  if (
+    shouldRememberPath &&
+    options.force !== true &&
+    battlePassPathCache.path &&
+    Date.now() - battlePassPathCache.at < BATTLE_PASS_PATH_CACHE_MS
+  ) {
+    return battlePassPathCache.path;
+  }
+
+  const hintedIds = [
+    battlePassSeasonId(options.knownUrl),
+    battlePassSeasonId(battlePassPathFromDocument(options.hintDocument)),
+    battlePassSeasonId(battlePassPathFromDocument(document)),
+    battlePassSeasonId(globalThis.location?.pathname),
+  ].filter((seasonId): seasonId is number => seasonId !== undefined);
+  const startId = hintedIds.length > 0 ? Math.max(...hintedIds) : 1;
+  const newest = await newestLiveSeasonId(
+    startId,
+    options.isLiveSeason ?? isLivePublicBattlePassSeason,
+  );
+  const path =
+    newest === undefined
+      ? battlePassControlCenterPath(options.knownUrl)
+      : `/control-center/battle-pass/${newest}`;
+  if (shouldRememberPath && path) {
+    battlePassPathCache.at = Date.now();
+    battlePassPathCache.path = path;
+  }
+  return path;
+}
+
+function isStaticBattlePassPreview(document_: Document): boolean {
+  return Boolean(
+    document_.querySelector('.bp-landing--static, .bp-landing__login-prompt') &&
+      !document_.querySelector(
+        '.bp-popup__claim-btn, .bp-popup__claimed, form[data-claim-form]',
+      ),
+  );
+}
+
 export function scrapeBattlePassFromDocument(
   document_: Document,
+  pageUrl?: string,
 ): BattlePassState | undefined {
   const body = pageText(document_);
   const popups = document_.querySelectorAll('.bp-popup[data-milestone-id]');
@@ -50,6 +261,19 @@ export function scrapeBattlePassFromDocument(
   if (legacyClaims === 0 && popups.length === 0) {
     return undefined;
   }
+  // `/battle-pass/{id}` is a logged-out rewards map (every milestone locked).
+  // Caching that as 0 ready would wipe the personal track.
+  if (isStaticBattlePassPreview(document_)) {
+    return undefined;
+  }
+
+  const url =
+    battlePassControlCenterPath(pageUrl) ??
+    battlePassPathFromDocument(document_) ??
+    battlePassControlCenterPath(globalThis.location?.pathname);
+  if (!url) {
+    return undefined;
+  }
 
   const readyClaims = listReadyClaimsFromDocument(document_);
   const { readyToClaim, readyToClaimArp } = countBattlePassClaims(document_);
@@ -57,7 +281,7 @@ export function scrapeBattlePassFromDocument(
   const state: BattlePassState = {
     readyToClaim,
     readyToClaimArp,
-    url: '/control-center/battle-pass/1',
+    url,
     scrapedAt: new Date().toISOString(),
   };
   if (readyClaims.length > 0) {
@@ -68,14 +292,58 @@ export function scrapeBattlePassFromDocument(
     state.tokens = Number(tokensMatch[1].replaceAll(',', ''));
     state.tokensMax = Number(tokensMatch[2].replaceAll(',', ''));
   }
+  const tokenCount = numberFromElement(
+    document_,
+    '.bp-header__token-count',
+  );
+  const tokenTotal = numberFromElement(
+    document_,
+    '.bp-header__token-total',
+  );
+  if (tokenCount !== undefined) {
+    state.tokens = tokenCount;
+  }
+  if (tokenTotal !== undefined) {
+    state.tokensMax = tokenTotal;
+  }
 
-  applyBattlePassCountdown(state, body);
+  applyBattlePassEnd(state, document_);
 
   return state;
 }
 
 const BATTLE_PASS_ENDS_RE =
   /battle\s*pass\s*ends?\s*in\s*(\d{1,3}(?:\s*:\s*\d{1,2}){2,3})/i;
+
+function numberFromElement(
+  document_: Document,
+  selector: string,
+): number | undefined {
+  const raw = document_.querySelector(selector)?.textContent?.replaceAll(',', '').trim();
+  if (!raw || !/^\d+$/.test(raw)) {
+    return undefined;
+  }
+  return Number(raw);
+}
+
+function battlePassEndsAtFromDocument(document_: Document): string | undefined {
+  const raw = document_.querySelector<HTMLElement>(
+      '.bp-header__countdown[data-countdown], .bp-widget__countdown[data-countdown]',
+    )?.dataset.countdown?.trim();
+  if (!raw) {
+    return undefined;
+  }
+  const endsAt = Date.parse(raw);
+  return Number.isNaN(endsAt) ? undefined : new Date(endsAt).toISOString();
+}
+
+function applyBattlePassEnd(state: BattlePassState, document_: Document): void {
+  const absolute = battlePassEndsAtFromDocument(document_);
+  if (absolute) {
+    state.endsAt = absolute;
+  }
+  applyBattlePassCountdown(state, pageText(document_));
+}
 
 function applyBattlePassCountdown(state: BattlePassState, body: string): void {
   const endsMatch = BATTLE_PASS_ENDS_RE.exec(body);
@@ -85,7 +353,8 @@ function applyBattlePassCountdown(state: BattlePassState, body: string): void {
   const raw = endsMatch[1].replaceAll(/\s+/g, ' ').trim();
   state.endsInText = raw;
   const remaining = parseBattlePassCountdownMs(raw);
-  if (remaining !== undefined) {
+  // `data-countdown` is an absolute timestamp. The visible clock is only a fallback.
+  if (remaining !== undefined && !state.endsAt) {
     state.endsAt = new Date(Date.now() + remaining).toISOString();
   }
 }
@@ -134,6 +403,17 @@ export function mergeBattlePassScrape(
   scraped: BattlePassState,
   previous: BattlePassState | undefined,
 ): BattlePassState {
+  const scrapedId = battlePassSeasonId(scraped.url);
+  const previousId = battlePassSeasonId(previous?.url);
+  // Visiting an ended pass must not replace the current season's ready claims.
+  if (
+    previous &&
+    scrapedId !== undefined &&
+    previousId !== undefined &&
+    scrapedId < previousId
+  ) {
+    return previous;
+  }
   if (scraped.endsAt || !previous?.endsAt) {
     return scraped;
   }
@@ -155,7 +435,7 @@ export function applyBattlePassEndFromDocument(
     return;
   }
   const battlePass = { ...next.battlePass };
-  applyBattlePassCountdown(battlePass, pageText(document_));
+  applyBattlePassEnd(battlePass, document_);
   next.battlePass = battlePass;
 }
 
@@ -599,9 +879,19 @@ async function endpointFromPageScripts(
   return undefined;
 }
 
-async function fetchBattlePassDocument(): Promise<Document | undefined> {
+async function fetchBattlePassDocument(
+  path?: string,
+): Promise<Document | undefined> {
+  const resolved =
+    path ??
+    (await discoverBattlePassPath({
+      knownUrl: battlePassControlCenterPath(globalThis.location?.pathname),
+    }));
+  if (!resolved) {
+    return undefined;
+  }
   try {
-    const response = await fetch('/control-center/battle-pass/1', {
+    const response = await fetch(resolved, {
       headers: { Accept: 'text/html' },
     });
     return response.ok ? new DOMParser().parseFromString(await response.text(), 'text/html') : undefined;
@@ -810,6 +1100,7 @@ export async function claimAllBattlePassRewards(
   options: {
     shouldSkipArpBoosts?: boolean;
     readyClaims?: BattlePassReadyClaim[];
+    battlePassPath?: string;
   } = {},
 ): Promise<{
   claimed: number;
@@ -830,7 +1121,10 @@ export async function claimAllBattlePassRewards(
       listBattlePassClaimButtons(document, { shouldSkipArpBoosts }),
     );
   } else {
-    fetchedDocument = await fetchBattlePassDocument();
+    const path = await discoverBattlePassPath({
+      knownUrl: options.battlePassPath,
+    });
+    fetchedDocument = await fetchBattlePassDocument(path);
     targets = fetchedDocument
       ? listReadyClaimsFromDocument(fetchedDocument).filter(
           (claim) => !shouldSkipArpBoosts || !claim.isArp,
@@ -944,7 +1238,9 @@ export function battlePassClaimButtonLabel(
 }
 
 export function scrapeBattlePass(): BattlePassState | undefined {
-  return location.pathname.includes('/battle-pass') ? scrapeBattlePassFromDocument(document) : undefined;
+  return location.pathname.includes('/battle-pass')
+    ? scrapeBattlePassFromDocument(document, location.pathname)
+    : undefined;
 }
 
 export function isBattlePassDocumentReady(document_: Document): boolean {

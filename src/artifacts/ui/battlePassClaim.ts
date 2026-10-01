@@ -3,6 +3,7 @@ import {
   battlePassClaimableArp,
   battlePassReadyNonArp,
   claimAllBattlePassRewards,
+  discoverBattlePassPath,
   listBattlePassClaimButtons,
   loadSiteState,
   refreshSiteStateFromPage,
@@ -79,6 +80,9 @@ async function runBattlePassClaims(options: {
     await claimAllBattlePassRewards({
       shouldSkipArpBoosts,
       ...(readyClaims && { readyClaims }),
+      ...(siteState?.battlePass?.url && {
+        battlePassPath: siteState.battlePass.url,
+      }),
     });
   if (needsBattlePassPage === true) {
     showAoToast('Opening Battle Pass to claim…');
@@ -87,7 +91,17 @@ async function runBattlePassClaims(options: {
       shouldSkipArpBoosts ? BP_CLAIM_SKIP_ARP_VALUE : '1',
     );
     const state = await loadSiteState();
-    location.assign(state?.battlePass?.url ?? '/control-center/battle-pass/1');
+    const path =
+      state?.battlePass?.url ??
+      (await discoverBattlePassPath({
+        knownUrl: siteState?.battlePass?.url,
+      }));
+    if (!path) {
+      sessionStorage.removeItem(BP_CLAIM_ALL_PENDING_KEY);
+      await showAoAlert('Could not find the current Battle Pass.');
+      return;
+    }
+    location.assign(path);
     return;
   }
   try {

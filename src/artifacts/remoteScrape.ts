@@ -40,6 +40,10 @@ import {
   saveSiteState,
   scrapeArpLogFromDocument,
   scrapeBattlePassFromDocument,
+  discoverBattlePassPath,
+  battlePassControlCenterPath,
+  battlePassPathFromDocument,
+  newerBattlePassPath,
   scrapeCommunityEventFromDocument,
   scrapeControlCenterCapsFromDocument,
   scrapeLiveCommunityEventBanner,
@@ -88,7 +92,6 @@ comes from ASCE (~hourly), so this can follow the normal 6h cadence.
 */
 const COMMUNITY_EVENT_PENDING_STALE_MS = STALE_MS;
 const CONTROL_CENTER_PATH = '/control-center';
-const BATTLE_PASS_PATH = '/control-center/battle-pass/1';
 const GAME_VAULT_PATH = '/marketplace/game-vault';
 const ARP_LOG_PATH = '/account/arp-log';
 const QUEST_SETUP_PATH = '/steam/questsetup';
@@ -380,6 +383,11 @@ function isCapsFresh(
  * saved as 0 ready and then skipped for the whole caps TTL.
  */
 function shouldRescrapeBattlePass(state: SiteState | undefined): boolean {
+  const advertised = battlePassPathFromDocument(document);
+  const stored = battlePassControlCenterPath(state?.battlePass?.url);
+  if (advertised && advertised !== stored) {
+    return true;
+  }
   const bp = state?.battlePass;
   if (!bp || typeof bp.readyToClaimArp !== 'number') {
     return true;
@@ -388,12 +396,18 @@ function shouldRescrapeBattlePass(state: SiteState | undefined): boolean {
   return Number.isNaN(scrapedAt) || Date.now() - scrapedAt > BATTLE_PASS_STALE_MS;
 }
 
-async function refreshBattlePassOnly(next: SiteState): Promise<void> {
-  const battleDocument = await loadRemoteDocument(BATTLE_PASS_PATH);
+async function refreshBattlePassOnly(
+  next: SiteState,
+  path: string | undefined,
+): Promise<void> {
+  if (!path) {
+    return;
+  }
+  const battleDocument = await loadRemoteDocument(path);
   if (!battleDocument) {
     return;
   }
-  const battlePass = scrapeBattlePassFromDocument(battleDocument);
+  const battlePass = scrapeBattlePassFromDocument(battleDocument, path);
   if (battlePass) {
     next.battlePass = mergeBattlePassScrape(battlePass, next.battlePass);
   }
@@ -410,13 +424,14 @@ async function refreshPartialSitePages(
   next: SiteState,
   options: {
     isForce: boolean;
+    battlePassPath: string | undefined;
     requiresBattlePassRefresh: boolean;
     requiresEventRefresh: boolean;
     requiresSteamEligibility: boolean;
   },
 ): Promise<void> {
   if (options.requiresBattlePassRefresh) {
-    await refreshBattlePassOnly(next);
+    await refreshBattlePassOnly(next, options.battlePassPath);
   }
   if (options.requiresEventRefresh) {
     await refreshStaleLiveEvent(next);
@@ -936,12 +951,38 @@ function applyControlCenterDocument(
   applyBattlePassEndFromDocument(next, controlDocument);
 }
 
-async function refreshActivityPages(next: SiteState): Promise<void> {
+async function applyRemoteBattlePass(
+  next: SiteState,
+  battlePassPath: string | undefined,
+  controlDocument: Document | undefined,
+  battleDocument: Document | undefined,
+): Promise<void> {
+  const resolved =
+    newerBattlePassPath(battlePassPath, controlDocument) ?? battlePassPath;
+  const document_ =
+    resolved && resolved !== battlePassPath
+      ? await loadRemoteDocument(resolved)
+      : battleDocument;
+  if (!document_ || !resolved) {
+    return;
+  }
+  const battlePass = scrapeBattlePassFromDocument(document_, resolved);
+  if (battlePass) {
+    next.battlePass = mergeBattlePassScrape(battlePass, next.battlePass);
+  }
+}
+
+async function refreshActivityPages(
+  next: SiteState,
+  battlePassPath: string | undefined,
+): Promise<void> {
   const [controlDocument, questDocument, battleDocument, vaultDocument] =
     await Promise.all([
       loadControlCenterDocument(),
       loadRemoteDocument(QUEST_SETUP_PATH),
-      loadRemoteDocument(BATTLE_PASS_PATH),
+      battlePassPath
+        ? loadRemoteDocument(battlePassPath)
+        : Promise.resolve(undefined),
       loadRemoteDocument(GAME_VAULT_PATH),
     ]);
 
@@ -951,12 +992,12 @@ async function refreshActivityPages(next: SiteState): Promise<void> {
   if (questDocument) {
     applyWatchTwitchProgress(next, questDocument);
   }
-  if (battleDocument) {
-    const battlePass = scrapeBattlePassFromDocument(battleDocument);
-    if (battlePass) {
-      next.battlePass = mergeBattlePassScrape(battlePass, next.battlePass);
-    }
-  }
+  await applyRemoteBattlePass(
+    next,
+    battlePassPath,
+    controlDocument,
+    battleDocument,
+  );
   if (vaultDocument) {
     applyGameVaultDocument(next, vaultDocument);
   }
@@ -1077,6 +1118,13 @@ export async function ensureSiteState(
 ): Promise<SiteState> {
   const existing = (await loadSiteState()) ?? emptySiteState();
   const isForce = options.force === true;
+  const battlePassPath = await discoverBattlePassPath({
+    knownUrl: existing.battlePass?.url,
+    force: isForce,
+  });
+  const hasBattlePassSeasonChanged =
+    battlePassPath !== undefined &&
+    battlePassPath !== battlePassControlCenterPath(existing.battlePass?.url);
   // Merge scrapes already keep ASCE hours / samples / play eligibility; force
   // just means "don't trust TTL". Short cooldown stops Refresh spam.
   const isForceCaps =
@@ -1095,7 +1143,10 @@ export async function ensureSiteState(
   // Always re-pull Battle Pass on Refresh — claim buttons disappear after
   // claiming, and a fresh scrapedAt must not keep stale readyToClaimArp.
   const requiresBattlePassRefresh =
-    isForce || requiresCapsRefresh || shouldRescrapeBattlePass(existing);
+    isForce ||
+    requiresCapsRefresh ||
+    hasBattlePassSeasonChanged ||
+    shouldRescrapeBattlePass(existing);
   const requiresArpLogRefresh =
     isForceArpLog ||
     !isArpLogFresh(existing) ||
@@ -1125,10 +1176,11 @@ export async function ensureSiteState(
   };
 
   if (requiresCapsRefresh) {
-    await refreshActivityPages(next);
+    await refreshActivityPages(next, battlePassPath);
   } else {
     await refreshPartialSitePages(next, {
       isForce,
+      battlePassPath,
       requiresBattlePassRefresh,
       requiresEventRefresh,
       requiresSteamEligibility,

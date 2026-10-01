@@ -51,6 +51,7 @@ import {
   isControlCenterPage,
   isSiteStatePage,
   requiresBackgroundHydrate,
+  requiresSeasonChangeHydrate,
   warmNotificationSchedule,
   type GatheredData,
 } from "./gather";
@@ -220,7 +221,9 @@ function bindModalEvents(
     const cached = await gatherData({ remote: false });
     const shouldHydrate =
       isRemote &&
-      (isForce || requiresBackgroundHydrate(cached, { force: isForce }));
+      (isForce ||
+        requiresBackgroundHydrate(cached, { force: isForce }) ||
+        (await requiresSeasonChangeHydrate(cached.siteState)));
     paint(cached, { isHydrating: shouldHydrate });
     if (!shouldHydrate) {
       return;
@@ -334,7 +337,8 @@ async function openOptimizerModal(): Promise<void> {
   }
   const shouldHydrate =
     gatheredCache.current !== undefined &&
-    requiresBackgroundHydrate(gatheredCache.current);
+    (requiresBackgroundHydrate(gatheredCache.current) ||
+      (await requiresSeasonChangeHydrate(gatheredCache.current.siteState)));
   if (shouldHydrate || !isNew) {
     void modal.__aoRefresh?.({ remote: shouldHydrate || !isNew });
   }
@@ -788,7 +792,9 @@ async function fillPanelFromCacheThenHydrate(
     if (!isPanelGenerationCurrent(panel, generation)) {
       return;
     }
-    const shouldHydrate = requiresBackgroundHydrate(cached, options);
+    const shouldHydrate =
+      requiresBackgroundHydrate(cached, options) ||
+      (await requiresSeasonChangeHydrate(cached.siteState));
     paint(cached, shouldHydrate);
 
     // Control Center / Showroom are already open — scrape them on every load

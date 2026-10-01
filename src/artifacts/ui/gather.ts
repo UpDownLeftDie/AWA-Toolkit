@@ -44,6 +44,8 @@ import {
 } from '../settings';
 import {
   applyLiveDocumentToSiteState,
+  battlePassControlCenterPath,
+  discoverBattlePassPath,
   emptySiteState,
   loadSiteState,
   refreshSiteStateFromPage,
@@ -336,6 +338,21 @@ export function requiresBackgroundHydrate(
         data.settings.achievementsEnabled,
       )) ||
     requiresAsceHydrate(data.siteState)
+  );
+}
+
+/*
+Cached state still points at an ended pass (`/battle-pass/1` after `/2` is live).
+*/
+export async function requiresSeasonChangeHydrate(
+  state: SiteState | undefined,
+): Promise<boolean> {
+  const path = await discoverBattlePassPath({
+    knownUrl: state?.battlePass?.url,
+  });
+  return (
+    path !== undefined &&
+    path !== battlePassControlCenterPath(state?.battlePass?.url)
   );
 }
 

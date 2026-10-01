@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         AWA Toolkit
 // @namespace    https://github.com/UpDownLeftDie/AWA-Toolkit
-// @version      2.2.9
+// @version      2.3.0
 // @author       jaredcat
 // @description  Artifact Optimizer, Control Center tasks, giveaway/vault filters, and UCF reading mode
 // @license      AGPL-3.0-or-later
@@ -3030,17 +3030,115 @@
 			applied
 		};
 	}
-	function scrapeBattlePassFromDocument(document_) {
+	var BATTLE_PASS_SEASON_RE = /\/battle-pass\/(\d+)/;
+	var BATTLE_PASS_SEASON_LOOKAHEAD = 6;
+	var BATTLE_PASS_PATH_CACHE_MS = 9e5;
+	var battlePassPathCache = { at: 0 };
+	function battlePassSeasonId(href) {
+		if (!href) return;
+		const match = BATTLE_PASS_SEASON_RE.exec(href);
+		if (!match?.[1]) return;
+		const seasonId = Number(match[1]);
+		return Number.isSafeInteger(seasonId) && seasonId > 0 ? seasonId : void 0;
+	}
+	function battlePassControlCenterPath(href) {
+		const seasonId = battlePassSeasonId(href);
+		return seasonId === void 0 ? void 0 : `/control-center/battle-pass/${seasonId}`;
+	}
+	function highestBattlePassSeasonId(document_, selector) {
+		let newest;
+		for (const node of document_.querySelectorAll(selector)) {
+			const seasonId = battlePassSeasonId(node.getAttribute("href") ?? void 0);
+			if (seasonId === void 0) continue;
+			if (newest === void 0 || seasonId > newest) newest = seasonId;
+		}
+		return newest;
+	}
+	function battlePassPathFromDocument(document_) {
+		if (!document_) return;
+		const seasonId = highestBattlePassSeasonId(document_, "a.um-nav-link[href*=\"/battle-pass/\"]") ?? highestBattlePassSeasonId(document_, ".bp-widget a[href*=\"/battle-pass/\"]") ?? highestBattlePassSeasonId(document_, "a[href*=\"/battle-pass/\"]");
+		return seasonId === void 0 ? void 0 : `/control-center/battle-pass/${seasonId}`;
+	}
+	function newerBattlePassPath(current, document_) {
+		const linked = battlePassPathFromDocument(document_);
+		const linkedId = battlePassSeasonId(linked);
+		const currentId = battlePassSeasonId(current);
+		if (linked && linkedId !== void 0 && (currentId === void 0 || linkedId > currentId)) return linked;
+		return current;
+	}
+	function isPublicBattlePassSeasonPage(options) {
+		if (!options.ok || isLoginUrl(options.finalUrl)) return false;
+		return /class=["'][^"']*\bbp-(?:landing|popup)\b/.test(options.html);
+	}
+	function isLoginUrl(finalUrl) {
+		try {
+			const pathname = new URL(finalUrl, "https://www.alienwarearena.com").pathname;
+			return pathname === "/login" || pathname.startsWith("/login/");
+		} catch {
+			return false;
+		}
+	}
+	async function isLivePublicBattlePassSeason(seasonId) {
+		const response = await fetch(`/battle-pass/${seasonId}`, { headers: { Accept: "text/html" } });
+		const html = response.ok ? await response.text() : "";
+		return isPublicBattlePassSeasonPage({
+			ok: response.ok,
+			finalUrl: response.url || `/battle-pass/${seasonId}`,
+			html
+		});
+	}
+	async function newestLiveSeasonId(startId, isLiveSeason) {
+		let newest;
+		const lastId = startId + BATTLE_PASS_SEASON_LOOKAHEAD;
+		for (let seasonId = startId; seasonId <= lastId; seasonId += 1) {
+			let isLive;
+			try {
+				isLive = await isLiveSeason(seasonId);
+			} catch {
+				return newest;
+			}
+			if (!isLive) {
+				if (newest !== void 0) return newest;
+				continue;
+			}
+			newest = seasonId;
+		}
+		return newest;
+	}
+	async function discoverBattlePassPath(options = {}) {
+		const shouldRememberPath = options.isLiveSeason === void 0;
+		if (shouldRememberPath && options.force !== true && battlePassPathCache.path && Date.now() - battlePassPathCache.at < BATTLE_PASS_PATH_CACHE_MS) return battlePassPathCache.path;
+		const hintedIds = [
+			battlePassSeasonId(options.knownUrl),
+			battlePassSeasonId(battlePassPathFromDocument(options.hintDocument)),
+			battlePassSeasonId(battlePassPathFromDocument(document)),
+			battlePassSeasonId(globalThis.location?.pathname)
+		].filter((seasonId) => seasonId !== void 0);
+		const newest = await newestLiveSeasonId(hintedIds.length > 0 ? Math.max(...hintedIds) : 1, options.isLiveSeason ?? isLivePublicBattlePassSeason);
+		const path = newest === void 0 ? battlePassControlCenterPath(options.knownUrl) : `/control-center/battle-pass/${newest}`;
+		if (shouldRememberPath && path) {
+			battlePassPathCache.at = Date.now();
+			battlePassPathCache.path = path;
+		}
+		return path;
+	}
+	function isStaticBattlePassPreview(document_) {
+		return Boolean(document_.querySelector(".bp-landing--static, .bp-landing__login-prompt") && !document_.querySelector(".bp-popup__claim-btn, .bp-popup__claimed, form[data-claim-form]"));
+	}
+	function scrapeBattlePassFromDocument(document_, pageUrl) {
 		const body = pageText(document_);
 		const popups = document_.querySelectorAll(".bp-popup[data-milestone-id]");
 		const tokensMatch = /BATTLE TOKENS\s*([\d,]+)\s*\/\s*([\d,]+)/i.exec(body);
 		if ((body.match(/Ready to claim/gi) ?? []).length === 0 && popups.length === 0) return;
+		if (isStaticBattlePassPreview(document_)) return;
+		const url = battlePassControlCenterPath(pageUrl) ?? battlePassPathFromDocument(document_) ?? battlePassControlCenterPath(globalThis.location?.pathname);
+		if (!url) return;
 		const readyClaims = listReadyClaimsFromDocument(document_);
 		const { readyToClaim, readyToClaimArp } = countBattlePassClaims(document_);
 		const state = {
 			readyToClaim,
 			readyToClaimArp,
-			url: "/control-center/battle-pass/1",
+			url,
 			scrapedAt: new Date().toISOString()
 		};
 		if (readyClaims.length > 0) state.readyClaims = readyClaims;
@@ -3048,17 +3146,37 @@
 			state.tokens = Number(tokensMatch[1].replaceAll(",", ""));
 			state.tokensMax = Number(tokensMatch[2].replaceAll(",", ""));
 		}
-		applyBattlePassCountdown(state, body);
+		const tokenCount = numberFromElement(document_, ".bp-header__token-count");
+		const tokenTotal = numberFromElement(document_, ".bp-header__token-total");
+		if (tokenCount !== void 0) state.tokens = tokenCount;
+		if (tokenTotal !== void 0) state.tokensMax = tokenTotal;
+		applyBattlePassEnd(state, document_);
 		return state;
 	}
 	var BATTLE_PASS_ENDS_RE = /battle\s*pass\s*ends?\s*in\s*(\d{1,3}(?:\s*:\s*\d{1,2}){2,3})/i;
+	function numberFromElement(document_, selector) {
+		const raw = document_.querySelector(selector)?.textContent?.replaceAll(",", "").trim();
+		if (!raw || !/^\d+$/.test(raw)) return;
+		return Number(raw);
+	}
+	function battlePassEndsAtFromDocument(document_) {
+		const raw = document_.querySelector(".bp-header__countdown[data-countdown], .bp-widget__countdown[data-countdown]")?.dataset.countdown?.trim();
+		if (!raw) return;
+		const endsAt = Date.parse(raw);
+		return Number.isNaN(endsAt) ? void 0 : new Date(endsAt).toISOString();
+	}
+	function applyBattlePassEnd(state, document_) {
+		const absolute = battlePassEndsAtFromDocument(document_);
+		if (absolute) state.endsAt = absolute;
+		applyBattlePassCountdown(state, pageText(document_));
+	}
 	function applyBattlePassCountdown(state, body) {
 		const endsMatch = BATTLE_PASS_ENDS_RE.exec(body);
 		if (!endsMatch?.[1]) return;
 		const raw = endsMatch[1].replaceAll(/\s+/g, " ").trim();
 		state.endsInText = raw;
 		const remaining = parseBattlePassCountdownMs(raw);
-		if (remaining !== void 0) state.endsAt = new Date(Date.now() + remaining).toISOString();
+		if (remaining !== void 0 && !state.endsAt) state.endsAt = new Date(Date.now() + remaining).toISOString();
 	}
 	function parseBattlePassCountdownMs(text) {
 		const parts = text.trim().split(":").map((part) => Number(part.trim())).filter((part) => Number.isFinite(part));
@@ -3080,6 +3198,9 @@
 		return parsed === void 0 || Number.isNaN(scrapedAt) ? void 0 : Math.max(0, parsed - (now - scrapedAt));
 	}
 	function mergeBattlePassScrape(scraped, previous) {
+		const scrapedId = battlePassSeasonId(scraped.url);
+		const previousId = battlePassSeasonId(previous?.url);
+		if (previous && scrapedId !== void 0 && previousId !== void 0 && scrapedId < previousId) return previous;
 		if (scraped.endsAt || !previous?.endsAt) return scraped;
 		const merged = {
 			...scraped,
@@ -3091,7 +3212,7 @@
 	function applyBattlePassEndFromDocument(next, document_) {
 		if (!next.battlePass) return;
 		const battlePass = { ...next.battlePass };
-		applyBattlePassCountdown(battlePass, pageText(document_));
+		applyBattlePassEnd(battlePass, document_);
 		next.battlePass = battlePass;
 	}
 	function listReadyClaimsFromDocument(document_) {
@@ -3326,9 +3447,11 @@
 			if (fromFile) return fromFile;
 		} catch {}
 	}
-	async function fetchBattlePassDocument() {
+	async function fetchBattlePassDocument(path) {
+		const resolved = path ?? await discoverBattlePassPath({ knownUrl: battlePassControlCenterPath(globalThis.location?.pathname) });
+		if (!resolved) return;
 		try {
-			const response = await fetch("/control-center/battle-pass/1", { headers: { Accept: "text/html" } });
+			const response = await fetch(resolved, { headers: { Accept: "text/html" } });
 			return response.ok ? new DOMParser().parseFromString(await response.text(), "text/html") : void 0;
 		} catch {
 			return;
@@ -3445,7 +3568,7 @@
 		let targets;
 		if (isOnBattlePassPage) targets = claimsFromLiveButtons(listBattlePassClaimButtons(document, { shouldSkipArpBoosts }));
 		else {
-			fetchedDocument = await fetchBattlePassDocument();
+			fetchedDocument = await fetchBattlePassDocument(await discoverBattlePassPath({ knownUrl: options.battlePassPath }));
 			targets = fetchedDocument ? listReadyClaimsFromDocument(fetchedDocument).filter((claim) => !shouldSkipArpBoosts || !claim.isArp) : [];
 			if (targets.every((claim) => !claim.claimPath)) targets = (options.readyClaims ?? []).filter((claim) => Boolean(claim.claimPath) && (!shouldSkipArpBoosts || !claim.isArp));
 		}
@@ -3496,7 +3619,7 @@
 		return options?.compact === true ? "Claim all BP" : "Claim all";
 	}
 	function scrapeBattlePass() {
-		return location.pathname.includes("/battle-pass") ? scrapeBattlePassFromDocument(document) : void 0;
+		return location.pathname.includes("/battle-pass") ? scrapeBattlePassFromDocument(document, location.pathname) : void 0;
 	}
 	function isBattlePassDocumentReady(document_) {
 		return Boolean(document_.querySelector(".bp-popup[data-milestone-id], .bp-popup__claim-btn, .bp-popup__claimed") || /Ready to claim/i.test(document_.body?.textContent ?? ""));
@@ -8530,7 +8653,6 @@
 	var BATTLE_PASS_STALE_MS = 36e5;
 	var COMMUNITY_EVENT_PENDING_STALE_MS = STALE_MS$1;
 	var CONTROL_CENTER_PATH = "/control-center";
-	var BATTLE_PASS_PATH = "/control-center/battle-pass/1";
 	var GAME_VAULT_PATH$1 = "/marketplace/game-vault";
 	var ARP_LOG_PATH = "/account/arp-log";
 	var QUEST_SETUP_PATH = "/steam/questsetup";
@@ -8678,15 +8800,19 @@
 		return true;
 	}
 	function shouldRescrapeBattlePass(state) {
+		const advertised = battlePassPathFromDocument(document);
+		const stored = battlePassControlCenterPath(state?.battlePass?.url);
+		if (advertised && advertised !== stored) return true;
 		const bp = state?.battlePass;
 		if (!bp || typeof bp.readyToClaimArp !== "number") return true;
 		const scrapedAt = Date.parse(bp.scrapedAt ?? "");
 		return Number.isNaN(scrapedAt) || Date.now() - scrapedAt > BATTLE_PASS_STALE_MS;
 	}
-	async function refreshBattlePassOnly(next) {
-		const battleDocument = await loadRemoteDocument(BATTLE_PASS_PATH);
+	async function refreshBattlePassOnly(next, path) {
+		if (!path) return;
+		const battleDocument = await loadRemoteDocument(path);
 		if (!battleDocument) return;
-		const battlePass = scrapeBattlePassFromDocument(battleDocument);
+		const battlePass = scrapeBattlePassFromDocument(battleDocument, path);
 		if (battlePass) next.battlePass = mergeBattlePassScrape(battlePass, next.battlePass);
 	}
 	async function refreshGameVaultOnly(next) {
@@ -8694,7 +8820,7 @@
 		if (vaultDocument) applyGameVaultDocument(next, vaultDocument);
 	}
 	async function refreshPartialSitePages(next, options) {
-		if (options.requiresBattlePassRefresh) await refreshBattlePassOnly(next);
+		if (options.requiresBattlePassRefresh) await refreshBattlePassOnly(next, options.battlePassPath);
 		if (options.requiresEventRefresh) await refreshStaleLiveEvent(next);
 		if (options.requiresSteamEligibility) await enrichSteamQuestEligibility(next);
 		if (options.isForce) await refreshGameVaultOnly(next);
@@ -8936,19 +9062,23 @@
 		applyWatchTwitchProgress(next, controlDocument);
 		applyBattlePassEndFromDocument(next, controlDocument);
 	}
-	async function refreshActivityPages(next) {
+	async function applyRemoteBattlePass(next, battlePassPath, controlDocument, battleDocument) {
+		const resolved = newerBattlePassPath(battlePassPath, controlDocument) ?? battlePassPath;
+		const document_ = resolved && resolved !== battlePassPath ? await loadRemoteDocument(resolved) : battleDocument;
+		if (!document_ || !resolved) return;
+		const battlePass = scrapeBattlePassFromDocument(document_, resolved);
+		if (battlePass) next.battlePass = mergeBattlePassScrape(battlePass, next.battlePass);
+	}
+	async function refreshActivityPages(next, battlePassPath) {
 		const [controlDocument, questDocument, battleDocument, vaultDocument] = await Promise.all([
 			loadControlCenterDocument(),
 			loadRemoteDocument(QUEST_SETUP_PATH),
-			loadRemoteDocument(BATTLE_PASS_PATH),
+			battlePassPath ? loadRemoteDocument(battlePassPath) : Promise.resolve(void 0),
 			loadRemoteDocument(GAME_VAULT_PATH$1)
 		]);
 		if (controlDocument) applyControlCenterDocument(next, controlDocument);
 		if (questDocument) applyWatchTwitchProgress(next, questDocument);
-		if (battleDocument) {
-			const battlePass = scrapeBattlePassFromDocument(battleDocument);
-			if (battlePass) next.battlePass = mergeBattlePassScrape(battlePass, next.battlePass);
-		}
+		await applyRemoteBattlePass(next, battlePassPath, controlDocument, battleDocument);
 		if (vaultDocument) applyGameVaultDocument(next, vaultDocument);
 		await Promise.all([controlDocument ? refreshLiveCommunityEvent(next, controlDocument) : Promise.resolve(), enrichSteamQuestEligibility(next)]);
 	}
@@ -8998,11 +9128,16 @@
 	async function ensureSiteState(options = {}) {
 		const existing = await loadSiteState() ?? emptySiteState();
 		const isForce = options.force === true;
+		const battlePassPath = await discoverBattlePassPath({
+			knownUrl: existing.battlePass?.url,
+			force: isForce
+		});
+		const hasBattlePassSeasonChanged = battlePassPath !== void 0 && battlePassPath !== battlePassControlCenterPath(existing.battlePass?.url);
 		const isForceCaps = isForce && !isScrapedWithin(existing.updatedAt, FORCE_REFRESH_COOLDOWN_MS$1);
 		const isForceArpLog = isForce;
 		const isForceEvent = isForce && !isScrapedWithin(existing.communityEvent?.scrapedAt, FORCE_REFRESH_COOLDOWN_MS$1);
 		const requiresCapsRefresh = isForceCaps || !isCapsFresh(existing);
-		const requiresBattlePassRefresh = isForce || requiresCapsRefresh || shouldRescrapeBattlePass(existing);
+		const requiresBattlePassRefresh = isForce || requiresCapsRefresh || hasBattlePassSeasonChanged || shouldRescrapeBattlePass(existing);
 		const requiresArpLogRefresh = isForceArpLog || !isArpLogFresh(existing) || shouldRefreshCommunityEventArpLog(existing);
 		const requiresEventRefresh = isForceEvent || !isCommunityEventFresh(existing);
 		const requiresSteamEligibility = isForceCaps || requiresSteamQuestEligibilityFetch(existing);
@@ -9018,9 +9153,10 @@
 			updatedAt: new Date().toISOString(),
 			caps: { ...existing.caps }
 		};
-		if (requiresCapsRefresh) await refreshActivityPages(next);
+		if (requiresCapsRefresh) await refreshActivityPages(next, battlePassPath);
 		else await refreshPartialSitePages(next, {
 			isForce,
+			battlePassPath,
 			requiresBattlePassRefresh,
 			requiresEventRefresh,
 			requiresSteamEligibility
@@ -10233,16 +10369,23 @@
 	async function runBattlePassClaims(options) {
 		const shouldSkipArpBoosts = options.shouldSkipArpBoosts;
 		showAoToast(shouldSkipArpBoosts ? "Claiming Battle Pass rewards (leaving ARP Boosts)…" : "Claiming Battle Pass rewards…");
-		const readyClaims = (await loadSiteState())?.battlePass?.readyClaims;
+		const siteState = await loadSiteState();
+		const readyClaims = siteState?.battlePass?.readyClaims;
 		const { claimed, remaining, needsBattlePassPage } = await claimAllBattlePassRewards({
 			shouldSkipArpBoosts,
-			...readyClaims && { readyClaims }
+			...readyClaims && { readyClaims },
+			...siteState?.battlePass?.url && { battlePassPath: siteState.battlePass.url }
 		});
 		if (needsBattlePassPage === true) {
 			showAoToast("Opening Battle Pass to claim…");
 			sessionStorage.setItem(BP_CLAIM_ALL_PENDING_KEY, shouldSkipArpBoosts ? BP_CLAIM_SKIP_ARP_VALUE : "1");
-			const state = await loadSiteState();
-			location.assign(state?.battlePass?.url ?? "/control-center/battle-pass/1");
+			const path = (await loadSiteState())?.battlePass?.url ?? await discoverBattlePassPath({ knownUrl: siteState?.battlePass?.url });
+			if (!path) {
+				sessionStorage.removeItem(BP_CLAIM_ALL_PENDING_KEY);
+				await showAoAlert("Could not find the current Battle Pass.");
+				return;
+			}
+			location.assign(path);
 			return;
 		}
 		try {
@@ -10506,6 +10649,10 @@
 		if (hasElapsedShowroomLock(data.settings, data.snapshot?.slotLocks)) return true;
 		if (!isArtifactsShowroomPage() && requiresRemoteSnapshotHydrate(data.snapshot)) return true;
 		return requiresRemoteSiteHydrate(data.siteState) || requiresSteamFreeHydrate(data.siteState) || requiresAsceHydrate(data.siteState);
+	}
+	async function requiresSeasonChangeHydrate(state) {
+		const path = await discoverBattlePassPath({ knownUrl: state?.battlePass?.url });
+		return path !== void 0 && path !== battlePassControlCenterPath(state?.battlePass?.url);
 	}
 	async function hydrateAsceData(data, options = {}) {
 		if (!data.siteState.communityEvent?.isLive) return;
@@ -11510,7 +11657,7 @@
 			const isForce = options?.force ?? false;
 			if (options?.persist === true) await persistFormSettings(tree());
 			const cached = await gatherData({ remote: false });
-			const shouldHydrate = isRemote && (isForce || requiresBackgroundHydrate(cached, { force: isForce }));
+			const shouldHydrate = isRemote && (isForce || requiresBackgroundHydrate(cached, { force: isForce }) || await requiresSeasonChangeHydrate(cached.siteState));
 			paint(cached, { isHydrating: shouldHydrate });
 			if (!shouldHydrate) return;
 			paint(await hydrateGatheredData({ force: isForce }), { isHydrating: false });
@@ -11586,7 +11733,7 @@
 			const cached = gatheredCache.current ?? await gatherData({ remote: false });
 			bindModalEvents(modal, cached);
 		}
-		const shouldHydrate = gatheredCache.current !== void 0 && requiresBackgroundHydrate(gatheredCache.current);
+		const shouldHydrate = gatheredCache.current !== void 0 && (requiresBackgroundHydrate(gatheredCache.current) || await requiresSeasonChangeHydrate(gatheredCache.current.siteState));
 		if (shouldHydrate || !isNew) modal.__aoRefresh?.({ remote: shouldHydrate || !isNew });
 	}
 	function addOptimizerMenuButton() {
@@ -11860,7 +12007,7 @@
 			}
 			const cached = await gatherData({ remote: false });
 			if (!isPanelGenerationCurrent(panel, generation)) return;
-			const shouldHydrate = requiresBackgroundHydrate(cached, options);
+			const shouldHydrate = requiresBackgroundHydrate(cached, options) || await requiresSeasonChangeHydrate(cached.siteState);
 			paint(cached, shouldHydrate);
 			await refreshPanelFromLivePage(panel, generation, (data, isHydrating) => {
 				paint(data, shouldHydrate || isHydrating);
