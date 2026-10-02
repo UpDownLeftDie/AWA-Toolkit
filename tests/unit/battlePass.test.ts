@@ -1,6 +1,7 @@
 import { beforeAll, describe, expect, it, vi } from 'vitest';
 
 import {
+  battlePassClaimButtonLabel,
   battlePassControlCenterPath,
   battlePassPathFromDocument,
   battlePassSeasonId,
@@ -373,5 +374,14 @@ describe('scrapeBattlePassFromDocument', () => {
         current,
       ).url,
     ).toBe('/control-center/battle-pass/4');
+  });
+
+  it('labels skip-ARP claim buttons as non-ARP, not bare Claim rewards', () => {
+    expect(battlePassClaimButtonLabel(true)).toMatch(/non-ARP/i);
+    expect(battlePassClaimButtonLabel(true)).toMatch(/hold Boosts/i);
+    expect(battlePassClaimButtonLabel(true, { compact: true })).toBe(
+      'Claim non-ARP',
+    );
+    expect(battlePassClaimButtonLabel(false)).toBe('Claim all');
   });
 });

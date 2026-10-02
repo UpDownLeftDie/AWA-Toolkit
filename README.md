@@ -24,7 +24,7 @@ Reads your Showroom, Control Center, Battle Pass, Game Vault, ARP Log, and (when
 
 **Loadouts** — Scores 3-artifact combos for the next 24h lock window (remaining today, next UTC dailies if capped, Monday Steam Quests when that reset falls inside the lock). Category bonuses first, then All-ARP% (H\`erkow Plasma Chamber / Zorathian). Also surfaces market-discount sets when a vault buy would be blocked by a lock, and Megumin’s standing monthly META set on the Showroom.
 
-**Tasks** — Control Center lists what to do next from activity caps, Steam Quests, Twitch, Discord poll, Battle Pass ready rewards, and community-event ARP still wearing under the lock. Community hours / unlock ETA come from [ASCE](https://github.com/MarvashMagalli/ASCE); already-granted event rewards are checked against the ARP Log.
+**Tasks** — Control Center lists what to do next from activity caps, Steam Quests, Twitch, Discord poll, Battle Pass ready rewards, and community-event ARP still wearing under the lock. When All-ARP% is owned but not equipped, cosmetics/fragments can claim immediately (**Claim non-ARP**); ARP Boosts stay held until All-ARP% is on (or the season ends first). Community hours / unlock ETA come from [ASCE](https://github.com/MarvashMagalli/ASCE); already-granted event rewards are checked against the ARP Log.
 
 **Upgrades** — Long-term META path (HPC → Pn295 Twitch → Chai → …) using tiers you own. Plan only — leftover shards are not pushed onto cheaper sidegrades.
 
@@ -46,7 +46,7 @@ Choices are remembered across posts.
 * Notifications only schedule while an AWA tab is open.
 * Some activity signals are best-effort (“still available” when markup differs).
 * Steam Quests / Community Events need the game owned on the linked Steam account (not family sharing). Paid games are skipped; free / $0 titles stay listed. **Check Game** / **Visit Steam** / **Sync Games** means ownership has not shown up yet.
-* Battle Pass ready-to-claim counts are informational; season thresholds are not hardcoded.
+* Battle Pass ready-to-claim counts are informational; season thresholds are not hardcoded. Claim buttons distinguish **Claim non-ARP** (hold Boosts) from **Claim all**.
 
 ## Credits
 

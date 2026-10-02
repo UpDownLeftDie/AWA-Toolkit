@@ -1225,14 +1225,15 @@ export function shouldShowBattlePassClaimAll(
 }
 
 /**
- * Skip-ARP must not say "all" — that implies claiming the boosts we are holding.
+ * Skip-ARP must not say "all" or bare "rewards" — that implies claiming the
+ * ARP Boosts we are holding for All-ARP%.
  */
 export function battlePassClaimButtonLabel(
   shouldSkipArpBoosts: boolean,
   options?: { compact?: boolean },
 ): string {
   if (shouldSkipArpBoosts) {
-    return 'Claim rewards';
+    return options?.compact === true ? 'Claim non-ARP' : 'Claim non-ARP (hold Boosts)';
   }
   return options?.compact === true ? 'Claim all BP' : 'Claim all';
 }

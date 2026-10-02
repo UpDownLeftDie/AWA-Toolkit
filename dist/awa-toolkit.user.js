@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         AWA Toolkit
 // @namespace    https://github.com/UpDownLeftDie/AWA-Toolkit
-// @version      2.3.0
+// @version      2.3.1
 // @author       jaredcat
 // @description  Artifact Optimizer, Control Center tasks, giveaway/vault filters, and UCF reading mode
 // @license      AGPL-3.0-or-later
@@ -3615,7 +3615,7 @@
 		return (battlePass?.readyToClaim ?? 0) > 0 && !shouldWaitForAllArpSwap;
 	}
 	function battlePassClaimButtonLabel(shouldSkipArpBoosts, options) {
-		if (shouldSkipArpBoosts) return "Claim rewards";
+		if (shouldSkipArpBoosts) return options?.compact === true ? "Claim non-ARP" : "Claim non-ARP (hold Boosts)";
 		return options?.compact === true ? "Claim all BP" : "Claim all";
 	}
 	function scrapeBattlePass() {
@@ -6758,7 +6758,10 @@
 		return `${readyAll} Battle Pass rewards (${readyArp === 1 ? "1 ARP Boost" : `${readyArp} ARP Boosts`})`;
 	}
 	function holdArpBoostReason(readyArp) {
-		return `Hold ${readyArp === 1 ? "1 ARP Boost" : `${readyArp} ARP Boosts`} until All-ARP% is on`;
+		return `Does not claim ${readyArp === 1 ? "1 ARP Boost" : `${readyArp} ARP Boosts`} — those wait for All-ARP%`;
+	}
+	function nonArpBattlePassClaimLabel(nonArp) {
+		return nonArp === 1 ? "1 cosmetic / fragment" : `${nonArp} cosmetics / fragments`;
 	}
 	function pushHeldArpBattlePassTodos(todos, siteState, readyArp, hasScheduledAllArp, allArpReadyAtMs = 0) {
 		const nonArp = battlePassReadyNonArp(siteState.battlePass);
@@ -6766,7 +6769,7 @@
 			const reasons = [{ text: holdArpBoostReason(readyArp) }];
 			if (!hasScheduledAllArp) reasons.push({ text: "More boosts may unlock — claim those when All-ARP% is already on" });
 			todos.push({
-				text: `Claim ${battlePassClaimCountLabel(nonArp, 0)} now`,
+				text: `Claim ${nonArpBattlePassClaimLabel(nonArp)} now (not ARP Boosts)`,
 				reasons,
 				claimBattlePass: true,
 				claimBattlePassSkipArp: true,
@@ -7511,7 +7514,7 @@
 		const { ownsAllArp, hasAllArpEquipped, isLocked, deferBattlePassClaims } = options;
 		if (!ownsAllArp || hasAllArpEquipped) return;
 		const hasScheduledAllArp = options.hasScheduledAllArp === true || options.hasPlannedAllArp === true;
-		if (deferBattlePassClaims && battlePassClaimableArp(siteState.battlePass) > 0 && battlePassReadyNonArp(siteState.battlePass) === 0) {
+		if (deferBattlePassClaims && battlePassClaimableArp(siteState.battlePass) > 0) {
 			const arpReady = battlePassClaimableArp(siteState.battlePass);
 			todos.push({
 				kind: "caution",
@@ -11908,7 +11911,7 @@
 		const shouldWait = data.result.deferBattlePassClaims === true;
 		if (!shouldShowBattlePassClaimAll(data.siteState.battlePass, shouldWait)) return "";
 		const shouldSkipArpBoosts = shouldSkipArpInBattlePassClaimAll(data.siteState.battlePass, shouldWait);
-		return `<button type="button" class="ao-claim-btn ao-secondary"${shouldSkipArpBoosts ? " data-skip-arp=\"1\"" : ""}${shouldSkipArpBoosts ? " title=\"Claims cosmetics and fragments; leaves ARP Boosts until All-ARP% is equipped\"" : ""}>${battlePassClaimButtonLabel(shouldSkipArpBoosts, { compact: true })}</button>`;
+		return `<button type="button" class="ao-claim-btn ao-secondary"${shouldSkipArpBoosts ? " data-skip-arp=\"1\"" : ""}${shouldSkipArpBoosts ? " title=\"Claims cosmetics/fragments only — leaves ARP Boosts until All-ARP% is equipped\"" : ""}>${battlePassClaimButtonLabel(shouldSkipArpBoosts, { compact: true })}</button>`;
 	}
 	function renderControlCenterPanelBody(data, options = {}) {
 		const hydrateBanner = options.isHydrating ? renderHydrateBanner("Updating in the background…") : "";

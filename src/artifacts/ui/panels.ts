@@ -633,7 +633,7 @@ function compactClaimAllBpButton(data: GatheredData): string {
   );
   const skipArp = shouldSkipArpBoosts ? ' data-skip-arp="1"' : "";
   const title = shouldSkipArpBoosts
-    ? ' title="Claims cosmetics and fragments; leaves ARP Boosts until All-ARP% is equipped"'
+    ? ' title="Claims cosmetics/fragments only — leaves ARP Boosts until All-ARP% is equipped"'
     : "";
   return `<button type="button" class="ao-claim-btn ao-secondary"${skipArp}${title}>${battlePassClaimButtonLabel(shouldSkipArpBoosts, { compact: true })}</button>`;
 }

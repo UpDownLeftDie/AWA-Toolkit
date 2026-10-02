@@ -418,6 +418,75 @@ function checkActionPlan(
     }
   }
 
+  violations.push(...checkBattlePassClaimOrder(result, todos, ctx));
+
+  return violations;
+}
+
+/**
+ * Skip-ARP claims may be step 1, but must say cosmetics/non-ARP and that
+ * ARP Boosts stay held. Full ARP Boost claims stay deferred until All-ARP%
+ * is on, unless the season ends before that lock can finish.
+ */
+function checkBattlePassClaimOrder(
+  result: OptimizerResult,
+  todos: ActionTodo[],
+  ctx: AuditContext,
+): InvariantViolation[] {
+  const violations: InvariantViolation[] = [];
+  const steps = todos.filter((todo) => todo.kind !== 'caution');
+
+  for (const todo of steps) {
+    if (todo.claimBattlePass !== true || todo.claimBattlePassSkipArp !== true) {
+      continue;
+    }
+    const blob = `${todo.text} ${(todo.reasons ?? []).map((reason) => reason.text).join(' ')}`;
+    if (!/not arp boost|cosmetic|fragment|non-arp/i.test(blob)) {
+      violations.push(
+        violation(
+          ctx,
+          'action-plan-skip-arp-claim-labeled',
+          'skip-ARP Battle Pass claim does not say it is cosmetic/non-ARP',
+          { todo: todo.text },
+        ),
+      );
+    }
+    if (!/arp boost|all-arp/i.test(blob)) {
+      violations.push(
+        violation(
+          ctx,
+          'action-plan-skip-arp-holds-boosts',
+          'skip-ARP Battle Pass claim does not say ARP Boosts stay held for All-ARP%',
+          { todo: todo.text },
+        ),
+      );
+    }
+  }
+
+  if (
+    result.deferBattlePassClaims === true &&
+    result.hasAllArpOwned === true &&
+    result.hasAllArpEquipped !== true
+  ) {
+    const urgentFullClaim = steps.find(
+      (todo) =>
+        todo.claimBattlePass === true &&
+        todo.claimBattlePassSkipArp !== true &&
+        (todo.urgency?.readyAtMs ?? 0) <= 0 &&
+        todo.urgency?.kind === 'action',
+    );
+    if (urgentFullClaim && !/ends before All-ARP%/i.test(urgentFullClaim.text)) {
+      violations.push(
+        violation(
+          ctx,
+          'action-plan-no-arp-boost-before-allarp',
+          'claims Battle Pass ARP Boosts immediately while All-ARP% is owned but not equipped and defer is on',
+          { todo: urgentFullClaim.text },
+        ),
+      );
+    }
+  }
+
   return violations;
 }
 

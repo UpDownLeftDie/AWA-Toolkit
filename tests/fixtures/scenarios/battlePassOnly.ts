@@ -17,7 +17,8 @@ export function battlePassOnlyScenario(
     battlePass: {
       url: '/control-center/battle-pass/1',
       scrapedAt: isoAt(nowMs),
-      readyToClaim: 2,
+      // 1 cosmetic + 30 ARP Boost so skip-ARP ordering is audited too.
+      readyToClaim: 31,
       readyToClaimArp: 30,
       endsAt: new Date(BP_END_MS).toISOString(),
     },

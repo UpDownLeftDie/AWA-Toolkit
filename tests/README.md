@@ -15,7 +15,7 @@ Vitest harness for the artifact optimizer: persona fixtures, month scenarios, in
 tests/
   fixtures/     Personas, month scenarios, UTC time grid
   audit/        Invariant rules + optimizer.audit.test.ts
-  unit/         wearWindow, steamScoring, allArpLock
+  unit/         wearWindow, steamScoring, allArpLock, battlePassPlan, …
   sim/          Day-by-day monthSimulator (pnpm test:sim)
 ```
 
@@ -36,7 +36,7 @@ Five month templates under `tests/fixtures/scenarios/`:
 
 - **baseline** — no battle pass or community event
 - **steamWeekOpen** — Steam Quest rows still incomplete; Twitch remaining when the UTC day is open
-- **battlePassOnly** — claimable boosts, season ends mid-month
+- **battlePassOnly** — claimable cosmetics + ARP Boosts; season ends mid-month (exercises skip-ARP labeling)
 - **communityOnly** — ASCE-style milestones + hour samples
 - **both** — battle pass + community event
 
@@ -67,8 +67,10 @@ Named tests in `optimizer.audit.test.ts`:
 
 | Path | Behavior |
 |------|----------|
-| **Guided** | Follows `buildActionPlan` equip steps when `readyAtMs === 0` (artifact objects, not name-splitting); 24h Steam locks use the same 0% All-ARP set as the oracle; claims BP when the plan says so |
+| **Guided** | Follows `buildActionPlan` equip steps when `readyAtMs === 0` (artifact objects, not name-splitting); 24h Steam locks use the same 0% All-ARP set as the oracle; claims BP ARP Boosts when the plan says so (never via skip-ARP cosmetic steps) |
 | **Oracle** | Same cooldown rules; swaps to All-ARP% before community gates / deferred All-ARP%; claims BP on All-ARP%; otherwise equips the best 0% All-ARP set when slots allow |
+
+Audit / sim both enforce Battle Pass claim clarity: skip-ARP steps must say cosmetics/non-ARP and that ARP Boosts stay held for All-ARP%; full ARP Boost claims stay deferred until All-ARP% is on unless the season ends first. The sim ARP ledger ignores skip-ARP claim buttons — label clarity is enforced by the audit invariant.
 
 Guided should not trail the oracle by more than **10%** (action-plan sequencing vs perfect lump timing). Failures include per-ledger breakdowns.
 

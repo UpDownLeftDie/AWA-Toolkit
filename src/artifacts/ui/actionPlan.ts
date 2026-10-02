@@ -21,8 +21,8 @@ import {
   type ArtifactOptimizerSettings,
   COOLDOWN_MS,
   hasElapsedShowroomLock,
-  STUCK_SLOT_LOCK_HINT,
   showroomCooldownRemainingMs,
+  STUCK_SLOT_LOCK_HINT,
   utcDailyEndBufferMs,
 } from '../settings';
 import {
@@ -61,13 +61,13 @@ import {
   formatMs,
   hasAnySlotOnCooldown,
   isSameLoadout,
+  type LoadoutChangePlan,
   loadoutLabel,
   maxSlotCooldownMs,
   msUntilUtcMidnight,
   planLoadoutChanges,
   plannedEquipLabel,
   utcResetDeadlineLabel,
-  type LoadoutChangePlan,
 } from './loadoutPlan';
 
 export type ActionTone = 'default' | 'muted' | 'warn';
@@ -239,11 +239,17 @@ function compareActionTodoUrgency(
   }
   const leftSlack = urgencyDeadlineMs(left) - left.durationMs;
   const rightSlack = urgencyDeadlineMs(right) - right.durationMs;
-  return leftSlack === rightSlack ? (right.arp ?? 0) - (left.arp ?? 0) : leftSlack - rightSlack;
+  return leftSlack === rightSlack
+    ? (right.arp ?? 0) - (left.arp ?? 0)
+    : leftSlack - rightSlack;
 }
 
 function defaultTodoUrgency(todo: ActionTodo): ActionTodoUrgency {
-  return ({ kind: todo.tone === 'muted' && !todo.loadout ? 'info' : 'action', readyAtMs: 0, durationMs: 0 });
+  return {
+    kind: todo.tone === 'muted' && !todo.loadout ? 'info' : 'action',
+    readyAtMs: 0,
+    durationMs: 0,
+  };
 }
 
 /**
@@ -468,12 +474,19 @@ function battlePassClaimCountLabel(readyAll: number, readyArp: number): string {
 
 function holdArpBoostReason(readyArp: number): string {
   const arpLabel = readyArp === 1 ? '1 ARP Boost' : `${readyArp} ARP Boosts`;
-  return `Hold ${arpLabel} until All-ARP% is on`;
+  return `Does not claim ${arpLabel} — those wait for All-ARP%`;
+}
+
+function nonArpBattlePassClaimLabel(nonArp: number): string {
+  return nonArp === 1
+    ? '1 cosmetic / fragment'
+    : `${nonArp} cosmetics / fragments`;
 }
 
 /**
  * All-ARP% is owned but not equipped, and the season still has time.
- * Claim cosmetics/fragments now; leave ARP Boosts until All-ARP% is on.
+ * Cosmetics/fragments are fine to claim now (can be step 1) — copy must make
+ * clear ARP Boosts are held. Full ARP Boost claims wait for All-ARP%.
  */
 function pushHeldArpBattlePassTodos(
   todos: ActionTodo[],
@@ -493,7 +506,7 @@ function pushHeldArpBattlePassTodos(
       });
     }
     todos.push({
-      text: `Claim ${battlePassClaimCountLabel(nonArp, 0)} now`,
+      text: `Claim ${nonArpBattlePassClaimLabel(nonArp)} now (not ARP Boosts)`,
       reasons,
       claimBattlePass: true,
       claimBattlePassSkipArp: true,
@@ -681,7 +694,9 @@ function twitchActivityLabel(options: {
     return 'Watch Twitch now';
   }
   const swapPart = options.beforeSwap ? ' before swapping' : '';
-  return options.utcDeadline ? `Watch Twitch${swapPart} (${utcResetDeadlineLabel()})` : `Watch Twitch${swapPart}`;
+  return options.utcDeadline
+    ? `Watch Twitch${swapPart} (${utcResetDeadlineLabel()})`
+    : `Watch Twitch${swapPart}`;
 }
 
 function twitchArpReason(options: {
@@ -776,7 +791,9 @@ function dailyQuestsActivityLabel(
 ): string {
   const beforePart = options.beforeSwap ? ' before swapping' : '';
   const questsName = dailyQuestCountLabel(pending);
-  return options.utcDeadline ? `Complete ${questsName} (${utcResetDeadlineLabel()})` : `Complete ${questsName}${beforePart}`;
+  return options.utcDeadline
+    ? `Complete ${questsName} (${utcResetDeadlineLabel()})`
+    : `Complete ${questsName}${beforePart}`;
 }
 
 function activityLabel(
@@ -1066,7 +1083,9 @@ function allArpPctForPhase(
   if (phase === 'after') {
     return plannedWear?.stats.allArpPct ?? best?.allArpPct ?? 0;
   }
-  return phase === 'afterNow' ? afterNow?.allArpPct ?? current?.allArpPct ?? 0 : current?.allArpPct ?? 0;
+  return phase === 'afterNow'
+    ? (afterNow?.allArpPct ?? current?.allArpPct ?? 0)
+    : (current?.allArpPct ?? 0);
 }
 
 function bonusForActivityPhase(
@@ -1094,9 +1113,11 @@ function activityTodoArp(options: {
   if (key === 'watchTwitch') {
     return twitchArp;
   }
-  return key === 'timeOnSite' ? Math.round(
-      (BASE_ACTIVITY.timeOnSiteBasePerDay + bonusForText) * (1 + allArpPct),
-    ) : bonusForText;
+  return key === 'timeOnSite'
+    ? Math.round(
+        (BASE_ACTIVITY.timeOnSiteBasePerDay + bonusForText) * (1 + allArpPct),
+      )
+    : bonusForText;
 }
 
 function activityTodoUrgency(options: {
@@ -1149,7 +1170,9 @@ function steamQuestsTodoExtras(
   if (pending.some((quest) => quest.libraryPending === true)) {
     reasons.push({ text: STEAM_LIBRARY_PENDING_HINT });
   }
-  return reasons.length === 0 ? { count: pending.length } : { count: pending.length, reasons };
+  return reasons.length === 0
+    ? { count: pending.length }
+    : { count: pending.length, reasons };
 }
 
 function dailyQuestsTodoExtras(siteState: SiteState): {
@@ -1332,7 +1355,9 @@ function sortTodosByUtcDeadline(items: ActionTodo[]): ActionTodo[] {
   return items.toSorted((left, right) => {
     const leftUrgent = /00:00 UTC/i.test(left.text) ? 0 : 1;
     const rightUrgent = /00:00 UTC/i.test(right.text) ? 0 : 1;
-    return leftUrgent === rightUrgent ? utcResetTodoRank(left) - utcResetTodoRank(right) : leftUrgent - rightUrgent;
+    return leftUrgent === rightUrgent
+      ? utcResetTodoRank(left) - utcResetTodoRank(right)
+      : leftUrgent - rightUrgent;
   });
 }
 
@@ -1359,11 +1384,13 @@ function upcomingResetAtMs(
     }
     const monday = msUntilNextSteamQuestWeek();
     return canCompleteInWearWindow(
-        monday,
-        monday + STEAM_WEEK_MS,
-        plannedWear.waitMs,
-        0,
-      ) ? monday : undefined;
+      monday,
+      monday + STEAM_WEEK_MS,
+      plannedWear.waitMs,
+      0,
+    )
+      ? monday
+      : undefined;
   }
   if (!isUtcDailyActivity(key)) {
     return undefined;
@@ -1374,11 +1401,13 @@ function upcomingResetAtMs(
       ? twitchFullDayMs(plannedWear.stats, siteState)
       : activityDurationMs(key, 0);
   return canCompleteInWearWindow(
-      midnight,
-      midnight + 86_400_000,
-      plannedWear.waitMs,
-      duration,
-    ) ? midnight : undefined;
+    midnight,
+    midnight + 86_400_000,
+    plannedWear.waitMs,
+    duration,
+  )
+    ? midnight
+    : undefined;
 }
 
 function waitMsForActivityPhase(
@@ -1550,9 +1579,9 @@ function isSequencedActivityDue(
   if (!isActivityEnabled(settings, rule.key)) {
     return false;
   }
-  return rule.key === 'watchTwitch' ? (
-      watchRemainingMs > 0 && isActivityAvailable(siteState.caps, 'watchTwitch')
-    ) : rule.isDue(siteState.caps);
+  return rule.key === 'watchTwitch'
+    ? watchRemainingMs > 0 && isActivityAvailable(siteState.caps, 'watchTwitch')
+    : rule.isDue(siteState.caps);
 }
 
 function buildSequencedActivityTodos(
@@ -1894,7 +1923,9 @@ function deferredSteamSetHeadline(waitMs: number): string {
   if (waitMs > COOLDOWN_MS) {
     return 'Equip Steam Quests set after this 24h wear';
   }
-  return waitMs >= COOLDOWN_MS ? 'Equip Steam Quests set in 24h' : `Equip Steam Quests set in ${formatMs(waitMs)}`;
+  return waitMs >= COOLDOWN_MS
+    ? 'Equip Steam Quests set in 24h'
+    : `Equip Steam Quests set in ${formatMs(waitMs)}`;
 }
 
 /**
@@ -2199,8 +2230,7 @@ function pushAllArpGuardTodos(
     options.hasScheduledAllArp === true || options.hasPlannedAllArp === true;
   if (
     deferBattlePassClaims &&
-    battlePassClaimableArp(siteState.battlePass) > 0 &&
-    battlePassReadyNonArp(siteState.battlePass) === 0
+    battlePassClaimableArp(siteState.battlePass) > 0
   ) {
     const arpReady = battlePassClaimableArp(siteState.battlePass);
     todos.push({
@@ -2619,11 +2649,17 @@ function discordPollTodoText(options: {
   if (slot === 'before') {
     return `Vote Discord Poll now — next post in ${nextPost}${bonusPart}`;
   }
-  return bonus > 0 ? `Vote Discord Poll (+${bonus} already equipped)` : 'Vote Discord Poll';
+  return bonus > 0
+    ? `Vote Discord Poll (+${bonus} already equipped)`
+    : 'Vote Discord Poll';
 }
 
-function discordPollTodoReasons(slot: DiscordPollSlot): ActionTodoReason[] | undefined {
-  return slot === 'afterFull' || slot === 'afterNow' ? [{ text: 'After equipping' }] : undefined;
+function discordPollTodoReasons(
+  slot: DiscordPollSlot,
+): ActionTodoReason[] | undefined {
+  return slot === 'afterFull' || slot === 'afterNow'
+    ? [{ text: 'After equipping' }]
+    : undefined;
 }
 
 function buildDiscordPollAction(options: {
@@ -3016,7 +3052,9 @@ function renderTodoActionButton(
     const label = todo.openHrefLabel ?? 'Open';
     return `<button type="button" class="ao-ach-open-btn" data-href="${escapeHtml(todo.openHref)}"${visit}>${escapeHtml(label)}</button>`;
   }
-  return options.allowAccountActions === true ? renderAccountTodoButton(todo) : '';
+  return options.allowAccountActions === true
+    ? renderAccountTodoButton(todo)
+    : '';
 }
 
 function isCautionTodo(todo: ActionTodo): boolean {
