@@ -1,3 +1,4 @@
+import { firstNonEmpty } from '../../pageGlobals';
 import { scrapeSteamAppIdFromDocument } from '../steamApp';
 import type { ArpLogState } from './arpLog';
 import { pageText } from './shared';
@@ -88,8 +89,8 @@ export interface CommunityHoursSample {
 }
 
 /**
- * LIVE Steam Community Event banner on Control Center (href + title).
- */
+LIVE Steam Community Event banner on Control Center (href + title).
+*/
 export function scrapeLiveCommunityEventBanner(
   document_: Document,
 ): { url: string; title?: string } | undefined {
@@ -104,16 +105,19 @@ export function scrapeLiveCommunityEventBanner(
       ...document_.querySelectorAll<HTMLAnchorElement>(
         ":scope a[href*='/steam/community-event/']",
       ),
-    ].find((link) => /LIVE/i.test(link.textContent ?? ''));
+    ].find((link) => /LIVE/i.test(link.textContent));
 
   if (!bannerLink?.href) {
     return undefined;
   }
-  const path = bannerLink.pathname || bannerLink.getAttribute('href') || '';
+  const path = firstNonEmpty(
+    bannerLink.pathname,
+    bannerLink.getAttribute('href'),
+  );
   if (!path.includes('/steam/community-event/')) {
     return undefined;
   }
-  const title = bannerLink.textContent?.replaceAll(/\s+/g, ' ').trim();
+  const title = bannerLink.textContent.replaceAll(/\s+/g, ' ').trim();
   const result: { url: string; title?: string } = { url: path };
   if (title) {
     result.title = title;
@@ -122,9 +126,9 @@ export function scrapeLiveCommunityEventBanner(
 }
 
 /**
- * Community-hour gate is met from the page badge, ASCE unlock, or live hours
- * already at/past the requirement (stretch goals AWA hasn't badged yet).
- */
+Community-hour gate is met from the page badge, ASCE unlock, or live hours
+already at/past the requirement (stretch goals AWA hasn't badged yet).
+*/
 export function isCommunityGateMet(
   milestone: CommunityEventMilestone,
   communityHours: number | undefined,
@@ -162,9 +166,9 @@ function milestoneSortKey(milestone: CommunityEventMilestone): number {
 }
 
 /**
- * Awards are sequential: if milestone N is awarded, every earlier gate is too.
- * A partial carousel scrape often only paints "Awarded" on the selected card.
- */
+Awards are sequential: if milestone N is awarded, every earlier gate is too.
+A partial carousel scrape often only paints "Awarded" on the selected card.
+*/
 export function applySequentialCommunityAwards(
   milestones: CommunityEventMilestone[],
 ): CommunityEventMilestone[] {
@@ -210,9 +214,9 @@ export function isPersonalHoursMet(
 }
 
 /**
- * True when a milestone can still auto-award: not awarded yet, has ARP, and at
- * least one of the two gates is already satisfied. Award fires when both are.
- */
+True when a milestone can still auto-award: not awarded yet, has ARP, and at
+least one of the two gates is already satisfied. Award fires when both are.
+*/
 export function isCommunityEventMilestonePending(
   milestone: CommunityEventMilestone,
   personalHours: number,
@@ -260,14 +264,14 @@ export interface CommunityEventPendingBreakdown {
 }
 
 /**
- * Split pending community-event ARP by which gate is still open.
- *
- * Scoring: `waitingPersonalArp` is player-controlled (play more hours after
- * community unlock). `waitingCommunityArp` is scored when ASCE ETA is inside
- * the 24h slot lock — you'll still be wearing that combo when it grants.
- * Unknown ETA stays unscored (UI warning only). `imminentArp` is unlocked
- * but not awarded yet.
- */
+Split pending community-event ARP by which gate is still open.
+
+Scoring: `waitingPersonalArp` is player-controlled (play more hours after
+community unlock). `waitingCommunityArp` is scored when ASCE ETA is inside
+the 24h slot lock — you'll still be wearing that combo when it grants.
+Unknown ETA stays unscored (UI warning only). `imminentArp` is unlocked
+but not awarded yet.
+*/
 export function breakDownCommunityEventPending(
   event: CommunityEventState,
 ): CommunityEventPendingBreakdown {
@@ -306,8 +310,8 @@ export function breakDownCommunityEventPending(
 }
 
 /**
- * Milestone ARP is exact unless All-ARP% is equipped (then payout is boosted).
- */
+Milestone ARP is exact unless All-ARP% is equipped (then payout is boosted).
+*/
 export function formatCommunityEventArp(
   baseArp: number,
   allArpPct = 0,
@@ -392,24 +396,24 @@ Debounce rapid reloads when the user is on the event page.
 */
 const COMMUNITY_SAMPLE_VISIT_MIN_GAP_MS = 15 * 60 * 1000;
 /**
- * Local fallback only: remote scrapes add a rate sample on this cadence when
- * ASCE is unavailable. User visits still sample separately.
- */
+Local fallback only: remote scrapes add a rate sample on this cadence when
+ASCE is unavailable. User visits still sample separately.
+*/
 export const COMMUNITY_HOURS_REMOTE_SAMPLE_MIN_MS = 60 * 60 * 1000;
 const COMMUNITY_RATE_MIN_SPAN_MS = 15 * 60 * 1000;
 const COMMUNITY_RATE_WINDOW_MS = 24 * 60 * 60 * 1000;
 const COMMUNITY_TREND_WINDOW_MS = 48 * 60 * 60 * 1000;
 /**
- * Each half of the 48h window must be at least this long to trust a ratio.
- */
+Each half of the 48h window must be at least this long to trust a ratio.
+*/
 const COMMUNITY_TREND_HALF_MIN_MS = 18 * 60 * 60 * 1000;
 const COMMUNITY_RATIO_MIN = 0.5;
 const COMMUNITY_RATIO_MAX = 2;
 /**
- * When the last two days are fading, only apply this fraction of the observed
- * decay. Shorter ETA = users swap artifacts before the gate, not after.
- * Growth is applied in full so a late push does not sneak up.
- */
+When the last two days are fading, only apply this fraction of the observed
+decay. Shorter ETA = users swap artifacts before the gate, not after.
+Growth is applied in full so a late push does not sneak up.
+*/
 const COMMUNITY_DECAY_TRUST = 0.5;
 const COMMUNITY_RATIO_FLAT_EPS = 0.03;
 /**
@@ -420,9 +424,9 @@ const COMMUNITY_MAX_HOURS_PER_DAY = 80_000;
 export type CommunityHoursSampleSource = 'visit' | 'remote';
 
 /**
- * Drop live progress + sample history once an event ends (keeps awarded /
- * milestone snapshot for ARP-log reconciliation until the next event).
- */
+Drop live progress + sample history once an event ends (keeps awarded /
+milestone snapshot for ARP-log reconciliation until the next event).
+*/
 export function markCommunityEventEnded(
   event: CommunityEventState,
 ): CommunityEventState {
@@ -457,9 +461,9 @@ function shouldSkipCommunityHoursSample(options: {
 }
 
 /**
- * Append a community-hours sample when progress moved or enough time passed.
- * Resets history if hours drop sharply (new event / bad scrape).
- */
+Append a community-hours sample when progress moved or enough time passed.
+Resets history if hours drop sharply (new event / bad scrape).
+*/
 export function appendCommunityHoursSample(
   samples: CommunityHoursSample[],
   hours: number,
@@ -498,10 +502,10 @@ export function appendCommunityHoursSample(
 }
 
 /**
- * Merge a fresh scrape with prior event state (keeps sample history while live).
- * Pass `source: 'visit'` for real page navigations; `'remote'` for background
- * fetches (samples only on the remote minimum interval).
- */
+Merge a fresh scrape with prior event state (keeps sample history while live).
+Pass `source: 'visit'` for real page navigations; `'remote'` for background
+fetches (samples only on the remote minimum interval).
+*/
 function isSparseCommunityEventScrape(
   scraped: CommunityEventState,
   previous: CommunityEventState | undefined,
@@ -574,9 +578,9 @@ function milestoneMergeKey(milestone: CommunityEventMilestone): string {
 }
 
 /**
- * Visit/carousel scrapes win status flags, but must not wipe ARP or hour
- * gates we already know (ASCE stretch teasers often parse as 0 ARP).
- */
+Visit/carousel scrapes win status flags, but must not wipe ARP or hour
+gates we already know (ASCE stretch teasers often parse as 0 ARP).
+*/
 function preferCommunityEventMilestone(
   scraped: CommunityEventMilestone,
   previous: CommunityEventMilestone | undefined,
@@ -615,9 +619,9 @@ function preferCommunityEventMilestone(
 }
 
 /**
- * Union milestone lists so a partial carousel scrape cannot drop later
- * stretch gates we already know about (ASCE or an earlier full scrape).
- */
+Union milestone lists so a partial carousel scrape cannot drop later
+stretch gates we already know about (ASCE or an earlier full scrape).
+*/
 function mergeCommunityEventMilestones(
   scraped: CommunityEventMilestone[],
   previous: CommunityEventMilestone[] | undefined,
@@ -717,10 +721,10 @@ function patchMilestoneFromGate(
 }
 
 /**
- * Fill in community-hour gates the live page scrape missed (ASCE stretch
- * goals). Scraped rows win status flags; ASCE restores ARP and can flip
- * Community Unlocked when a teaser cell parsed as 0 ARP.
- */
+Fill in community-hour gates the live page scrape missed (ASCE stretch
+goals). Scraped rows win status flags; ASCE restores ARP and can flip
+Community Unlocked when a teaser cell parsed as 0 ARP.
+*/
 export function upsertCommunityEventMilestoneGates(
   existing: CommunityEventMilestone[],
   gates: readonly CommunityEventMilestoneGate[],
@@ -824,10 +828,10 @@ export interface CommunityUnlockEstimate {
 }
 
 /**
- * Unawarded community-hour ARP gates that are still locked, soonest first.
- * Unlike `waitingCommunityMilestones`, personal hours need not be met — this
- * is the next stretch goal to show even after a visit scrape.
- */
+Unawarded community-hour ARP gates that are still locked, soonest first.
+Unlike `waitingCommunityMilestones`, personal hours need not be met — this
+is the next stretch goal to show even after a visit scrape.
+*/
 export function lockedCommunityArpMilestones(
   event: CommunityEventState,
 ): CommunityEventMilestone[] {
@@ -854,9 +858,9 @@ export function nextLockedCommunityArpMilestone(
 }
 
 /**
- * Community-hour ARP gates that still need community unlock
- * (personal hours already met), soonest first.
- */
+Community-hour ARP gates that still need community unlock
+(personal hours already met), soonest first.
+*/
 export function waitingCommunityMilestones(
   event: CommunityEventState,
 ): CommunityEventMilestone[] {
@@ -866,9 +870,9 @@ export function waitingCommunityMilestones(
 }
 
 /**
- * Soonest community-hour ARP gate that still needs community unlock
- * (personal hours already met).
- */
+Soonest community-hour ARP gate that still needs community unlock
+(personal hours already met).
+*/
 export function nextWaitingCommunityMilestone(
   event: CommunityEventState,
 ): CommunityEventMilestone | undefined {
@@ -876,9 +880,9 @@ export function nextWaitingCommunityMilestone(
 }
 
 /**
- * Next community-hour gate for ARP still waiting on community unlock
- * (personal hours already met).
- */
+Next community-hour gate for ARP still waiting on community unlock
+(personal hours already met).
+*/
 export function nextCommunityUnlockTarget(
   event: CommunityEventState,
 ): number | undefined {
@@ -886,14 +890,14 @@ export function nextCommunityUnlockTarget(
 }
 
 /**
- * Estimate time until the next waiting-on-community ARP milestone unlocks,
- * using ASCE hourly samples when present (local visit samples as fallback).
- *
- * Pace is the trailing 24h (not lifetime — launch day would make ETA too
- * early). A 48h day-over-day ratio adapts to fade vs a late push without
- * assuming a curve. Decay is half-trusted so the ETA stays on the early
- * side and users have time to swap artifacts.
- */
+Estimate time until the next waiting-on-community ARP milestone unlocks,
+using ASCE hourly samples when present (local visit samples as fallback).
+
+Pace is the trailing 24h (not lifetime — launch day would make ETA too
+early). A 48h day-over-day ratio adapts to fade vs a late push without
+assuming a curve. Decay is half-trusted so the ETA stays on the early
+side and users have time to swap artifacts.
+*/
 export function estimateCommunityUnlockAt(
   event: CommunityEventState,
   targetHours: number,
@@ -956,9 +960,9 @@ export interface ReachableCommunityUnlock {
 }
 
 /**
- * First waiting community ARP gate that grants after `readyAtMs` (when
- * All-ARP% can actually go on). Gates that fire before that are already a miss.
- */
+First waiting community ARP gate that grants after `readyAtMs` (when
+All-ARP% can actually go on). Gates that fire before that are already a miss.
+*/
 export function nextReachableCommunityUnlock(
   event: CommunityEventState,
   readyAtMs: number,
@@ -1025,9 +1029,9 @@ function communityHoursPerMsBetween(
 }
 
 /**
- * Trailing 24h when history is long enough; otherwise the full available
- * span (new events) or the last two points.
- */
+Trailing 24h when history is long enough; otherwise the full available
+span (new events) or the last two points.
+*/
 function estimateCommunityHoursPerMs(
   samples: CommunityHoursSample[],
   nowMs: number,
@@ -1111,10 +1115,10 @@ function optimisticCommunityRatio(measured: number): number {
 }
 
 /**
- * Linear when the ratio is ~1. Otherwise integrate R0 * r^(t/day).
- * If fade is too steep to ever hit the target, fall back to linear so we
- * still warn early instead of implying "never".
- */
+Linear when the ratio is ~1. Otherwise integrate R0 * r^(t/day).
+If fade is too steep to ever hit the target, fall back to linear so we
+still warn early instead of implying "never".
+*/
 function communityEtaMs(
   remainingHours: number,
   ratePerMs: number,
@@ -1151,9 +1155,9 @@ export function formatCommunityEta(etaMs: number): string {
 }
 
 /**
- * Compact community progress for unlock ETA, e.g. "65,184/75,000h · ETA ~18h".
- * Empty when we have nothing useful to show.
- */
+Compact community progress for unlock ETA, e.g. "65,184/75,000h · ETA ~18h".
+Empty when we have nothing useful to show.
+*/
 export function describeWaitingCommunityProgress(
   event: CommunityEventState,
 ): string {
@@ -1178,20 +1182,20 @@ export function describeWaitingCommunityProgress(
 
 export interface WaitingCommunityArpDescription {
   /**
-   * Next unlock focus, e.g. "20 ARP · 73,701/75,000h · ETA ~3h".
-   */
+  Next unlock focus, e.g. "20 ARP · 73,701/75,000h · ETA ~3h".
+  */
   text: string;
   /**
-   * Later gated milestones, e.g. "+35 ARP later" — keep off the main line.
-   */
+  Later gated milestones, e.g. "+35 ARP later" — keep off the main line.
+  */
   later?: string;
 }
 
 /**
- * Next unlock's ARP next to 72,521/75,000h progress. Remaining gated ARP
- * (later milestones) is returned separately so it isn't read as the
- * 75,000h reward.
- */
+Next unlock's ARP next to 72,521/75,000h progress. Remaining gated ARP
+(later milestones) is returned separately so it isn't read as the
+75,000h reward.
+*/
 export function describeWaitingCommunityArp(
   event: CommunityEventState,
   waitingCommunityArp: number,
@@ -1219,8 +1223,8 @@ export function describeWaitingCommunityArp(
 }
 
 /**
- * Compact single-line form (embeds later in parentheses when present).
- */
+Compact single-line form (embeds later in parentheses when present).
+*/
 export function describeWaitingCommunityArpLine(
   event: CommunityEventState,
   waitingCommunityArp: number,
@@ -1255,11 +1259,11 @@ export function sumCommunityEventRewardsFromArpLog(
 }
 
 /**
- * Cross-check event-page award flags against ARP Log receipts.
- * Marks personal-met milestones as awarded when log ARP still accounts for
- * their base reward (handles stale scrapes / missing Community Unlocked flags).
- * Receipt in the log implies both gates were met at award time.
- */
+Cross-check event-page award flags against ARP Log receipts.
+Marks personal-met milestones as awarded when log ARP still accounts for
+their base reward (handles stale scrapes / missing Community Unlocked flags).
+Receipt in the log implies both gates were met at award time.
+*/
 export function reconcileCommunityEventWithArpLog(
   event: CommunityEventState,
   arpLog: ArpLogState | undefined,
@@ -1341,23 +1345,25 @@ function parseLeadingCount(text: string, unit: string): number | undefined {
 function isLabeledRowComplete(cell: Element, label: string): boolean {
   const needle = `${label}:`;
   const other = label === 'Personal' ? 'Community:' : 'Personal:';
-  const row =
-    [...cell.querySelectorAll('p, div, li, span, tr, td')].find((node) => {
-      const text = node.textContent ?? '';
+  const row = [...cell.querySelectorAll('p, div, li, span, tr, td')].find(
+    (node) => {
+      const text = node.textContent;
       return text.includes(needle) && !text.includes(other);
-    }) ??
-    [...cell.querySelectorAll('p, div, li, span, tr, td')].find((node) =>
-      (node.textContent ?? '').includes(needle),
-    );
+    },
+  );
   const scope = row ?? cell;
-  return scope.querySelector('.fa-check, .fa-check-circle, .bi-check, .bi-check-lg') ? true : /[✓✔]/.test(scope.textContent ?? '');
+  return scope.querySelector(
+    '.fa-check, .fa-check-circle, .bi-check, .bi-check-lg',
+  )
+    ? true
+    : /[✓✔]/.test(scope.textContent);
 }
 
 function milestoneCellText(cell: Element): string {
-  const parts = [cell.textContent ?? ''];
+  const parts = [cell.textContent];
   const sibling = cell.nextElementSibling;
   if (sibling && !sibling.classList.contains('carousel-cell')) {
-    parts.push(sibling.textContent ?? '');
+    parts.push(sibling.textContent);
   }
   return parts.join(' ').replaceAll(/\s+/g, ' ').trim();
 }
@@ -1381,10 +1387,11 @@ function parseMilestoneCell(
   const communityHours = parseLabeledHours(text, 'Community');
   const arpReward = parseLeadingCount(text, 'ARP') ?? 0;
   const fragmentCount = parseLeadingCount(text, 'Fragment');
-  const heading =
-    cell.querySelector(':scope h3')?.textContent?.trim() ||
-    cell.querySelector(':scope img[alt]')?.getAttribute('alt') ||
-    (arpReward > 0 ? `${arpReward} ARP` : 'Reward');
+  const heading = firstNonEmpty(
+    cell.querySelector(':scope h3')?.textContent.trim(),
+    cell.querySelector(':scope img[alt]')?.getAttribute('alt'),
+    arpReward > 0 ? `${arpReward} ARP` : 'Reward',
+  );
 
   const milestone: CommunityEventMilestone = {
     index,
@@ -1406,14 +1413,14 @@ function parseMilestoneCell(
 }
 
 /**
- * Event pages fill `#personal-hours` client-side from an inline
- * `personalPlaytime` value (minutes). Static fetch HTML leaves the span empty,
- * so prefer DOM text when present, otherwise parse the script minutes.
- */
+Event pages fill `#personal-hours` client-side from an inline
+`personalPlaytime` value (minutes). Static fetch HTML leaves the span empty,
+so prefer DOM text when present, otherwise parse the script minutes.
+*/
 export function parseCommunityEventPersonalHours(document_: Document): number {
   const hoursFromDom = document_
     .querySelector('#personal-hours')
-    ?.textContent?.trim();
+    ?.textContent.trim();
   if (hoursFromDom && /\d/.test(hoursFromDom)) {
     const fromDom = Number(hoursFromDom);
     if (Number.isFinite(fromDom)) {
@@ -1432,7 +1439,7 @@ export function parseCommunityEventPersonalHours(document_: Document): number {
 
   // Server-rendered into page JS: `let personalPlaytime = 489;` (minutes).
   const scriptSource = [...document_.querySelectorAll('script:not([src])')]
-    .map((script) => script.textContent ?? '')
+    .map((script) => script.textContent)
     .join('\n');
   const minutesMatch =
     /personalPlaytime\s*=\s*(\d+)/i.exec(scriptSource) ??
@@ -1479,8 +1486,8 @@ function leadingNumberToken(value: string): string | undefined {
 }
 
 /**
- * Live progress bar text, e.g. "62160 of 100000 hour(s)".
- */
+Live progress bar text, e.g. "62160 of 100000 hour(s)".
+*/
 function parseHoursOfCap(text: string):
   | {
       hours: number;
@@ -1530,7 +1537,7 @@ export function parseCommunityEventProgress(document_: Document): {
 } {
   const candidates = [
     ...document_.querySelectorAll('b, strong, .progress, .event-progress'),
-  ].map((node) => node.textContent?.trim() ?? '');
+  ].map((node) => node.textContent.trim());
   candidates.push(pageText(document_));
 
   for (const text of candidates) {
@@ -1569,7 +1576,7 @@ function parseCommunityEventTitleFromDocumentTitle(
 }
 
 function parseCommunityEventTitle(document_: Document): string | undefined {
-  const documentTitle = document_.title?.replaceAll(/\s+/g, ' ').trim() ?? '';
+  const documentTitle = document_.title.replaceAll(/\s+/g, ' ').trim();
   const fromDocumentTitle =
     parseCommunityEventTitleFromDocumentTitle(documentTitle);
   if (fromDocumentTitle) {
@@ -1580,7 +1587,7 @@ function parseCommunityEventTitle(document_: Document): string | undefined {
     .querySelector(
       '.event-title-date, :scope .community-event-view .event-name',
     )
-    ?.textContent?.replaceAll(/\s+/g, ' ')
+    ?.textContent.replaceAll(/\s+/g, ' ')
     .trim();
   return fromEventLabel && !isCommunityEventLiveDateBar(fromEventLabel) ? fromEventLabel : undefined;
 }
@@ -1595,10 +1602,10 @@ function isCommunityEventLiveDateBar(text: string): boolean {
 }
 
 /**
- * Live vs ended on the event page. AWA paints `LIVE | Aug 7, 2026 - … | LIVE`
- * in `.event-title-date` — that is the badge. `.live-container .live-text` is
- * an older/alternate chrome. `.event-closed` is the only end signal.
- */
+Live vs ended on the event page. AWA paints `LIVE | Aug 7, 2026 - … | LIVE`
+in `.event-title-date` — that is the badge. `.live-container .live-text` is
+an older/alternate chrome. `.event-closed` is the only end signal.
+*/
 function readCommunityEventLiveBadge(document_: Document): boolean | undefined {
   if (document_.querySelector('.event-closed')) {
     return false;
@@ -1609,15 +1616,15 @@ function readCommunityEventLiveBadge(document_: Document): boolean | undefined {
   const dateBar = document_.querySelector(
     '.event-title-date, .live-container',
   );
-  const dateBarText = dateBar?.textContent?.replaceAll(/\s+/g, ' ').trim() ?? '';
+  const dateBarText = dateBar?.textContent.replaceAll(/\s+/g, ' ').trim() ?? '';
   return isCommunityEventLiveDateBar(dateBarText) || undefined;
 }
 
 /**
- * Parse a LIVE Steam Community Event page (carousel milestone cards).
- * Pending ARP = not yet awarded, and personal hours and/or community unlock
- * already met (auto-awards when both gates are true).
- */
+Parse a LIVE Steam Community Event page (carousel milestone cards).
+Pending ARP = not yet awarded, and personal hours and/or community unlock
+already met (auto-awards when both gates are true).
+*/
 export function scrapeCommunityEventFromDocument(
   document_: Document,
   url: string,

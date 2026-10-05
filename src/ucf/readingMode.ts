@@ -1,4 +1,5 @@
 import { GM } from '$';
+import { documentHead } from '../pageGlobals';
 
 const READING_KEY = 'ucfReadingMode';
 const TABLES_KEY = 'ucfClassicTables';
@@ -11,7 +12,7 @@ const TABLES_CLASS = 'awa-ucf-classic-tables';
 const RULE_ROW_CLASS = 'awa-ucf-table-rule';
 const UCF_POST_PATH = /\/ucf\/show\//i;
 const NAVBAR_OFFSET_PX = 80;
-const NAVBAR_OFFSET = `${NAVBAR_OFFSET_PX}px`;
+const NAVBAR_OFFSET = `${String(NAVBAR_OFFSET_PX)}px`;
 const STICKY_GAP_PX = 8;
 const TABLE_SCOPE =
   ':is(.ucf__content, .discussion__op-content, .js-comments-post)';
@@ -344,7 +345,7 @@ function ensureStyles(): void {
   if (!style) {
     style = document.createElement('style');
     style.id = STYLE_ID;
-    (document.head || document.documentElement).append(style);
+    (documentHead() ?? document.documentElement).append(style);
   }
   style.textContent = buildReadingModeCss();
 }
@@ -440,7 +441,7 @@ function normalizeHeaderText(cell: HTMLElement): void {
 }
 
 function isRuleRow(row: HTMLTableRowElement): boolean {
-  const text = (row.textContent ?? '').replaceAll(/\s+/g, '');
+  const text = (row.textContent).replaceAll(/\s+/g, '');
   return text.length > 0 && !/\p{L}|\p{N}/u.test(text);
 }
 

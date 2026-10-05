@@ -1,3 +1,4 @@
+import { firstNonEmpty } from '../../pageGlobals';
 import { BASE_ACTIVITY } from '../data';
 import { scrapeSteamAppIdFromDocument } from '../steamApp';
 import { controlLabel, findActivityCard, pageText } from './shared';
@@ -134,9 +135,10 @@ function parseSteamQuestRowFromStatusCell(
     return undefined;
   }
   const questLink = row.querySelector('a[href*="/steam/quests/"]');
-  const name =
-    questLink?.textContent?.replaceAll(/\s+/g, ' ').trim() ||
-    row.querySelector('a')?.textContent?.replaceAll(/\s+/g, ' ').trim();
+  const name = firstNonEmpty(
+    questLink?.textContent.replaceAll(/\s+/g, ' ').trim(),
+    row.querySelector('a')?.textContent.replaceAll(/\s+/g, ' ').trim(),
+  );
   if (!name) {
     return undefined;
   }
@@ -144,7 +146,7 @@ function parseSteamQuestRowFromStatusCell(
     ? card.querySelector(`#control-center__steam-quest-reward-${id}`)
     : undefined;
   const rewardArp = parseSteamQuestRewardArp(
-    rewardCell?.textContent ?? row.textContent ?? '',
+    rewardCell?.textContent ?? row.textContent,
   );
   if (rewardArp === undefined) {
     return undefined;
@@ -153,7 +155,7 @@ function parseSteamQuestRowFromStatusCell(
   return buildSteamQuestRow({
     name,
     rewardArp,
-    statusText: statusCell.textContent?.trim() ?? '',
+    statusText: statusCell.textContent.trim(),
     ...(id && { id }),
     ...(href && { href }),
   });
@@ -163,22 +165,22 @@ function parseSteamQuestRowFromTableRow(
   row: Element,
 ): SteamQuestRow | undefined {
   const questLink = row.querySelector('a[href*="/steam/quests/"]');
-  const name = questLink?.textContent?.replaceAll(/\s+/g, ' ').trim();
+  const name = questLink?.textContent.replaceAll(/\s+/g, ' ').trim();
   if (!name) {
     return undefined;
   }
-  const rewardArp = parseSteamQuestRewardArp(row.textContent ?? '');
+  const rewardArp = parseSteamQuestRewardArp(row.textContent);
   if (rewardArp === undefined) {
     return undefined;
   }
   const statusCell = [...row.querySelectorAll('td')].find((cell) =>
-    steamQuestStatusFromText(cell.textContent ?? ''),
+    steamQuestStatusFromText(cell.textContent),
   );
   const href = pathnameFromHref(questLink?.getAttribute('href') ?? undefined);
   return buildSteamQuestRow({
     name,
     rewardArp,
-    statusText: statusCell?.textContent?.trim() ?? '',
+    statusText: statusCell?.textContent.trim() ?? '',
     ...(href && { href }),
   });
 }
@@ -264,19 +266,19 @@ export function remainingSteamQuestRows(siteState: SiteState): SteamQuestRow[] {
 }
 
 /**
- * Bases still earnable this week. Falls back to the typical 15+25+25 week
- * when Control Center rows haven't been scraped yet. Upcoming weeks are
- * unknown until posted — monthly META still uses the typical week.
- */
+Bases still earnable this week. Falls back to the typical 15+25+25 week
+when Control Center rows haven't been scraped yet. Upcoming weeks are
+unknown until posted — monthly META still uses the typical week.
+*/
 export function remainingSteamQuestRewards(siteState: SiteState): number[] {
   const scraped = scrapedRemainingSteamQuestRewards(siteState);
-  return scraped === undefined ? [...BASE_ACTIVITY.steamQuestBases] : scraped;
+  return scraped ?? [...BASE_ACTIVITY.steamQuestBases];
 }
 
 /**
- * Remaining Steam Quest bases from Control Center rows. `undefined` when
- * rows have not been scraped — do not invent a 15+25+25 week for 24h scoring.
- */
+Remaining Steam Quest bases from Control Center rows. `undefined` when
+rows have not been scraped — do not invent a 15+25+25 week for 24h scoring.
+*/
 export function scrapedRemainingSteamQuestRewards(
   siteState: SiteState,
 ): number[] | undefined {
@@ -300,10 +302,10 @@ export function requiresSteamQuestEligibilityFetch(state: SiteState): boolean {
 }
 
 /**
- * Quest/event page signals that the linked Steam account does not own the
- * game. Buttons exist in the DOM only when AWA failed the library check;
- * completed/in-progress pages keep the click handlers in a script tag.
- */
+Quest/event page signals that the linked Steam account does not own the
+game. Buttons exist in the DOM only when AWA failed the library check;
+completed/in-progress pages keep the click handlers in a script tag.
+*/
 export function scrapeSteamPlayEligibilityFromDocument(
   document_: Document,
   options: { personalHours?: number; href?: string } = {},

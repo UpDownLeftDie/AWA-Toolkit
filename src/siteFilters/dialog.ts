@@ -180,7 +180,7 @@ function buildGlobalSettingsSection(settings: FilterSettings): string {
                     User tier:
                     <input id="manualSetTier" type="text" inputmode="numeric" pattern="[0-9]*" size="1" maxlength="2" ${
                       isHigherTierOff || settings.autoSyncTier ? 'disabled' : ''
-                    } value="${settings.userTier || ''}"
+                    } value="${String(settings.userTier)}"
                     aria-describedby="manualSetTierDesc">
                   </label>
                   <span id="manualSetTierDesc" class="sr-only">

@@ -1,13 +1,13 @@
 /**
- * AWA dumps account state on the page `window` (`arp_tier`, `fragment_balance`,
- * `giveawayKeys`, …). This userscript is sandboxed (`@grant` ≠ none), so
- * `globalThis.arp_tier` is not that object — Tampermonkey/Violentmonkey expose
- * it as `unsafeWindow`.
- *
- * Chrome extensions have no `unsafeWindow`; Megumin injects a page `<script>`
- * instead. Do not copy that here: inline injects are subject to AWA's CSP.
- * `unsafeWindow` is the userscript equivalent.
- */
+AWA dumps account state on the page `window` (`arp_tier`, `fragment_balance`,
+`giveawayKeys`, …). This userscript is sandboxed (`@grant` ≠ none), so
+`globalThis.arp_tier` is not that object — Tampermonkey/Violentmonkey expose
+it as `unsafeWindow`.
+
+Chrome extensions have no `unsafeWindow`; Megumin injects a page `<script>`
+instead. Do not copy that here: inline injects are subject to AWA's CSP.
+`unsafeWindow` is the userscript equivalent.
+*/
 import { unsafeWindow } from '$';
 
 export interface GiveawayKeyStatus {
@@ -30,11 +30,54 @@ type PageWindow = Window & {
 
 function pageWindow(): PageWindow {
   try {
-    return unsafeWindow as PageWindow;
+    return unsafeWindow;
   } catch {
     // Tampermonkey throws if the page context is gone.
   }
   return globalThis as unknown as PageWindow;
+}
+
+/**
+lib.dom types `document.body` and `document.head` as always present.
+This script is `@run-at document-start`, where both are null until parsed.
+*/
+function optionalDocumentNode(
+  document_: Document,
+  key: 'body' | 'head',
+): HTMLElement | undefined {
+  const value: unknown = Reflect.get(document_, key);
+  // Plain objects stand in for body in unit tests, where HTMLElement is absent.
+  if (typeof value !== 'object' || !value) {
+    return undefined;
+  }
+  return value as HTMLElement;
+}
+
+export function documentBody(
+  document_: Document = document,
+): HTMLElement | undefined {
+  return optionalDocumentNode(document_, 'body');
+}
+
+export function documentHead(
+  document_: Document = document,
+): HTMLHeadElement | undefined {
+  const head = optionalDocumentNode(document_, 'head');
+  return head;
+}
+
+/**
+First string that is not null, undefined, or empty.
+*/
+export function firstNonEmpty(
+  ...values: readonly (string | null | undefined)[]
+): string {
+  for (const value of values) {
+    if (typeof value === 'string' && value !== '') {
+      return value;
+    }
+  }
+  return '';
 }
 
 function asFiniteNumber(value: unknown): number | undefined {
@@ -52,7 +95,7 @@ function asFiniteNumber(value: unknown): number | undefined {
 
 export function readPageNumber(name: keyof PageWindow): number | undefined {
   try {
-    return asFiniteNumber(pageWindow()[name]);
+    return asFiniteNumber(Reflect.get(pageWindow(), name));
   } catch {
     return undefined;
   }
@@ -66,7 +109,7 @@ export function parseInlineNumber(
     String.raw`(?:var\s+|window\.)?(?:${names.join('|')})\s*=\s*(\d+)`,
   );
   for (const script of document_.querySelectorAll('script')) {
-    const match = pattern.exec(script.textContent ?? '');
+    const match = pattern.exec(script.textContent);
     if (match?.[1]) {
       return Number(match[1]);
     }

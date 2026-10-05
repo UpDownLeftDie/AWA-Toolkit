@@ -25,8 +25,8 @@ export type ArtifactSlotPosition = 1 | 2 | 3;
 export interface ActivityToggle {
   enabled: boolean;
   /**
-   * Relative weight / participation frequency multiplier (1 = full guide assumption).
-   */
+  Relative weight / participation frequency multiplier (1 = full guide assumption).
+  */
   frequency: number;
 }
 
@@ -51,20 +51,20 @@ export interface SlotCooldownEntry {
 export interface ArtifactOptimizerSettings {
   activities: Record<ActivityKey, ActivityToggle>;
   /**
-   * Target list-price Game Vault claim (ARP); 0 = first claimable vault price. Not auction bids.
-   */
+  Target list-price Game Vault claim (ARP); 0 = first claimable vault price. Not auction bids.
+  */
   pendingVaultPurchaseArp: number;
   /**
-   * Manual fragment override; undefined = use scraped.
-   */
+  Manual fragment override; undefined = use scraped.
+  */
   manualFragments?: number;
   /**
-   * Manual owned list; empty = use scraped only.
-   */
+  Manual owned list; empty = use scraped only.
+  */
   manualArtifacts: ManualOwnedArtifact[];
   /**
-   * Prefer scraped data when both exist.
-   */
+  Prefer scraped data when both exist.
+  */
   preferScraped: boolean;
   slotCooldowns: SlotCooldownEntry[];
   /**
@@ -76,10 +76,10 @@ export interface ArtifactOptimizerSettings {
   */
   preferredTwitchStreamers: string[];
   /**
-   * Hours before 00:00 UTC to keep free for Twitch / Time on Site. A 24h
-   * All-ARP% lock that would leave less leftover than this is treated as
-   * forcing those sits onto All-ARP% (usually a loss vs Twitch flats).
-   */
+  Hours before 00:00 UTC to keep free for Twitch / Time on Site. A 24h
+  All-ARP% lock that would leave less leftover than this is treated as
+  forcing those sits onto All-ARP% (usually a loss vs Twitch flats).
+  */
   utcDailyEndBufferHours: number;
   /**
   OS desktop notifications via GM.notification for known times (recommended
@@ -279,8 +279,8 @@ function mergeNotificationTypes(
 }
 
 /**
- * Normalize a typed Twitch login / URL to a lowercase channel login.
- */
+Normalize a typed Twitch login / URL to a lowercase channel login.
+*/
 export function twitchLoginFromInput(value: string): string {
   let text = value.trim();
   if (!text) {
@@ -294,8 +294,8 @@ export function twitchLoginFromInput(value: string): string {
 }
 
 /**
- * One login per line (commas also split). Duplicates are dropped, order kept.
- */
+One login per line (commas also split). Duplicates are dropped, order kept.
+*/
 export function parsePreferredTwitchStreamers(raw: string): string[] {
   const logins: string[] = [];
   const seen = new Set<string>();
@@ -389,11 +389,11 @@ export function isSlotOnCooldown(
 }
 
 /**
- * Showroom lock icons are the source of truth for whether a slot is locked —
- * same role the ARP Log has for Discord Poll / calendar completion.
- * GM `slotCooldowns` never invent a lock; they only answer "how long left?"
- * after the showroom says locked.
- */
+Showroom lock icons are the source of truth for whether a slot is locked —
+same role the ARP Log has for Discord Poll / calendar completion.
+GM `slotCooldowns` never invent a lock; they only answer "how long left?"
+after the showroom says locked.
+*/
 export function isShowroomSlotLocked(
   position: ArtifactSlotPosition,
   options: {
@@ -407,9 +407,9 @@ export function isShowroomSlotLocked(
 }
 
 /**
- * Remaining cooldown ms for UI / wait math. Always 0 when the showroom says
- * the slot is unlocked — even if a stale GM timer still exists.
- */
+Remaining cooldown ms for UI / wait math. Always 0 when the showroom says
+the slot is unlocked — even if a stale GM timer still exists.
+*/
 export function showroomCooldownRemainingMs(
   settings: ArtifactOptimizerSettings,
   position: ArtifactSlotPosition,
@@ -436,9 +436,9 @@ export function cooldownRemainingMs(
 }
 
 /**
- * Showroom still paints a lock after the local 24h timer elapsed — AWA's
- * stuck-lock bug. Distinct from an unknown-duration lock (no GM entry).
- */
+Showroom still paints a lock after the local 24h timer elapsed — AWA's
+stuck-lock bug. Distinct from an unknown-duration lock (no GM entry).
+*/
 export function hasElapsedShowroomLock(
   settings: ArtifactOptimizerSettings,
   slotLocks: Partial<Record<ArtifactSlotPosition, boolean>> | undefined,
@@ -492,14 +492,14 @@ function isCompleteSlotLockMap(
 }
 
 /**
- * Align GM remaining-time timers with Showroom lock icons.
- *
- * Showroom is source of truth for locked vs open (like ARP Log for caps).
- * Local `changedAt` only stores duration for slots the showroom still locks:
- * - Unlocked → drop any local timer
- * - Locked + existing timer → keep measured/estimated clock
- * - Locked + no timer → one-time estimated 24h from now
- */
+Align GM remaining-time timers with Showroom lock icons.
+
+Showroom is source of truth for locked vs open (like ARP Log for caps).
+Local `changedAt` only stores duration for slots the showroom still locks:
+- Unlocked → drop any local timer
+- Locked + existing timer → keep measured/estimated clock
+- Locked + no timer → one-time estimated 24h from now
+*/
 export async function syncSlotLocksFromScrape(
   slotLocks: Partial<Record<ArtifactSlotPosition, boolean>>,
   now = Date.now(),
@@ -547,7 +547,7 @@ export function isNotificationTypeEnabled(
   settings: ArtifactOptimizerSettings,
   key: NotificationTypeKey,
 ): boolean {
-  return settings.notificationTypes[key] ?? true;
+  return settings.notificationTypes[key];
 }
 
 export function areAccountActionsEnabled(
@@ -557,10 +557,13 @@ export function areAccountActionsEnabled(
 }
 
 /**
- * Hard kill-switch for Achievements helper while it is unfinished.
- * User setting is ignored until this is flipped back on.
- */
-export const isAchievementsHelperFeatureEnabled = false;
+Hard kill-switch for Achievements helper while it is unfinished.
+User setting is ignored until this is flipped back on.
+*/
+// `false` is the kill switch. The annotation keeps this a boolean so the
+// helper branches stay type-checked until it is turned back on.
+// eslint-disable-next-line @typescript-eslint/no-inferrable-types
+export const isAchievementsHelperFeatureEnabled: boolean = false;
 
 export function areAchievementsEnabled(
   settings: ArtifactOptimizerSettings,

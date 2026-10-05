@@ -104,10 +104,10 @@ export function collectBonuses(owned: OwnedArtifact[]): BonusBuckets {
 }
 
 /**
- * Flats + All-ARP% for an arbitrary equipped set (including 1–2 pieces or a
- * post-immediate-equip mix). Used to decide whether filling a free slot would
- * actually hurt a pending activity.
- */
+Flats + All-ARP% for an arbitrary equipped set (including 1–2 pieces or a
+post-immediate-equip mix). Used to decide whether filling a free slot would
+actually hurt a pending activity.
+*/
 export interface ActivityLoadoutStats {
   allArpPct: number;
   steamQuestsFlat: number;

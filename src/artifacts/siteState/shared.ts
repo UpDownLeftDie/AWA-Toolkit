@@ -1,5 +1,7 @@
+import { documentBody } from '../../pageGlobals';
+
 export function pageText(document_: Document = document): string {
-  return document_.body?.textContent ?? '';
+  return documentBody(document_)?.textContent ?? '';
 }
 
 function isElementDisplayNone(element: Element): boolean {
@@ -32,7 +34,7 @@ export function isElementVisiblyHidden(element: Element): boolean {
 }
 
 export function controlLabel(element: Element): string {
-  return (element.textContent ?? '').replaceAll(/\s+/g, ' ').trim();
+  return (element.textContent).replaceAll(/\s+/g, ' ').trim();
 }
 
 export function findActivityCard(
@@ -40,7 +42,7 @@ export function findActivityCard(
   title: RegExp,
 ): Element | undefined {
   const header = [...document_.querySelectorAll('h2, h3, h4')].find((element) =>
-    title.test(element.textContent?.trim() ?? ''),
+    title.test(element.textContent.trim()),
   );
   return header ? (
     header.closest(

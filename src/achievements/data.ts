@@ -23,9 +23,9 @@ export type AchievementCategory =
   | 'verified';
 
 /**
- * Background GETs that can count toward visit/read/enter achievements.
- * Off by default — each key has its own switch.
- */
+Background GETs that can count toward visit/read/enter achievements.
+Off by default — each key has its own switch.
+*/
 export const ACHIEVEMENT_AUTOMATION_KEYS = [
   'visitPages',
   'profileCosmetics',
@@ -71,8 +71,8 @@ export interface AchievementDefinition {
   aliases?: readonly string[];
   category: AchievementCategory;
   /**
-   * Shared chain id — only the next unearned rank is advised.
-   */
+  Shared chain id — only the next unearned rank is advised.
+  */
   group: string;
   rank: number;
   hint: string;
@@ -80,8 +80,8 @@ export interface AchievementDefinition {
   hrefLabel?: string;
   automation?: AchievementAutomationKey;
   /**
-   * Daily ARP work already listed in the Artifact Optimizer action plan.
-   */
+  Daily ARP work already listed in the Artifact Optimizer action plan.
+  */
   coveredByActionPlan?: boolean;
   kind: AchievementKind;
 }

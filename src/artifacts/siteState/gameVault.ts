@@ -1,4 +1,4 @@
-import { readPageArpTier } from "../../pageGlobals";
+import { firstNonEmpty, readPageArpTier } from "../../pageGlobals";
 import { pageText, parseTimestamp } from "./shared";
 import { applyRedeemableArpFromDocument } from "./arpLog";
 import type { SiteState } from "./types";
@@ -300,18 +300,18 @@ export function isGameVaultMonthlyClaimUsedFromDocument(
 
 function isVaultCardClaimedByUser(item: HTMLElement): boolean {
   return VAULT_CLAIMED_BADGE_RE.test(
-    (item.textContent ?? "").replaceAll(/\s+/g, " "),
+    (item.textContent).replaceAll(/\s+/g, " "),
   );
 }
 
 function vaultCardName(item: HTMLElement): string {
-  return (
-    item.dataset.productName?.trim() ||
+  return firstNonEmpty(
+    item.dataset.productName?.trim(),
     item
       .querySelector(".product-name, .gv-product-name, h3, h4")
-      ?.textContent?.trim() ||
-    item.getAttribute("title") ||
-    "Game Vault item"
+      ?.textContent.trim(),
+    item.getAttribute("title"),
+    "Game Vault item",
   );
 }
 
@@ -321,7 +321,7 @@ function vaultCardPrice(item: HTMLElement): number | undefined {
     return fromData;
   }
   const match = /(\d{1,7})\s*ARP/i.exec(
-    (item.textContent ?? "").replaceAll(/\s+/g, " "),
+    (item.textContent).replaceAll(/\s+/g, " "),
   );
   if (!match?.[1]) {
     return undefined;
@@ -389,7 +389,7 @@ export function hasVaultClaimActionFromDocument(document_: Document): boolean {
   const cards = document_.querySelectorAll<HTMLElement>(VAULT_CARD_SELECTORS);
   if (cards.length > 0) {
     return [...cards].some((item) => {
-      const text = (item.textContent ?? "").replaceAll(/\s+/g, " ");
+      const text = (item.textContent).replaceAll(/\s+/g, " ");
       return (
         VAULT_CLAIM_ACTION_RE.test(text) && !VAULT_CLAIMED_BADGE_RE.test(text)
       );

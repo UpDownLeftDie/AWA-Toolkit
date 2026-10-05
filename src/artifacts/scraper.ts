@@ -1,8 +1,13 @@
 import { GM } from "$";
 
-import { readPageFragmentBalance } from "../pageGlobals";
+import {
+  documentBody,
+  firstNonEmpty,
+  readPageFragmentBalance,
+} from "../pageGlobals";
 import {
   type ArtifactCategory,
+  artifactTierAt,
   ArtifactTier,
   displayNameFor,
   fragmentCostToUpgradeFrom,
@@ -75,9 +80,9 @@ export async function saveSnapshot(snapshot: ArtifactSnapshot): Promise<void> {
 }
 
 /**
- * Apply a successful AWA upgrade to the cached showroom snapshot so the
- * optimizer does not keep recommending the old tier until the 6h rescrape.
- */
+Apply a successful AWA upgrade to the cached showroom snapshot so the
+optimizer does not keep recommending the old tier until the 6h rescrape.
+*/
 export async function applySnapshotUpgrade(
   instanceId: number,
 ): Promise<ArtifactSnapshot | undefined> {
@@ -91,7 +96,10 @@ export async function applySnapshotUpgrade(
   if (!current || current.tier >= ArtifactTier.Interstellar) {
     return snapshot;
   }
-  const toTier = (current.tier + 1) as ArtifactTier;
+  const toTier = artifactTierAt(current.tier + 1);
+  if (toTier === undefined) {
+    return snapshot;
+  }
   const family = getArtifactById(current.familyId);
   const cost =
     current.upgradeCost ?? fragmentCostToUpgradeFrom(current.tier) ?? 0;
@@ -124,7 +132,7 @@ function readFragmentBalance(document_: Document): number {
   if (fromPage !== undefined) {
     return fromPage;
   }
-  const text = document_.body?.textContent ?? "";
+  const text = documentBody(document_)?.textContent ?? "";
   const match = /Fragments:\s*([\d,]+)/i.exec(text);
   return match?.[1] ? Number(match[1].replaceAll(",", "")) : 0;
 }
@@ -153,16 +161,16 @@ function readUsername(): string | undefined {
 }
 
 /**
- * Site redirect to the logged-in user's Artifact Showroom
- * (`/member/<you>/artifacts`).
- */
+Site redirect to the logged-in user's Artifact Showroom
+(`/member/<you>/artifacts`).
+*/
 export const USER_ARTIFACTS_ROOM_PATH = "/user-artifacts-room";
 
 /**
- * Artifact Showroom path for the logged-in user.
- * Falls back to `/user-artifacts-room`, which the site redirects.
- */
-export function resolveShowroomUrl(username?: string | undefined): string {
+Artifact Showroom path for the logged-in user.
+Falls back to `/user-artifacts-room`, which the site redirects.
+*/
+export function resolveShowroomUrl(username?: string  ): string {
   const name = username ?? readUsername();
   if (name) {
     return `/member/${encodeURIComponent(name)}/artifacts`;
@@ -170,7 +178,7 @@ export function resolveShowroomUrl(username?: string | undefined): string {
   const link = document.querySelector<HTMLAnchorElement>(
     'a[href*="/member/"][href$="/artifacts"]',
   );
-  return link?.pathname || USER_ARTIFACTS_ROOM_PATH;
+  return firstNonEmpty(link?.pathname, USER_ARTIFACTS_ROOM_PATH);
 }
 
 function parseEquippedPosition(card: Element): ArtifactSlotIndex | undefined {
@@ -197,17 +205,17 @@ interface ShowcaseSlot {
 }
 
 /**
- * Prefer explicit unlock icons. Font Awesome uses `fa-lock-open` (not a
- * `fa-lock` token), so "has fa-lock and not fa-lock-open" is the locked state.
- */
+Prefer explicit unlock icons. Font Awesome uses `fa-lock-open` (not a
+`fa-lock` token), so "has fa-lock and not fa-lock-open" is the locked state.
+*/
 function isShowcaseSlotLocked(slot: Element): boolean {
   return !slot.querySelector(":scope i.fa-lock-open, :scope i.fa-unlock") && Boolean(slot.querySelector(":scope i.fa-lock"));
 }
 
 /**
- * Hero showcase slots expose equipped artifacts + lock icons even when Unequip
- * is hidden during the 24h cooldown.
- */
+Hero showcase slots expose equipped artifacts + lock icons even when Unequip
+is hidden during the 24h cooldown.
+*/
 function scrapeShowcaseSlots(document_: Document): ShowcaseSlot[] {
   const root = document_.querySelector(".slots");
   const slots = root
@@ -290,8 +298,8 @@ function parseFooterTier(card: Element): ArtifactTier | undefined {
 }
 
 /**
- * Scrape an Artifact Showroom Document into a snapshot.
- */
+Scrape an Artifact Showroom Document into a snapshot.
+*/
 export function scrapeShowroomFromDocument(
   document_: Document,
   pathHint?: string,
@@ -326,9 +334,10 @@ export function scrapeShowroomFromDocument(
       upgradeCostRaw === undefined || upgradeCostRaw === ""
         ? undefined
         : Number(upgradeCostRaw);
-    const upgradeCost = Number.isNaN(parsedUpgradeCost as number)
-      ? undefined
-      : parsedUpgradeCost;
+    const upgradeCost =
+      parsedUpgradeCost === undefined || Number.isNaN(parsedUpgradeCost)
+        ? undefined
+        : parsedUpgradeCost;
     const isMaxLevel =
       card.dataset.maxLevel === "true" ||
       card.dataset.maxLevel === "1" ||
@@ -430,7 +439,7 @@ export async function scrapeAndPersist(): Promise<ArtifactSnapshot> {
 }
 
 export function isArtifactsShowroomPage(): boolean {
-  const pathname = globalThis.location?.pathname ?? '';
+  const pathname = location.pathname;
   return (
     /\/member\/[^/]+\/artifacts\/?$/.test(pathname) ||
     /\/user-artifacts-room\/?$/.test(pathname)

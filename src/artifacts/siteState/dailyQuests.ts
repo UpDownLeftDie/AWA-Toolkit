@@ -34,8 +34,8 @@ function dailyQuestStatusFromText(
   return /^incomplete$/i.test(trimmed) ? 'incomplete' : undefined;
 }
 
-function dailyQuestKind(name: string, href?: string): DailyQuestKind {
-  return /weekend/i.test(`${name} ${href ?? ''}`) ? 'weekend' : 'daily';
+function dailyQuestKind(name: string, href = ''): DailyQuestKind {
+  return /weekend/i.test(`${name} ${href}`) ? 'weekend' : 'daily';
 }
 
 function pathnameFromHref(href: string | undefined): string | undefined {
@@ -58,7 +58,7 @@ function questNameFromRow(row: Element): string | undefined {
     questLink?.textContent ??
     row.querySelector('a')?.textContent ??
     [...row.querySelectorAll('td')].find((cell) => {
-      const text = cell.textContent?.replaceAll(/\s+/g, ' ').trim() ?? '';
+      const text = cell.textContent.replaceAll(/\s+/g, ' ').trim();
       return text.length > 0 && !dailyQuestStatusFromText(text);
     })?.textContent;
   const name = raw?.replaceAll(/\s+/g, ' ').trim();
@@ -67,9 +67,9 @@ function questNameFromRow(row: Element): string | undefined {
 
 function statusTextFromRow(row: Element): string {
   const fromCell = [...row.querySelectorAll('td, th, span, div')].find((cell) =>
-    dailyQuestStatusFromText(cell.textContent ?? ''),
+    dailyQuestStatusFromText(cell.textContent),
   );
-  return fromCell?.textContent?.trim() ?? '';
+  return fromCell?.textContent.trim() ?? '';
 }
 
 function buildDailyQuestRow(
@@ -98,7 +98,7 @@ function parseDailyQuestRowFromStatusCell(
   statusCell: Element,
 ): DailyQuestRow | undefined {
   const row = statusCell.closest('tr') ?? statusCell.parentElement;
-  return row ? buildDailyQuestRow(row, statusCell.textContent?.trim() ?? '') : undefined;
+  return row ? buildDailyQuestRow(row, statusCell.textContent.trim()) : undefined;
 }
 
 function parseDailyQuestRowFromTableRow(row: Element): DailyQuestRow | undefined {

@@ -1,4 +1,5 @@
 import { nudgeStuckSlotLocks } from './api';
+import { documentBody } from '../pageGlobals';
 import { applyAsceCommunityHours } from './asce';
 import { lastDiscordPollPostAt } from './data';
 import {
@@ -177,7 +178,7 @@ async function waitForCommunityEventHours(document_: Document): Promise<void> {
   while (Date.now() - started < 4000) {
     const hours = document_
       .querySelector('#personal-hours')
-      ?.textContent?.trim();
+      ?.textContent.trim();
     if (hours) {
       break;
     }
@@ -209,9 +210,9 @@ async function settleIframePage(
 }
 
 /**
- * Briefly open a same-origin page in a hidden iframe (fallback when fetch HTML
- * is incomplete), scrape, then remove it.
- */
+Briefly open a same-origin page in a hidden iframe (fallback when fetch HTML
+is incomplete), scrape, then remove it.
+*/
 async function openPageDocument(path: string): Promise<LoadedPage | undefined> {
   return new Promise((resolve) => {
     const iframe = document.createElement('iframe');
@@ -255,16 +256,16 @@ async function waitForBattlePassUi(document_: Document): Promise<void> {
 function hasPersonalHours(document_: Document): boolean {
   const domHours = document_
     .querySelector('#personal-hours')
-    ?.textContent?.trim();
+    ?.textContent.trim();
   if (domHours && /\d/.test(domHours)) {
     return true;
   }
-  if (/Your Total Hours:\s*[\d.]+/i.test(document_.body?.textContent ?? '')) {
+  if (/Your Total Hours:\s*[\d.]+/i.test(documentBody(document_)?.textContent ?? '')) {
     return true;
   }
   // Fetch HTML leaves #personal-hours empty; minutes are inlined as JS.
   const scripts = [...document_.querySelectorAll('script:not([src])')]
-    .map((script) => script.textContent ?? '')
+    .map((script) => script.textContent)
     .join('\n');
   return /personalPlaytime\s*=\s*\d+/i.test(scripts);
 }
@@ -281,7 +282,7 @@ async function waitForGameVaultUi(document_: Document): Promise<void> {
 
 function requiresIframeFallback(path: string, fetched: Document): boolean {
   if (path.includes('/artifacts') || path.includes('/user-artifacts-room')) {
-    return !fetched.body?.querySelector(
+    return !documentBody(fetched)?.querySelector(
       ':scope a.artifact-list-item.change-artifact-modal, :scope .slot img',
     );
   }
@@ -314,11 +315,11 @@ function hasSteamPlayEligibilitySignal(document_: Document): boolean {
     return true;
   }
   const labels = [...document_.querySelectorAll('a, button')].map((element) =>
-    (element.textContent ?? '').replaceAll(/\s+/g, ' ').trim(),
+    (element.textContent).replaceAll(/\s+/g, ' ').trim(),
   );
   return labels.some((label) =>
       /^(Check Game|Visit Steam|Sync Games|Launch Game)$/i.test(label),
-    ) || /completed this quest/i.test(document_.body?.textContent ?? '');
+    ) || /completed this quest/i.test(documentBody(document_)?.textContent ?? '');
 }
 
 async function loadRemotePage(path: string): Promise<LoadedPage | undefined> {
@@ -379,9 +380,9 @@ function isCapsFresh(
 }
 
 /**
- * Battle Pass claims are JS-rendered. A fetch of the empty shell used to be
- * saved as 0 ready and then skipped for the whole caps TTL.
- */
+Battle Pass claims are JS-rendered. A fetch of the empty shell used to be
+saved as 0 ready and then skipped for the whole caps TTL.
+*/
 function shouldRescrapeBattlePass(state: SiteState | undefined): boolean {
   const advertised = battlePassPathFromDocument(document);
   const stored = battlePassControlCenterPath(state?.battlePass?.url);
@@ -392,7 +393,7 @@ function shouldRescrapeBattlePass(state: SiteState | undefined): boolean {
   if (!bp || typeof bp.readyToClaimArp !== 'number') {
     return true;
   }
-  const scrapedAt = Date.parse(bp.scrapedAt ?? '');
+  const scrapedAt = Date.parse(bp.scrapedAt);
   return Number.isNaN(scrapedAt) || Date.now() - scrapedAt > BATTLE_PASS_STALE_MS;
 }
 
@@ -460,12 +461,12 @@ function utcDayStartMs(now = new Date()): number {
 }
 
 /**
- * Everything tied to a daily 00:00 UTC reset (activity caps, ARP-log-driven
- * claims, most Control Center widgets) is stale by definition if the last
- * scrape happened before today's UTC midnight — even when it is inside the
- * general TTL. Return false in that case so hydrate always covers the
- * current UTC day.
- */
+Everything tied to a daily 00:00 UTC reset (activity caps, ARP-log-driven
+claims, most Control Center widgets) is stale by definition if the last
+scrape happened before today's UTC midnight — even when it is inside the
+general TTL. Return false in that case so hydrate always covers the
+current UTC day.
+*/
 function isScrapedSinceUtcMidnight(
   scrapedAt: string | undefined,
   now = new Date(),
@@ -478,23 +479,21 @@ function isScrapedSinceUtcMidnight(
 }
 
 /**
- * ARP Log is the only signal for Discord Poll votes and same-day Daily Login
- * Calendar claims, so any scrape from before the current UTC day — or before
- * the most recent weekday 16:00 UTC poll post — cannot see today's earn even
- * if it is within the general 6h TTL. Treat those as stale so a hydrate
- * always covers at least the current daily and poll cycles.
- *
- * An empty `recent` also counts as stale: an empty scrape can only mean "we
- * never actually saw the log" (a fresh page shell, an iframe that returned
- * before rows painted, a session miss) — never trust it to keep us from
- * refetching. `mergeArpLogScrape` stamps such scrapes with an epoch sentinel
- * so `isScrapedWithin` already fails, but check length explicitly in case a
- * future writer forgets that convention.
- */
-function isArpLogFresh(
-  state: SiteState | undefined,
-  now = new Date(),
-): boolean {
+ARP Log is the only signal for Discord Poll votes and same-day Daily Login
+Calendar claims, so any scrape from before the current UTC day — or before
+the most recent weekday 16:00 UTC poll post — cannot see today's earn even
+if it is within the general 6h TTL. Treat those as stale so a hydrate
+always covers at least the current daily and poll cycles.
+
+An empty `recent` also counts as stale: an empty scrape can only mean "we
+never actually saw the log" (a fresh page shell, an iframe that returned
+before rows painted, a session miss) — never trust it to keep us from
+refetching. `mergeArpLogScrape` stamps such scrapes with an epoch sentinel
+so `isScrapedWithin` already fails, but check length explicitly in case a
+future writer forgets that convention.
+*/
+function isArpLogFresh(state: SiteState | undefined): boolean {
+  const now = new Date();
   const arpLog = state?.arpLog;
   if (!arpLog || arpLog.recent.length === 0) {
     return false;
@@ -507,10 +506,8 @@ function isArpLogFresh(
   return scrapedAtMs >= lastDiscordPollPostAt(now).getTime();
 }
 
-function isCommunityEventFresh(
-  state: SiteState | undefined,
-  now = new Date(),
-): boolean {
+function isCommunityEventFresh(state: SiteState | undefined): boolean {
+  const now = new Date();
   const event = state?.communityEvent;
   if (!event?.isLive) {
     // A LIVE banner with a wrongly-ended cache must refetch, not sit on TTL.
@@ -563,10 +560,10 @@ async function persistShowroomSnapshot(
 }
 
 /**
- * Megumin FAQ: POST Upgrade on a maxed (0-frag) artifact clears AWA's stuck
- * 24h lock bug. Force Refresh and elapsed-timer hydrates do that, then
- * re-fetch Showroom.
- */
+Megumin FAQ: POST Upgrade on a maxed (0-frag) artifact clears AWA's stuck
+24h lock bug. Force Refresh and elapsed-timer hydrates do that, then
+re-fetch Showroom.
+*/
 async function scrapeShowroomAfterLockNudge(
   showroomPath: string,
   existing: ArtifactSnapshot | undefined,
@@ -600,7 +597,7 @@ async function scrapeShowroomAfterLockNudge(
 
 function hasSnapshotLoadout(
   snapshot: ArtifactSnapshot,
-  applied: ReadonlyArray<{ artifactId: number; position: 1 | 2 | 3 }>,
+  applied: readonly { artifactId: number; position: 1 | 2 | 3 }[],
 ): boolean {
   return applied.every((target) =>
     snapshot.artifacts.some(
@@ -648,7 +645,12 @@ async function invalidateSnapshotFreshness(): Promise<void> {
 
 function equippedSignature(snapshot: ArtifactSnapshot): string {
   const equipped = snapshot.artifacts
-    .filter((artifact) => artifact.equippedPosition !== undefined)
+    .filter(
+      (
+        artifact,
+      ): artifact is typeof artifact & { equippedPosition: number } =>
+        artifact.equippedPosition !== undefined,
+    )
     .map(
       (artifact) =>
         `${artifact.instanceId}:${artifact.equippedPosition}:${artifact.slotLocked === true ? '1' : '0'}`,
@@ -661,9 +663,9 @@ function equippedSignature(snapshot: ArtifactSnapshot): string {
 }
 
 /**
- * Re-read Showroom after AWA rejects an equip. Persist whatever is actually
- * equipped/locked — the rejection means our cache was wrong.
- */
+Re-read Showroom after AWA rejects an equip. Persist whatever is actually
+equipped/locked — the rejection means our cache was wrong.
+*/
 export async function resyncShowroomSnapshot(): Promise<{
   snapshot: ArtifactSnapshot | undefined;
   didChange: boolean;
@@ -689,11 +691,11 @@ export async function resyncShowroomSnapshot(): Promise<{
 }
 
 /**
- * Re-read Showroom after a successful equip and persist only when the new
- * pieces are actually in those slots. Does not invent equipped state.
- */
+Re-read Showroom after a successful equip and persist only when the new
+pieces are actually in those slots. Does not invent equipped state.
+*/
 export async function confirmShowroomLoadout(
-  applied: ReadonlyArray<{ artifactId: number; position: 1 | 2 | 3 }>,
+  applied: readonly { artifactId: number; position: 1 | 2 | 3 }[],
 ): Promise<void> {
   if (applied.length === 0) {
     return;
@@ -1089,7 +1091,7 @@ export function requiresRemoteSiteHydrate(
 ): boolean {
   return (
     !state ||
-    options.force ||
+    options.force === true ||
     !isCapsFresh(state) ||
     shouldRescrapeBattlePass(state) ||
     !isArpLogFresh(state) ||

@@ -1,3 +1,4 @@
+import { documentHead } from '../pageGlobals';
 import {
   DEFAULT_USER_TIER,
   extractTier,
@@ -41,7 +42,7 @@ function isGiveawayClosed(giveaway: HTMLElement): boolean {
 }
 
 function isGiveawayEntered(giveaway: HTMLElement): boolean {
-  return /you have entered this giveaway/i.test(giveaway.textContent ?? '');
+  return /you have entered this giveaway/i.test(giveaway.textContent);
 }
 
 function combineFilterMode(
@@ -188,7 +189,7 @@ export function ensureFilterStyles(): void {
           filter: grayscale(0.55);
         }
       `;
-  (document.head ?? document.documentElement).append(style);
+  (documentHead() ?? document.documentElement).append(style);
 }
 
 export function watchPageFilters(): void {

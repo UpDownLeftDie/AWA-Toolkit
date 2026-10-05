@@ -99,12 +99,9 @@ export async function saveSiteState(state: SiteState): Promise<void> {
   await GM.setValue(SITE_STATE_KEY, JSON.stringify(state));
 }
 
-function applyWatchTwitchFromDocument(
-  next: SiteState,
-  document_: Document,
-): void {
+function applyWatchTwitchFromDocument(next: SiteState): void {
   const progress = scrapeWatchTwitchProgressFromDocument(
-    document_,
+    document,
     next.watchTwitch,
   );
   if (progress) {
@@ -119,7 +116,7 @@ function applyControlCenterPage(next: SiteState): void {
   Object.assign(next.caps, scrapeControlCenterCaps());
   applySteamQuestsFromDocument(next, document);
   applyDailyQuestsFromDocument(next, document);
-  applyWatchTwitchFromDocument(next, document);
+  applyWatchTwitchFromDocument(next);
   applyBattlePassEndFromDocument(next, document);
   const banner = scrapeLiveCommunityEventBanner(document);
   if (banner) {
@@ -169,7 +166,7 @@ export function applyLiveDocumentToSiteState(next: SiteState): void {
     path.includes("/rewards/terms") ||
     path.includes("/faq-contact")
   ) {
-    applyWatchTwitchFromDocument(next, document);
+    applyWatchTwitchFromDocument(next);
   }
 
   if (path.includes("/marketplace") || path.includes("/game-vault")) {
@@ -240,9 +237,9 @@ export async function refreshSiteStateFromPage(): Promise<SiteState> {
 }
 
 /**
- * `onPersist` runs after every persisted refresh (e.g. ASCE hours) — caller
- * hook instead of importing `asce.ts` here (circular with this module).
- */
+`onPersist` runs after every persisted refresh (e.g. ASCE hours) — caller
+hook instead of importing `asce.ts` here (circular with this module).
+*/
 function watchLiveSiteStatePage(options: {
   isPage: boolean;
   datasetFlag: "aoBpWatch" | "aoCcWatch" | "aoArpWatch";
@@ -328,9 +325,9 @@ function watchLiveSiteStatePage(options: {
 }
 
 /**
- * Keep Battle Pass ready-to-claim counts in sync while the user claims on the
- * live page (CLAIM buttons disappear / COMPLETE markers appear).
- */
+Keep Battle Pass ready-to-claim counts in sync while the user claims on the
+live page (CLAIM buttons disappear / COMPLETE markers appear).
+*/
 export function watchBattlePassPage(
   onPersist?: (state: SiteState) => void | Promise<void>,
 ): void {
@@ -346,9 +343,9 @@ export function watchBattlePassPage(
 }
 
 /**
- * Keep Control Center caps / Watch Twitch in sync while the user stays on the
- * page (jQuery fills empty SSR spans; twitch ticks update status text).
- */
+Keep Control Center caps / Watch Twitch in sync while the user stays on the
+page (jQuery fills empty SSR spans; twitch ticks update status text).
+*/
 export function watchControlCenterPage(
   onPersist?: (state: SiteState) => void | Promise<void>,
 ): void {
@@ -365,9 +362,9 @@ export function watchControlCenterPage(
 }
 
 /**
- * Persist Discord Poll / calendar earns when the ARP Log table paints.
- * `@run-at document-start` otherwise stamps an empty scrape as fresh.
- */
+Persist Discord Poll / calendar earns when the ARP Log table paints.
+`@run-at document-start` otherwise stamps an empty scrape as fresh.
+*/
 export function watchArpLogPage(
   onPersist?: (state: SiteState) => void | Promise<void>,
 ): void {
@@ -400,8 +397,8 @@ export function emptySiteState(): SiteState {
 }
 
 /**
- * Treat unknown as still available (optimistic for planning).
- */
+Treat unknown as still available (optimistic for planning).
+*/
 export function isActivityAvailable(
   caps: ActivityCapState,
   key: ActivityKey,
@@ -410,10 +407,10 @@ export function isActivityAvailable(
 }
 
 /**
- * True when the user still needs to claim/complete this activity soon.
- * Weekly activities default to pending when status is unknown — except Discord
- * Poll, which is often absent from Control Center markup (use ARP Log instead).
- */
+True when the user still needs to claim/complete this activity soon.
+Weekly activities default to pending when status is unknown — except Discord
+Poll, which is often absent from Control Center markup (use ARP Log instead).
+*/
 export function isActivityPending(
   caps: ActivityCapState,
   key: ActivityKey,

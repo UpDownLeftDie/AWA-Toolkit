@@ -1,5 +1,5 @@
 import { GM } from '$';
-import { readPageUsername } from '../pageGlobals';
+import { documentBody, readPageUsername } from '../pageGlobals';
 import {
   ACHIEVEMENTS,
   FAQ_PATH,
@@ -183,14 +183,16 @@ function parseCountFromText(
 function parseCount(
   document_: Document,
 ): { earned: number; total: number } | undefined {
-  const fromBody = parseCountFromText(document_.body?.textContent ?? '');
+  const fromBody = parseCountFromText(
+    documentBody(document_)?.textContent ?? '',
+  );
   if (fromBody) {
     return fromBody;
   }
   for (const element of document_.querySelectorAll(
     'h1, h2, h3, h4, h5, strong, span, div, p',
   )) {
-    const text = element.textContent ?? '';
+    const text = element.textContent;
     const lowered = text.replaceAll(/\s+/g, ' ').toLowerCase();
     if (!lowered.includes('achievements') || !lowered.includes('/')) {
       continue;
@@ -304,7 +306,7 @@ function isCardUnearned(card: Element): boolean {
   return (
     card.classList.contains('unachieved') ||
     (!card.classList.contains('achieved') &&
-      !isEarnedCardText(card.textContent ?? ''))
+      !isEarnedCardText(card.textContent))
   );
 }
 
@@ -325,7 +327,7 @@ function scrapeFromCards(
     if (nestedCards.length > 1) {
       continue;
     }
-    const text = card.textContent ?? '';
+    const text = card.textContent;
     const definition = matchAchievementInText(text);
     if (!definition) {
       continue;
@@ -339,7 +341,10 @@ function scrapeFromAchievementSegments(
   document_: Document,
   items: Record<string, AchievementProgress>,
 ): void {
-  const collapsed = (document_.body?.textContent ?? '').replaceAll(/\s+/g, ' ');
+  const collapsed = (documentBody(document_)?.textContent ?? '').replaceAll(
+    /\s+/g,
+    ' ',
+  );
   for (const achievement of ACHIEVEMENTS) {
     // Cards win — do not let body segments overwrite a card match
     if (items[achievement.id] !== undefined) {
@@ -365,7 +370,10 @@ function scrapeFromBodyText(
   document_: Document,
   items: Record<string, AchievementProgress>,
 ): void {
-  const collapsed = (document_.body?.textContent ?? '').replaceAll(/\s+/g, ' ');
+  const collapsed = (documentBody(document_)?.textContent ?? '').replaceAll(
+    /\s+/g,
+    ' ',
+  );
   for (const achievement of ACHIEVEMENTS) {
     if (items[achievement.id] !== undefined) {
       continue;
@@ -422,13 +430,11 @@ export function scrapeAchievementsFromDocument(
   };
 }
 
-function isSnapshotFresh(
-  snapshot: AchievementSnapshot | undefined,
-  now = Date.now(),
-): boolean {
+function isSnapshotFresh(snapshot: AchievementSnapshot | undefined): boolean {
   if (!snapshot || Object.keys(snapshot.items).length === 0) {
     return false;
   }
+  const now = Date.now();
   const scrapedAt = Date.parse(snapshot.scrapedAt);
   return !Number.isNaN(scrapedAt) && now - scrapedAt < STALE_MS;
 }
@@ -514,7 +520,8 @@ async function loadAchievementsDocument(
   if (fetched && parseCount(fetched)) {
     return fetched;
   }
-  return fetched && matchAchievementInText(fetched.body?.textContent ?? '')
+  return fetched &&
+    matchAchievementInText(documentBody(fetched)?.textContent ?? '')
     ? fetched
     : openPageDocument(path);
 }
@@ -578,7 +585,7 @@ async function visitPath(path: string): Promise<void> {
 }
 
 function parseSelectedBorderId(document_: Document): number | undefined {
-  const source = document_.documentElement?.textContent ?? '';
+  const source = document_.documentElement.textContent;
   const fromSaved = /saved\s*=\s*\{[^}]*\bborder\s*:\s*(\d+)/i.exec(source);
   if (fromSaved?.[1]) {
     const parsed = Number(fromSaved[1]);
@@ -625,7 +632,7 @@ function parseOptionalId(raw: string | undefined): number | undefined {
 }
 
 function parseAvatarSelection(document_: Document): AvatarSelection {
-  const source = document_.documentElement?.textContent ?? '';
+  const source = document_.documentElement.textContent;
   const match =
     /saved\s*=\s*\{\s*avatar:\s*(\d+|null)\s*,\s*background:\s*(\d+|null)\s*,\s*border:\s*(\d+|null)/i.exec(
       source,
@@ -645,7 +652,7 @@ function parseAvatarSelection(document_: Document): AvatarSelection {
 }
 
 function parseUserId(document_: Document): number | undefined {
-  const source = document_.documentElement?.textContent ?? '';
+  const source = document_.documentElement.textContent;
   const fromSaveUrl = /\/ajax\/user\/avatar\/save\/(\d+)/i.exec(source);
   if (fromSaveUrl?.[1]) {
     const parsed = Number(fromSaveUrl[1]);
@@ -686,7 +693,7 @@ function pickNextItemId(
 function stripHtmlTags(html: string): string {
   const container = document.createElement('div');
   container.innerHTML = html;
-  return (container.textContent ?? '').replaceAll(/\s+/g, ' ').trim();
+  return container.textContent.replaceAll(/\s+/g, ' ').trim();
 }
 
 function readPersonalizationFormState(
@@ -706,7 +713,7 @@ function readPersonalizationFormState(
     form?.querySelector<HTMLTextAreaElement>(
       'textarea[name="user_account_personalization[about]"]',
     )?.value ?? '';
-  if (!token || !form?.action) {
+  if (!token || !form.action) {
     return undefined;
   }
   return {
@@ -982,9 +989,7 @@ async function didApplyReadArticlesAutomation(
   if (articlePaths.length === 0) {
     await visitPath(NEWS_PATH);
   } else {
-    for (const path of articlePaths) {
-      await visitPath(path);
-    }
+    await Promise.all(articlePaths.map((path) => visitPath(path)));
   }
   await saveAutomationCooldowns({ readArticlesDate: today });
   return true;
@@ -1010,9 +1015,7 @@ async function didApplyWatchVideosAutomation(
   if (videoPaths.length === 0) {
     await visitPath(VIDEOS_PATH);
   } else {
-    for (const path of videoPaths) {
-      await visitPath(path);
-    }
+    await Promise.all(videoPaths.map((path) => visitPath(path)));
   }
   await saveAutomationCooldowns({ watchVideosDate: today });
   return true;
@@ -1033,9 +1036,9 @@ async function didApplyAchievementAutomations(
 }
 
 /**
- * Run enabled achievement automations, then refresh the snapshot if anything applied.
- * Used by gatherData on the achievements page (which otherwise only scrapes).
- */
+Run enabled achievement automations, then refresh the snapshot if anything applied.
+Used by gatherData on the achievements page (which otherwise only scrapes).
+*/
 export async function runAchievementAutomations(
   snapshot: AchievementSnapshot,
   settings: AchievementSettings,

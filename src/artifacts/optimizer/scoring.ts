@@ -45,14 +45,14 @@ import type {
 } from './types';
 
 /**
- * Base ARP per ready Battle Pass ARP Boost (pre All-ARP% multiplier).
- */
+Base ARP per ready Battle Pass ARP Boost (pre All-ARP% multiplier).
+*/
 export const BATTLE_PASS_BOOST_ARP = 40;
 
 /**
- * A dedicated 24h All-ARP% lock is only worth it when the extra multiplier on
- * ready BP boosts beats the lock-window ARP lost vs the recommended set.
- */
+A dedicated 24h All-ARP% lock is only worth it when the extra multiplier on
+ready BP boosts beats the lock-window ARP lost vs the recommended set.
+*/
 export function isAllArpLockWorthBattlePassBoost(
   best: ScoredCombo | undefined,
   allArp: ScoredCombo | undefined,
@@ -175,16 +175,16 @@ function scoreSecondaryActivities(
 }
 
 /**
- * Community Event ARP that this 24h lock will still be wearing when it grants.
- *
- * Personal-hours-not-met: player-controlled — score it (equip All-ARP% first).
- * Waiting-on-community: per milestone, only if that gate's ASCE ETA lands
- * while this loadout is worn (`waitMs` until equip, then 24h). 75k in ~16h
- * with a 12h lock is a miss; 75k after a 16h wait still counts. The award
- * fires on whatever is equipped; All-ARP% is the only boost (Megumin FAQ).
- * Watch Twitch repeats daily — it must not beat this one-shot. Unknown ETA
- * stays unscored. Both-gates-met is scrape lag — ignore.
- */
+Community Event ARP that this 24h lock will still be wearing when it grants.
+
+Personal-hours-not-met: player-controlled — score it (equip All-ARP% first).
+Waiting-on-community: per milestone, only if that gate's ASCE ETA lands
+while this loadout is worn (`waitMs` until equip, then 24h). 75k in ~16h
+with a 12h lock is a miss; 75k after a 16h wait still counts. The award
+fires on whatever is equipped; All-ARP% is the only boost (Megumin FAQ).
+Watch Twitch repeats daily — it must not beat this one-shot. Unknown ETA
+stays unscored. Both-gates-met is scrape lag — ignore.
+*/
 export function communityEventArpInSwapWindow(
   siteState: SiteState,
   waitMs = 0,
@@ -299,9 +299,9 @@ function scoreWindowActivities(
   let flatSum = 0;
 
   const isEnabled = (key: keyof typeof acts): boolean =>
-    (acts[key]?.enabled ?? false) && (acts[key]?.frequency ?? 0) > 0;
+    acts[key].enabled && acts[key].frequency > 0;
   const freq = (key: keyof typeof acts): number =>
-    isEnabled(key) ? (acts[key]?.frequency ?? 0) : 0;
+    isEnabled(key) ? acts[key].frequency : 0;
 
   if (isEnabled('timeOnSite')) {
     const tosDays = completableUtcDayStarts(waitMs, TIME_ON_SITE_DURATION_MS, {
@@ -428,20 +428,20 @@ export function vaultPurchasePriceNow(
 }
 
 /**
- * Holistic combo score for the next 24h swap window.
- *
- * Artifacts lock for 24h after they go on, so the window is remaining today
- * plus every known reset that still lands while worn — including a 00:00 UTC
- * daily that happens after a delayed All-ARP% equip, and the Monday Steam
- * Quest week. Goal is lifetime ARP, not only the rest of this UTC day.
- *
- * Stacking order (confirmed by guide math + FAQ):
- *   totalArp = Σ(base + flatCategoryBonus) × (1 + Σ AllArpPct)
- *
- * AllArpPct is a blanket multiplier over every ARP source — including categories
- * with no dedicated artifact (Steam Community Event Reward, Battle Pass claims).
- * MarketDiscountPct is scored separately as ARP savings, not as a multiplier.
- */
+Holistic combo score for the next 24h swap window.
+
+Artifacts lock for 24h after they go on, so the window is remaining today
+plus every known reset that still lands while worn — including a 00:00 UTC
+daily that happens after a delayed All-ARP% equip, and the Monday Steam
+Quest week. Goal is lifetime ARP, not only the rest of this UTC day.
+
+Stacking order (confirmed by guide math + FAQ):
+  totalArp = Σ(base + flatCategoryBonus) × (1 + Σ AllArpPct)
+
+AllArpPct is a blanket multiplier over every ARP source — including categories
+with no dedicated artifact (Steam Community Event Reward, Battle Pass claims).
+MarketDiscountPct is scored separately as ARP savings, not as a multiplier.
+*/
 export function scoreCombo(
   three: OwnedArtifact[],
   context: OptimizerContext,

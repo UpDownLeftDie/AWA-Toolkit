@@ -1,3 +1,5 @@
+import { documentHead } from "../../pageGlobals";
+
 export const MODAL_ID = "alienware-artifact-optimizer";
 export const INLINE_ID = "alienware-artifact-optimizer-inline";
 export const CC_PANEL_ID = "alienware-artifact-optimizer-cc";
@@ -13,7 +15,7 @@ export const TOAST_MS = 2200;
 /**
 Shared modal positioning — light-DOM CSS, shadow :host, and inline !important.
 */
-export const MODAL_LAYOUT: ReadonlyArray<readonly [string, string]> = [
+export const MODAL_LAYOUT: readonly (readonly [string, string])[] = [
   ["position", "fixed"],
   ["top", "50%"],
   ["left", "50%"],
@@ -24,7 +26,7 @@ export const MODAL_LAYOUT: ReadonlyArray<readonly [string, string]> = [
   ["overflow-y", "auto"],
 ];
 
-export const BACKDROP_LAYOUT: ReadonlyArray<readonly [string, string]> = [
+export const BACKDROP_LAYOUT: readonly (readonly [string, string])[] = [
   ["position", "fixed"],
   ["inset", "0"],
   ["background", "rgba(0, 0, 0, 0.85)"],
@@ -32,7 +34,7 @@ export const BACKDROP_LAYOUT: ReadonlyArray<readonly [string, string]> = [
 ];
 
 function cssDeclarations(
-  layout: ReadonlyArray<readonly [string, string]>,
+  layout: readonly (readonly [string, string])[],
 ): string {
   return layout
     .map(([property, value]) => `${property}: ${value};`)
@@ -198,13 +200,13 @@ export function ensureOptimizerStyles(): void {
   if (!style) {
     style = document.createElement("style");
     style.id = STYLE_ID;
-    (document.head || document.documentElement).append(style);
+    (documentHead() ?? document.documentElement).append(style);
   }
   style.textContent = buildOptimizerCss();
 }
 
 export function applyOpaqueModalChrome(modal: HTMLElement): void {
-  const paint: Array<readonly [string, string]> = [
+  const paint: (readonly [string, string])[] = [
     ...MODAL_LAYOUT,
     ["background", "transparent"],
     ["opacity", "1"],
@@ -215,7 +217,7 @@ export function applyOpaqueModalChrome(modal: HTMLElement): void {
 }
 
 export function applyOpaqueBackdropChrome(backdrop: HTMLElement): void {
-  const paint: Array<readonly [string, string]> = [
+  const paint: (readonly [string, string])[] = [
     ...BACKDROP_LAYOUT,
     ["background-color", "rgba(0, 0, 0, 0.85)"],
     ["opacity", "1"],

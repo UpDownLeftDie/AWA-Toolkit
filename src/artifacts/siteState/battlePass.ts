@@ -1,4 +1,5 @@
 import { claimBattlePassReward } from '../api';
+import { documentBody, firstNonEmpty } from '../../pageGlobals';
 import { pageText } from './shared';
 import type { SiteState } from './types';
 
@@ -6,9 +7,9 @@ export interface BattlePassReadyClaim {
   milestoneId: string;
   isArp: boolean;
   /**
-   * Form `action` (`/battle-pass/claim/{instanceId}`). The path id is a
-   * per-user claim instance, not `milestoneId`.
-   */
+  Form `action` (`/battle-pass/claim/{instanceId}`). The path id is a
+  per-user claim instance, not `milestoneId`.
+  */
   claimPath?: string;
   csrfToken?: string;
   body?: Record<string, unknown>;
@@ -62,8 +63,8 @@ export function battlePassSeasonId(href: string | undefined): number | undefined
 }
 
 /**
- * Personal track. Public `/battle-pass/{id}` is the rewards preview.
- */
+Personal track. Public `/battle-pass/{id}` is the rewards preview.
+*/
 export function battlePassControlCenterPath(
   href: string | undefined,
 ): string | undefined {
@@ -91,11 +92,11 @@ function highestBattlePassSeasonId(
 }
 
 /**
- * Current season from the site's own links.
- * Logged-in Control Center puts it on the account menu (`a.um-nav-link`).
- * The homepage widget (`.bp-widget a`) is the same pointer when that tile is
- * present. Other `/battle-pass/{id}` links are a fallback; the highest id wins.
- */
+Current season from the site's own links.
+Logged-in Control Center puts it on the account menu (`a.um-nav-link`).
+The homepage widget (`.bp-widget a`) is the same pointer when that tile is
+present. Other `/battle-pass/{id}` links are a fallback; the highest id wins.
+*/
 export function battlePassPathFromDocument(
   document_: Document | undefined,
 ): string | undefined {
@@ -118,9 +119,9 @@ export function battlePassPathFromDocument(
 }
 
 /**
- * Control Center sometimes links the live season the public pages have not
- * caught up to. Never step backwards onto an ended pass.
- */
+Control Center sometimes links the live season the public pages have not
+caught up to. Never step backwards onto an ended pass.
+*/
 export function newerBattlePassPath(
   current: string | undefined,
   document_: Document | undefined,
@@ -195,10 +196,10 @@ async function newestLiveSeasonId(
 }
 
 /**
- * Control-center path of the newest live season. Ended passes (public URL
- * redirects to login) are skipped. A known url is only the floor we search
- * from; a newer `/battle-pass/{id}` replaces it.
- */
+Control-center path of the newest live season. Ended passes (public URL
+redirects to login) are skipped. A known url is only the floor we search
+from; a newer `/battle-pass/{id}` replaces it.
+*/
 export async function discoverBattlePassPath(
   options: {
     knownUrl?: string | undefined;
@@ -221,7 +222,7 @@ export async function discoverBattlePassPath(
     battlePassSeasonId(options.knownUrl),
     battlePassSeasonId(battlePassPathFromDocument(options.hintDocument)),
     battlePassSeasonId(battlePassPathFromDocument(document)),
-    battlePassSeasonId(globalThis.location?.pathname),
+    battlePassSeasonId(location.pathname),
   ].filter((seasonId): seasonId is number => seasonId !== undefined);
   const startId = hintedIds.length > 0 ? Math.max(...hintedIds) : 1;
   const newest = await newestLiveSeasonId(
@@ -270,7 +271,7 @@ export function scrapeBattlePassFromDocument(
   const url =
     battlePassControlCenterPath(pageUrl) ??
     battlePassPathFromDocument(document_) ??
-    battlePassControlCenterPath(globalThis.location?.pathname);
+    battlePassControlCenterPath(location.pathname);
   if (!url) {
     return undefined;
   }
@@ -319,7 +320,7 @@ function numberFromElement(
   document_: Document,
   selector: string,
 ): number | undefined {
-  const raw = document_.querySelector(selector)?.textContent?.replaceAll(',', '').trim();
+  const raw = document_.querySelector(selector)?.textContent.replaceAll(',', '').trim();
   if (!raw || !/^\d+$/.test(raw)) {
     return undefined;
   }
@@ -360,8 +361,8 @@ function applyBattlePassCountdown(state: BattlePassState, body: string): void {
 }
 
 /**
- * `13 : 12 : 35 : 05` (d:h:m:s) or `12:35:05` (h:m:s).
- */
+`13 : 12 : 35 : 05` (d:h:m:s) or `12:35:05` (h:m:s).
+*/
 export function parseBattlePassCountdownMs(text: string): number | undefined {
   const parts = text
     .trim()
@@ -440,9 +441,9 @@ export function applyBattlePassEndFromDocument(
 }
 
 /**
- * Battle Pass track popups use `.bp-popup__claim-btn` (often hidden until opened).
- * Free and premium tracks share one form action — count unique claim POSTs.
- */
+Battle Pass track popups use `.bp-popup__claim-btn` (often hidden until opened).
+Free and premium tracks share one form action — count unique claim POSTs.
+*/
 function listReadyClaimsFromDocument(
   document_: Document,
 ): BattlePassReadyClaim[] {
@@ -466,7 +467,8 @@ function readyClaimFromButton(
   popup: HTMLElement,
 ): BattlePassReadyClaim {
   const form = button.closest('form');
-  const claimPath = form?.getAttribute('action')?.trim() || undefined;
+  const trimmedPath = form?.getAttribute('action')?.trim();
+  const claimPath = trimmedPath === '' ? undefined : trimmedPath;
   const csrfToken = form
     ?.querySelector<HTMLInputElement>('input[name="_csrf_token"]')
     ?.value;
@@ -527,7 +529,7 @@ function isBattlePassArpRewardTitle(title: string): boolean {
 }
 
 function battlePassPopupTitle(popup: HTMLElement): string {
-  return popup.querySelector('.bp-popup__title')?.textContent?.trim() ?? '';
+  return popup.querySelector('.bp-popup__title')?.textContent.trim() ?? '';
 }
 
 function isArpClaimPopup(popup: HTMLElement): boolean {
@@ -556,7 +558,10 @@ function uniqueReadyClaims(
 
 function claimButtonIdentity(button: HTMLElement, popup: HTMLElement): string {
   const form = button.closest('form');
-  return form?.getAttribute('action')?.trim() || popup.dataset.milestoneId || '';
+  return firstNonEmpty(
+    form?.getAttribute('action')?.trim(),
+    popup.dataset.milestoneId,
+  );
 }
 
 function pushUniqueClaimButton(
@@ -605,19 +610,18 @@ function delay(ms: number): Promise<void> {
 }
 
 /**
- * Gap between Battle Pass claim POSTs. Claiming several in one burst has
- * triggered a site-side bug for other users.
- */
+Gap between Battle Pass claim POSTs. Claiming several in one burst has
+triggered a site-side bug for other users.
+*/
 const CLAIM_QUEUE_GAP_MS = 1500;
 
 async function waitWhile(
   isWaiting: () => boolean,
   timeoutMs: number,
-  intervalMs = 100,
 ): Promise<void> {
   const startedAt = Date.now();
   while (isWaiting() && Date.now() - startedAt < timeoutMs) {
-    await delay(intervalMs);
+    await delay(100);
   }
 }
 
@@ -651,9 +655,9 @@ function isBattlePassClaimPath(path: string): boolean {
   ) {
     return false;
   }
-  const hasClaim = /claim/.test(normalized);
+  const hasClaim = normalized.includes('claim');
   const hasBattlePass = /battle-?pass/.test(normalized);
-  const hasMilestone = /milestone/.test(normalized);
+  const hasMilestone = normalized.includes('milestone');
   return hasClaim && (hasBattlePass || hasMilestone);
 }
 
@@ -778,7 +782,7 @@ function endpointFromScripts(source: string): BattlePassClaimEndpoint | undefine
 
 function collectInlineScriptText(document_: Document): string {
   return [...document_.querySelectorAll('script:not([src])')]
-    .map((script) => script.textContent ?? '')
+    .map((script) => script.textContent)
     .join('\n');
 }
 
@@ -838,7 +842,7 @@ function endpointFromJquery(
     ...document_.querySelectorAll('.bp-popup__claim-btn'),
     document_,
   ];
-  if (document_.body) {
+  if (documentBody(document_)) {
     roots.push(document_.body);
   }
   for (const root of roots) {
@@ -885,7 +889,7 @@ async function fetchBattlePassDocument(
   const resolved =
     path ??
     (await discoverBattlePassPath({
-      knownUrl: battlePassControlCenterPath(globalThis.location?.pathname),
+      knownUrl: battlePassControlCenterPath(location.pathname),
     }));
   if (!resolved) {
     return undefined;
@@ -1092,10 +1096,10 @@ async function waitForBattlePassClaimButtons(
 }
 
 /**
- * Claim ready Battle Pass rewards with the site's same-origin form POST
- * (`/battle-pass/claim/{instanceId}` + `_csrf_token`). From Control Center,
- * fetch the Battle Pass HTML for those forms — do not open the BP page.
- */
+Claim ready Battle Pass rewards with the site's same-origin form POST
+(`/battle-pass/claim/{instanceId}` + `_csrf_token`). From Control Center,
+fetch the Battle Pass HTML for those forms — do not open the BP page.
+*/
 export async function claimAllBattlePassRewards(
   options: {
     shouldSkipArpBoosts?: boolean;
@@ -1200,8 +1204,8 @@ export function battlePassReadyNonArp(
 }
 
 /**
- * True while ARP Boosts should stay unclaimed until All-ARP% is equipped.
- */
+True while ARP Boosts should stay unclaimed until All-ARP% is equipped.
+*/
 export function shouldSkipArpInBattlePassClaimAll(
   battlePass: BattlePassState | undefined,
   shouldWaitForAllArpSwap: boolean,
@@ -1210,9 +1214,9 @@ export function shouldSkipArpInBattlePassClaimAll(
 }
 
 /**
- * Claim is offered when something is ready, except ARP-only while waiting
- * for an All-ARP% swap. Non-ARP rewards can still be claimed in that wait.
- */
+Claim is offered when something is ready, except ARP-only while waiting
+for an All-ARP% swap. Non-ARP rewards can still be claimed in that wait.
+*/
 export function shouldShowBattlePassClaimAll(
   battlePass: BattlePassState | undefined,
   shouldWaitForAllArpSwap: boolean,
@@ -1225,9 +1229,9 @@ export function shouldShowBattlePassClaimAll(
 }
 
 /**
- * Skip-ARP must not say "all" or bare "rewards" — that implies claiming the
- * ARP Boosts we are holding for All-ARP%.
- */
+Skip-ARP must not say "all" or bare "rewards" — that implies claiming the
+ARP Boosts we are holding for All-ARP%.
+*/
 export function battlePassClaimButtonLabel(
   shouldSkipArpBoosts: boolean,
   options?: { compact?: boolean },
@@ -1248,7 +1252,7 @@ export function isBattlePassDocumentReady(document_: Document): boolean {
   return Boolean(
     document_.querySelector(
       '.bp-popup[data-milestone-id], .bp-popup__claim-btn, .bp-popup__claimed',
-    ) || /Ready to claim/i.test(document_.body?.textContent ?? ''),
+    ) ?? /Ready to claim/i.test(documentBody(document_)?.textContent ?? ''),
   );
 }
 
@@ -1283,10 +1287,10 @@ export async function waitForBattlePassDocument(
 }
 
 /**
- * Claim buttons are removed and `.bp-popup__claimed` appears after a successful
- * claim. Persist ready counts whenever that DOM changes so CC / optimizer
- * don't keep stale "claim N boosts" todos.
- */
+Claim buttons are removed and `.bp-popup__claimed` appears after a successful
+claim. Persist ready counts whenever that DOM changes so CC / optimizer
+don't keep stale "claim N boosts" todos.
+*/
 export function battlePassClaimSignature(document_: Document): string {
   const { readyToClaim, readyToClaimArp } = countBattlePassClaims(document_);
   return `${readyToClaim}:${readyToClaimArp}`;

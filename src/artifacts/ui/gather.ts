@@ -1,4 +1,3 @@
-import { GM } from '$';
 import {
   ensureAchievementSnapshot,
   isAchievementsPage,
@@ -76,10 +75,10 @@ export function isSiteStatePage(): boolean {
 }
 
 /**
- * Live Showroom scrapes skip ensureArtifactSnapshot, so they never POST
- * Megumin's 0-frag upgrade. If the GM timer is already 0 and the page still
- * shows locked, Force-Refresh that path once before optimizing.
- */
+Live Showroom scrapes skip ensureArtifactSnapshot, so they never POST
+Megumin's 0-frag upgrade. If the GM timer is already 0 and the page still
+shows locked, Force-Refresh that path once before optimizing.
+*/
 async function snapshotAfterElapsedShowroomLock(
   snapshot: ArtifactSnapshot | undefined,
   settings: ArtifactOptimizerSettings,
@@ -108,7 +107,13 @@ async function snapshotAfterElapsedShowroomLock(
 }
 
 export function hasGmStorage(): boolean {
-  return typeof GM?.getValue === 'function';
+  const gm: unknown = Reflect.get(globalThis, 'GM');
+  return (
+    typeof gm === 'object' &&
+    gm !== null &&
+    'getValue' in gm &&
+    typeof gm.getValue === 'function'
+  );
 }
 
 function assertGmStorage(): void {
@@ -272,10 +277,10 @@ export function rememberGathered(data: GatheredData): GatheredData {
 }
 
 /**
- * Cache-only gather so a background AWA tab can arm notification timers.
- * Skips when GM is missing (dev HMR / stub without @grant) so we do not
- * paint the panel error on pages that never needed a gather.
- */
+Cache-only gather so a background AWA tab can arm notification timers.
+Skips when GM is missing (dev HMR / stub without @grant) so we do not
+paint the panel error on pages that never needed a gather.
+*/
 export async function warmNotificationSchedule(): Promise<void> {
   if (!hasGmStorage() || gatheredCache.current) {
     return;

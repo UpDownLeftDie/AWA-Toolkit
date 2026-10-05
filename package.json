@@ -26,9 +26,10 @@
     "@types/node": "^26.6.4",
     "@violentmonkey/types": "^0.3.4",
     "eslint": "^10.12.0",
+    "eslint-config-narwhal": "^2.1.0",
     "eslint-config-prettier": "^10.1.8",
     "eslint-plugin-sonarjs": "^4.2.2",
-    "eslint-plugin-unicorn": "^76.0.0",
+    "eslint-plugin-unicorn": "^77.0.0",
     "globals": "^17.13.0",
     "playwright-core": "^1.63.0",
     "postcss": "^8.5.28",
@@ -39,5 +40,5 @@
     "vite-plugin-monkey": "^8.1.1",
     "vitest": "^5.0.3"
   },
-  "packageManager": "pnpm@12.8.1"
+  "packageManager": "pnpm@12.9.1"
 }

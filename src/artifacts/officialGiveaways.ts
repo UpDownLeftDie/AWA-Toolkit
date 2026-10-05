@@ -32,7 +32,7 @@ function titleFromCard(element: HTMLElement): string {
   const heading = element.querySelector(
     "h1, h2, h3, h4, .giveaways__listing-post-title, .post-title, .tile-title",
   );
-  const headingText = heading?.textContent?.replaceAll(/\s+/g, " ").trim();
+  const headingText = heading?.textContent.replaceAll(/\s+/g, " ").trim();
   if (headingText) {
     return headingText;
   }
@@ -127,11 +127,11 @@ export function scrapeOfficialGiveawaysFromDocument(
     addGiveaway(
       found,
       link.href,
-      link.textContent?.replaceAll(/\s+/g, " ").trim() ?? "",
+      link.textContent.replaceAll(/\s+/g, " ").trim(),
     );
   }
 
-  const html = document_.documentElement?.getHTML() ?? "";
+  const html = document_.documentElement.getHTML();
   const hrefMatches = html.matchAll(
     new RegExp(SHOW_GIVEAWAY_HREF.source, "gi"),
   );
@@ -151,7 +151,7 @@ function scrapeLiveGiveaways(): OfficialGiveaway[] {
   const pageTitle =
     document
       .querySelector("h1, .ucf-title, .content-title")
-      ?.textContent?.replaceAll(/\s+/g, " ")
+      ?.textContent.replaceAll(/\s+/g, " ")
       .trim() ??
     document.title.split("|", 1)[0]?.trim() ??
     "";
@@ -172,7 +172,7 @@ function esiItemsFromPayload(data: unknown): EsiGiveawayItem[] {
     return data as EsiGiveawayItem[];
   }
   if (typeof data === "object" && data && "data" in data) {
-    const nested = (data as { data: unknown }).data;
+    const nested = (data).data;
     if (Array.isArray(nested)) {
       return nested as EsiGiveawayItem[];
     }
@@ -293,10 +293,10 @@ async function openGiveawayListingFrame(): Promise<Document | undefined> {
 }
 
 /**
- * Official key giveaways. Prefer the same ESI JSON the homepage tiles use;
- * `/ucf/Giveaway` HTML is a hydrated listing and is often empty over fetch.
- * Community giveaways are a different listing and are ignored.
- */
+Official key giveaways. Prefer the same ESI JSON the homepage tiles use;
+`/ucf/Giveaway` HTML is a hydrated listing and is often empty over fetch.
+Community giveaways are a different listing and are ignored.
+*/
 export async function loadOfficialGiveaways(): Promise<OfficialGiveaway[]> {
   const live = scrapeLiveGiveaways();
   try {

@@ -1,4 +1,5 @@
 import { applyAsceCommunityHours } from "../asce";
+import { documentBody } from "../../pageGlobals";
 import type { OptimizerResult } from "../optimizer";
 import { isArtifactsShowroomPage, waitForShowroomDocument } from "../scraper";
 import { areAccountActionsEnabled, areAchievementsEnabled, isAchievementsHelperFeatureEnabled } from "../settings";
@@ -125,7 +126,7 @@ function setOptimizerModalOpen(isOpen: boolean): void {
   }
 }
 
-type RefreshViewOptions = {
+interface RefreshViewOptions {
   remote?: boolean;
   /**
   Re-read the live page and await ASCE. Does not write Advanced settings —
@@ -136,7 +137,7 @@ type RefreshViewOptions = {
   Write Advanced form fields to GM before gathering (Save only).
   */
   persist?: boolean;
-};
+}
 
 type OptimizerModal = HTMLElement & {
   __aoRefresh?: (options?: RefreshViewOptions) => Promise<void>;
@@ -160,7 +161,7 @@ function resolveShowroomInsertTarget():
     }
   | undefined {
   const fragments = [...document.querySelectorAll("div, p, span")].find(
-    (element) => /^Fragments:\s*\d+/i.test(element.textContent?.trim() ?? ""),
+    (element) => /^Fragments:\s*\d+/i.test(element.textContent.trim()),
   );
   let target: Element | undefined =
     fragments ?? document.querySelector("#weapon-section") ?? undefined;
@@ -275,18 +276,18 @@ function bindModalEvents(
 }
 
 /**
- * Drop any leftover dialog from older script versions (light DOM without shadow).
- */
+Drop any leftover dialog from older script versions (light DOM without shadow).
+*/
 function destroyOptimizerModal(): void {
   document.querySelector(`#${MODAL_ID}`)?.remove();
   document.querySelector(`#${BACKDROP_ID}`)?.remove();
 }
 
 /**
- * Prepare styles only. The dialog DOM is created the first time it is opened
- * so a failed stylesheet can never leave a visible overlay on page load.
- */
-export async function createOptimizerModal(): Promise<void> {
+Prepare styles only. The dialog DOM is created the first time it is opened
+so a failed stylesheet can never leave a visible overlay on page load.
+*/
+export function createOptimizerModal(): void {
   destroyOptimizerModal();
   ensureOptimizerStyles();
 }
@@ -382,7 +383,7 @@ function watchOptimizerMenuButton(): void {
 }
 
 function parkElement(element: HTMLElement): void {
-  const parent = document.body ?? document.documentElement;
+  const parent = documentBody() ?? document.documentElement;
   if (element.parentElement !== parent) {
     parent.prepend(element);
   }
@@ -473,7 +474,7 @@ function findAchievementsMount(): HTMLElement | undefined {
   );
 }
 
-async function waitForAchievementsMount(timeoutMs = 12_000): Promise<void> {
+async function waitForAchievementsMount(): Promise<void> {
   if (findAchievementsMount()) {
     return;
   }
@@ -484,7 +485,7 @@ async function waitForAchievementsMount(timeoutMs = 12_000): Promise<void> {
         finish();
       }
     });
-    const timer = setTimeout(finish, timeoutMs);
+    const timer = setTimeout(finish, 12_000);
     function finish(): void {
       if (isSettled) {
         return;
@@ -951,15 +952,15 @@ function paintControlCenterPanel(
   });
   // No-op: handleUpgradeClick already force-reinjects this same panel after
   // onChanged resolves, so refreshing it here too would just double-fetch.
-  bindUpgradeButtons(tree, async () => {});
+  bindUpgradeButtons(tree, () => Promise.resolve());
   bindClaimAllButtons(tree);
   bindOpenTwitchButtons(tree);
   bindVaultDiscountActions(tree, () => {
     void injectControlCenterPanel({ force: true });
   });
-  bindAchievementOpenButtons(tree, async () => {
-    void injectControlCenterPanel({ force: true });
-  });
+  bindAchievementOpenButtons(tree, () =>
+    injectControlCenterPanel({ force: true }),
+  );
   tree.querySelector("#ao-cc-artifacts")?.addEventListener("click", () => {
     location.assign("/user-artifacts-room");
   });
@@ -1003,9 +1004,9 @@ export async function injectControlCenterPanel(
 }
 
 /**
- * Re-paint from GM after a Showroom resync. Does not Force-Refresh (no
- * stuck-lock nudge). If the snapshot was marked stale, hydrate will scrape.
- */
+Re-paint from GM after a Showroom resync. Does not Force-Refresh (no
+stuck-lock nudge). If the snapshot was marked stale, hydrate will scrape.
+*/
 export async function reloadOptimizerFromCache(): Promise<void> {
   const ccPanel = document.querySelector<HTMLElement>(`#${CC_PANEL_ID}`);
   if (ccPanel) {
@@ -1097,9 +1098,10 @@ function renderBattlePassClaimBarBody(): string {
   const live = scrapeBattlePassFromDocument(document);
   const cached = gatheredCache.current;
   const battlePass = live ?? cached?.siteState.battlePass;
+  const claimButtonCount = listBattlePassClaimButtons().length;
   const count =
     live?.readyToClaim ??
-    (listBattlePassClaimButtons().length || battlePass?.readyToClaim || 0);
+    (claimButtonCount > 0 ? claimButtonCount : (battlePass?.readyToClaim ?? 0));
   if (count <= 0) {
     return `
       <div class="ao-heading">Battle Pass</div>
@@ -1216,12 +1218,12 @@ function paintAchievementsPanel(
   tree.querySelector("#ao-ach-refresh")?.addEventListener("click", () => {
     void injectAchievementsPanel({ force: true });
   });
-  bindAchievementOpenButtons(tree, async () => {
-    void injectAchievementsPanel({ force: true });
-  });
-  bindAchievementAutomationSwitches(tree, async () => {
-    void injectAchievementsPanel({ force: true });
-  });
+  bindAchievementOpenButtons(tree, () =>
+    injectAchievementsPanel({ force: true }),
+  );
+  bindAchievementAutomationSwitches(tree, () =>
+    injectAchievementsPanel({ force: true }),
+  );
 }
 
 export async function injectAchievementsPanel(
@@ -1246,7 +1248,7 @@ export async function injectAchievementsPanel(
   }
 }
 
-export async function initArtifactOptimizer(): Promise<void> {
+export function initArtifactOptimizer(): void {
   ensureOptimizerStyles();
   watchOptimizerMenuButton();
 
@@ -1302,6 +1304,6 @@ export async function initArtifactOptimizer(): Promise<void> {
     }
   }
 
-  await createOptimizerModal();
+  createOptimizerModal();
   void warmNotificationSchedule();
 }

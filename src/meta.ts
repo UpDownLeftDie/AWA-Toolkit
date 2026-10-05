@@ -1,16 +1,16 @@
 import type { MonkeyUserScript } from 'vite-plugin-monkey';
 
-const repoUrl = 'https://github.com/UpDownLeftDie/AWA-Toolkit';
+const repositoryUrl = 'https://github.com/UpDownLeftDie/AWA-Toolkit';
 
 const metadata: MonkeyUserScript = {
   name: 'AWA Toolkit',
-  namespace: repoUrl,
-  homepageURL: repoUrl,
-  supportURL: `${repoUrl}/issues`,
+  namespace: repositoryUrl,
+  homepageURL: repositoryUrl,
+  supportURL: `${repositoryUrl}/issues`,
   icon: 'https://raw.githubusercontent.com/UpDownLeftDie/AWA-Toolkit/main/icon.png',
   icon64:
     'https://raw.githubusercontent.com/UpDownLeftDie/AWA-Toolkit/main/icon64.png',
-  version: '2.3.1',
+  version: '2.3.2',
   description:
     'Artifact Optimizer, Control Center tasks, giveaway/vault filters, and UCF reading mode',
   match: ['*://*.alienwarearena.com/*'],

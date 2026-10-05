@@ -74,7 +74,7 @@ function parseTwitchArpStatus(document_: Document): {
   const status =
     document_
       .querySelector('#control-center__twitch-arp-status')
-      ?.textContent?.trim() ?? '';
+      ?.textContent.trim() ?? '';
   const incompleteArp = /^Incomplete:\s*(\d+)\s*ARP/i.exec(status);
   if (incompleteArp?.[1] !== undefined) {
     return { cap: 'available', earnedArp: Number(incompleteArp[1]) };
@@ -98,7 +98,7 @@ function readWatchTwitchCapFromDocument(
   }
 
   const card = findActivityCard(document_, /^Watch Twitch$/i);
-  if (card && /Incomplete/i.test(card.textContent ?? '')) {
+  if (card && /Incomplete/i.test(card.textContent)) {
     return 'available';
   }
 
@@ -107,7 +107,7 @@ function readWatchTwitchCapFromDocument(
   );
   return maxReached &&
     !isElementVisiblyHidden(maxReached) &&
-    /Max Cap Reached/i.test(maxReached.textContent ?? '') ? 'capped' : readWatchTwitchCap(pageText(document_));
+    /Max Cap Reached/i.test(maxReached.textContent) ? 'capped' : readWatchTwitchCap(pageText(document_));
 }
 
 function readWatchTwitchCap(body: string): CapStatus | undefined {
@@ -145,7 +145,7 @@ function parseDailyArpTwitchData(
   document_: Document,
 ): DailyArpTwitchData | undefined {
   const scripts = [...document_.querySelectorAll('script:not([src])')]
-    .map((script) => script.textContent ?? '')
+    .map((script) => script.textContent)
     .join('\n');
   const assignment = /dailyArpData\s*=\s*(\{[\s\S]*?\});/.exec(scripts)?.[1];
   if (!assignment) {
@@ -160,7 +160,7 @@ function parseDailyArpTwitchData(
   if (!parsed || typeof parsed !== 'object' || !('twitchData' in parsed)) {
     return undefined;
   }
-  const twitch = (parsed as { twitchData: unknown }).twitchData;
+  const twitch = (parsed).twitchData;
   if (!twitch || typeof twitch !== 'object') {
     return undefined;
   }
@@ -277,18 +277,18 @@ export function twitchWatchRemainingMs(
   // was already collected (Complete: 30 ARP with +15 still equipped).
   if (
     state?.caps.watchTwitch === 'capped' ||
-    (isFreshProgress && progress && !progress.isUnderCap)
+    (isFreshProgress && !progress.isUnderCap)
   ) {
     return 0;
   }
   // Watch Twitch resets at 00:00 UTC — ignore earn counts scraped yesterday.
-  const earned = isFreshProgress && progress ? progress.baseArp : 0;
+  const earned = isFreshProgress ? progress.baseArp : 0;
   return Math.max(0, baseCap + twitchFlat - earned) * TWITCH_MS_PER_ARP;
 }
 
 function readQuestStatusesFromCard(card: Element): CapStatus | undefined {
   const statuses = [...card.querySelectorAll('td, th, span, div, li')]
-    .map((element) => element.textContent?.trim() ?? '')
+    .map((element) => element.textContent.trim())
     .filter((text) => /^(Incomplete|Complete)$/i.test(text));
   if (statuses.some((status) => /^Incomplete$/i.test(status))) {
     return 'available';
@@ -296,7 +296,7 @@ function readQuestStatusesFromCard(card: Element): CapStatus | undefined {
   if (statuses.some((status) => /^Complete$/i.test(status))) {
     return 'capped';
   }
-  const text = card.textContent ?? '';
+  const text = card.textContent;
   if (/Incomplete/i.test(text)) {
     return 'available';
   }
@@ -334,7 +334,7 @@ function readSteamQuestsCapFromDocument(
   const fromRows = steamQuestsCapFromRows(
     scrapeSteamQuestRowsFromDocument(document_),
   );
-  return fromRows || readCapFromCardOrText(
+  return fromRows ?? readCapFromCardOrText(
     document_,
     /^Steam Quests$/i,
     readSteamQuestsCap,
@@ -361,7 +361,7 @@ function readDailyQuestsCapFromDocument(
   const fromRows = dailyQuestsCapFromRows(
     scrapeDailyQuestRowsFromDocument(document_),
   );
-  return fromRows || readCapFromCardOrText(
+  return fromRows ?? readCapFromCardOrText(
     document_,
     /^Daily Quests$/i,
     readDailyQuestsCap,
@@ -406,7 +406,7 @@ function readDailyCalendarCapFromDocument(
     return undefined;
   }
   const claimControl = [...card.querySelectorAll('button, a')].find((element) =>
-    /^claim$/i.test(element.textContent?.trim() ?? ''),
+    /^claim$/i.test(element.textContent.trim()),
   );
   if (!claimControl) {
     return 'capped';
@@ -422,32 +422,32 @@ function isDiscordPollEntry(entry: { action: string }): boolean {
 }
 
 /**
- * Daily Login Calendar / Streak stamp at 00:00 UTC, so they sit *under* a
- * Discord Poll voted later that morning. They must not disqualify a
- * day-boundary carryover once today's 16:00 UTC poll posts.
- */
+Daily Login Calendar / Streak stamp at 00:00 UTC, so they sit *under* a
+Discord Poll voted later that morning. They must not disqualify a
+day-boundary carryover once today's 16:00 UTC poll posts.
+*/
 function isUtcMidnightDailyEntry(entry: { action: string }): boolean {
   return /Daily Login (?:Calendar|Streak)/i.test(entry.action);
 }
 
 /**
- * ARP Log only stores a UTC date, not a time. Voting the previous weekday
- * poll after 00:00 UTC stamps today's date — and once today's poll posts at
- * 16:00 UTC that row looks like a vote for the new poll.
- *
- * Detect that carryover when the Discord Poll row is the first *daytime*
- * stamp of the UTC day (newest-first: the next older non-login row is a
- * prior date). Midnight login rows beneath it are ignored. A real same-day
- * vote after the post usually has Time on Site / Twitch / quests beneath
- * it, or the previous cycle already has its own Discord Poll row.
- */
+ARP Log only stores a UTC date, not a time. Voting the previous weekday
+poll after 00:00 UTC stamps today's date — and once today's poll posts at
+16:00 UTC that row looks like a vote for the new poll.
+
+Detect that carryover when the Discord Poll row is the first *daytime*
+stamp of the UTC day (newest-first: the next older non-login row is a
+prior date). Midnight login rows beneath it are ignored. A real same-day
+vote after the post usually has Time on Site / Twitch / quests beneath
+it, or the previous cycle already has its own Discord Poll row.
+*/
 function isLatePreviousPollStamp(
   recent: ArpLogState['recent'],
   index: number,
   pollStartDate: string,
 ): boolean {
   const entry = recent[index];
-  if (!entry || entry.date !== pollStartDate) {
+  if (entry?.date !== pollStartDate) {
     return false;
   }
   let isSawPreviousDay = false;
@@ -476,15 +476,15 @@ function previousDiscordPollStartDate(pollStart: Date): string {
 }
 
 /**
- * Discord Poll only reposts on weekdays (`lastDiscordPollPostAt`), so a vote
- * cast Friday is still "this poll" through the whole weekend — check from
- * the last post date, not just today, or a Friday vote reads as still
- * pending all weekend.
- *
- * Same-calendar-day late votes for the *previous* poll are filtered via
- * {@link isLatePreviousPollStamp} and prior-cycle coverage so they don't
- * mark the newly posted poll as done.
- */
+Discord Poll only reposts on weekdays (`lastDiscordPollPostAt`), so a vote
+cast Friday is still "this poll" through the whole weekend — check from
+the last post date, not just today, or a Friday vote reads as still
+pending all weekend.
+
+Same-calendar-day late votes for the *previous* poll are filtered via
+{@link isLatePreviousPollStamp} and prior-cycle coverage so they don't
+mark the newly posted poll as done.
+*/
 export function hasVotedCurrentDiscordPoll(
   arpLog: ArpLogState | undefined,
   now = new Date(),
@@ -518,11 +518,11 @@ export function hasVotedCurrentDiscordPoll(
 }
 
 /**
- * Mark activities complete when the ARP Log already shows the earn — for
- * Daily Login Calendar, Control Center renamed that UI often enough that the
- * log is the more reliable signal; for Discord Poll, Control Center never
- * surfaces it at all, so the log is the *only* signal.
- */
+Mark activities complete when the ARP Log already shows the earn — for
+Daily Login Calendar, Control Center renamed that UI often enough that the
+log is the more reliable signal; for Discord Poll, Control Center never
+surfaces it at all, so the log is the *only* signal.
+*/
 export function applyArpLogActivityCaps(
   caps: ActivityCapState,
   arpLog: ArpLogState | undefined,
@@ -592,15 +592,15 @@ export function isControlCenterDocumentReady(document_: Document): boolean {
 }
 
 /**
- * Twitch/ToS widgets exist in SSR empty; filled status text is the real paint.
- * `dailyArpData` is in the page immediately, so treating that as ready scrapes
- * before Complete/Incomplete exists and keeps a stale Watch Twitch step.
- * Remote HTML never hydrates — dailyArpData is all a fetch can see.
- */
+Twitch/ToS widgets exist in SSR empty; filled status text is the real paint.
+`dailyArpData` is in the page immediately, so treating that as ready scrapes
+before Complete/Incomplete exists and keeps a stale Watch Twitch step.
+Remote HTML never hydrates — dailyArpData is all a fetch can see.
+*/
 export function isControlCenterTwitchDataReady(document_: Document): boolean {
   const status = document_
     .querySelector('#control-center__twitch-arp-status')
-    ?.textContent?.trim();
+    ?.textContent.trim();
   return status ? true : document_ !== document && parseDailyArpTwitchData(document_) !== undefined;
 }
 

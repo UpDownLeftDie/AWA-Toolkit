@@ -60,6 +60,19 @@ export enum ArtifactTier {
   Interstellar = 5,
 }
 
+const ARTIFACT_TIERS = [
+  ArtifactTier.Rust,
+  ArtifactTier.Bronze,
+  ArtifactTier.Silver,
+  ArtifactTier.Gold,
+  ArtifactTier.Platinum,
+  ArtifactTier.Interstellar,
+] as const;
+
+export function artifactTierAt(index: number): ArtifactTier | undefined {
+  return ARTIFACT_TIERS[index];
+}
+
 export const TIER_LABELS: Record<ArtifactTier, string> = {
   [ArtifactTier.Rust]: "Rust",
   [ArtifactTier.Bronze]: "Bronze",
@@ -510,9 +523,9 @@ export const ARTIFACT_SETS: ArtifactSetDefinition[] = [
 ];
 
 /**
- * Base ARP rates for a single 24h swap window (artifacts can change once per day).
- * Weeklies are included only when that activity is still unfinished this period.
- */
+Base ARP rates for a single 24h swap window (artifacts can change once per day).
+Weeklies are included only when that activity is still unfinished this period.
+*/
 export const BASE_ACTIVITY = {
   /**
   Days scored per daily activity when still available.
@@ -675,9 +688,9 @@ export interface ArtifactNameEntry {
 }
 
 /**
- * Every known display name (tier names + Showroom aliases), longest first so
- * wrap/search matches "Pn295 Alloy" before a shorter family prefix.
- */
+Every known display name (tier names + Showroom aliases), longest first so
+wrap/search matches "Pn295 Alloy" before a shorter family prefix.
+*/
 export function listArtifactNameEntries(): readonly ArtifactNameEntry[] {
   const seen = new Set<string>();
   const entries: ArtifactNameEntry[] = [];
@@ -693,9 +706,10 @@ export function listArtifactNameEntries(): readonly ArtifactNameEntry[] {
     entries.push({ name, definition, tier });
   };
   for (const definition of ARTIFACTS) {
-    for (const [tier, name] of definition.tierNames.entries()) {
-      if (name) {
-        push(name, definition, tier as ArtifactTier);
+    for (const [index, name] of definition.tierNames.entries()) {
+      const tier = artifactTierAt(index);
+      if (name && tier !== undefined) {
+        push(name, definition, tier);
       }
     }
   }
@@ -722,22 +736,26 @@ export function resolveArtifactByDisplayName(
   }
 
   for (const definition of ARTIFACTS) {
-    const index = definition.tierNames.findIndex(
-      (name) => name?.toLowerCase() === displayName.toLowerCase(),
+    const tier = artifactTierAt(
+      definition.tierNames.findIndex(
+        (name) => name?.toLowerCase() === displayName.toLowerCase(),
+      ),
     );
-    if (index !== -1) {
-      return { definition, tier: index as ArtifactTier };
+    if (tier !== undefined) {
+      return { definition, tier };
     }
   }
 
   // Fuzzy: strip backticks / fancy apostrophes
   const normalized = normalizeName(displayName);
   for (const definition of ARTIFACTS) {
-    const index = definition.tierNames.findIndex(
-      (name) => name !== undefined && normalizeName(name) === normalized,
+    const tier = artifactTierAt(
+      definition.tierNames.findIndex(
+        (name) => name !== undefined && normalizeName(name) === normalized,
+      ),
     );
-    if (index !== -1) {
-      return { definition, tier: index as ArtifactTier };
+    if (tier !== undefined) {
+      return { definition, tier };
     }
   }
 
@@ -766,7 +784,8 @@ export function getNumericEffect(
 export function fragmentCostToUpgradeFrom(
   tier: ArtifactTier,
 ): number | undefined {
-  return tier >= ArtifactTier.Interstellar ? undefined : FRAGMENT_COST_TO_TIER[(tier + 1) as ArtifactTier];
+  const next = artifactTierAt(tier + 1);
+  return next === undefined ? undefined : FRAGMENT_COST_TO_TIER[next];
 }
 
 export function displayNameFor(
@@ -798,8 +817,8 @@ export function isUtcWeekday(date: Date): boolean {
 }
 
 /**
- * Next weekday 16:00 UTC poll post strictly after `now`.
- */
+Next weekday 16:00 UTC poll post strictly after `now`.
+*/
 export function nextDiscordPollPostAt(now = new Date()): Date {
   for (let offset = 0; offset <= 7; offset += 1) {
     const post = utcAtHour(
@@ -814,8 +833,8 @@ export function nextDiscordPollPostAt(now = new Date()): Date {
 }
 
 /**
- * Most recent weekday 16:00 UTC poll post at or before `now`.
- */
+Most recent weekday 16:00 UTC poll post at or before `now`.
+*/
 export function lastDiscordPollPostAt(now = new Date()): Date {
   for (let offset = 0; offset <= 7; offset += 1) {
     const post = utcAtHour(

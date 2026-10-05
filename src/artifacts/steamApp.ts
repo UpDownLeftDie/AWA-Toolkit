@@ -55,10 +55,10 @@ function parseSteamAppId(value: string | undefined): number | undefined {
 }
 
 /**
- * AWA quest pages use Steam CDN headers (`…/steam/apps/<id>/header.jpg`).
- * Community events expose `steam://run/<id>` when Launch Game is shown;
- * unowned pages typically use a store.steampowered.com/app/<id> link.
- */
+AWA quest pages use Steam CDN headers (`…/steam/apps/<id>/header.jpg`).
+Community events expose `steam://run/<id>` when Launch Game is shown;
+unowned pages typically use a store.steampowered.com/app/<id> link.
+*/
 export function scrapeSteamAppIdFromDocument(
   document_: Document,
 ): number | undefined {
@@ -84,10 +84,10 @@ export function scrapeSteamAppIdFromDocument(
 }
 
 /**
- * Steam Store appdetails (`is_free`, else a $0 / 100% off `price_overview`).
- * Permanently F2P games set `is_free: true` and often omit price.
- * Free weekends stay `is_free: false` with a $0 / 100% off price.
- */
+Steam Store appdetails (`is_free`, else a $0 / 100% off `price_overview`).
+Permanently F2P games set `is_free: true` and often omit price.
+Free weekends stay `is_free: false` with a $0 / 100% off price.
+*/
 function steamFreeFromDetails(data: SteamAppDetailsData): {
   isFree: boolean;
   permanent: boolean;
@@ -184,9 +184,9 @@ function fetchSteamAppDetailsBatch(
 }
 
 /**
- * At most one Steam store request per resolve, covering every unresolved app
- * ID. Fresh cache hits never hit the network.
- */
+At most one Steam store request per resolve, covering every unresolved app
+ID. Fresh cache hits never hit the network.
+*/
 async function lookupSteamIsCurrentlyFreeMany(
   appIds: number[],
 ): Promise<Map<number, boolean | undefined>> {
@@ -262,12 +262,12 @@ async function lookupSteamIsCurrentlyFreeManyUncached(
   return result;
 }
 
-type SteamFreeGate = {
+interface SteamFreeGate {
   eligibility: 'eligible' | 'ineligible' | 'unknown';
   steamAppId?: number;
   isFree?: boolean;
   libraryPending?: boolean;
-};
+}
 
 function requiresSteamFreeLookup(item: SteamFreeGate): boolean {
   return (
@@ -312,10 +312,10 @@ function applySteamFreeLookup<T extends SteamFreeGate>(
 }
 
 /**
- * Check Game / Visit Steam means Steam has not reported the game to AWA yet
- * (needs some playtime). Keep recommending if Steam lists it as free or $0.
- * One batched store request for whatever is still unresolved.
- */
+Check Game / Visit Steam means Steam has not reported the game to AWA yet
+(needs some playtime). Keep recommending if Steam lists it as free or $0.
+One batched store request for whatever is still unresolved.
+*/
 export async function resolveSiteStateSteamFreeToPlay(
   next: SiteState,
 ): Promise<void> {

@@ -34,19 +34,19 @@ const NOTIFY_ICON =
 const NOTIFY_TITLE = "AWA Toolkit";
 const FIRED_KEEP_MS = 48 * 60 * 60 * 1000;
 /**
- * Keep a shown notification after the tab dies (Violentmonkey). Tampermonkey
- * uses `tag` + `url` for the same persistence.
- */
+Keep a shown notification after the tab dies (Violentmonkey). Tampermonkey
+uses `tag` + `url` for the same persistence.
+*/
 const ZOMBIE_MS = 24 * 60 * 60 * 1000;
 const SHOWROOM_PATH = "/user-artifacts-room";
 const VAULT_PATH = "/game-vault";
 const CONTROL_CENTER_PATH = "/control-center";
 
-export type NotificationSource = {
+export interface NotificationSource {
   settings: ArtifactOptimizerSettings;
   result: OptimizerResult;
   siteState: SiteState;
-};
+}
 
 type NotifyKind = "swap" | "vault" | "community" | "giveaway";
 
@@ -244,7 +244,7 @@ async function saveNotifyLog(log: NotifyLog): Promise<void> {
 function pruneFired(log: NotifyLog, now: number): void {
   for (const [id, at] of Object.entries(log.fired)) {
     if (now - at > FIRED_KEEP_MS) {
-      delete log.fired[id];
+      Reflect.deleteProperty(log.fired, id);
     }
   }
 }
@@ -303,7 +303,8 @@ function didShowGmNotification(options: {
     return false;
   }
   try {
-    GM.notification({
+    // eslint-disable-next-line sonarjs/void-use -- no-floating-promises requires void here
+    void GM.notification({
       title: options.title,
       text: options.text,
       image: NOTIFY_ICON,
@@ -324,13 +325,13 @@ function didShowGmNotification(options: {
 }
 
 /**
- * Prefer the site Notification API when the user already clicked Allow —
- * that is the permission the opt-in prompt grants. GM.notification is a
- * different channel (userscript manager → OS) and can stay silent.
- *
- * Do not await `GM.notification()`: Tampermonkey's promise resolves when the
- * user clicks, which would stall the scheduler.
- */
+Prefer the site Notification API when the user already clicked Allow —
+that is the permission the opt-in prompt grants. GM.notification is a
+different channel (userscript manager → OS) and can stay silent.
+
+Do not await `GM.notification()`: Tampermonkey's promise resolves when the
+user clicks, which would stall the scheduler.
+*/
 function didShowBrowserNotification(options: {
   title: string;
   text: string;
@@ -457,7 +458,7 @@ function collectUpcomingEvents(
   source: NotificationSource,
   now: number,
 ): ScheduledNotify[] {
-  const events: Array<ScheduledNotify | undefined> = [];
+  const events: (ScheduledNotify | undefined)[] = [];
   if (isKindEnabled(source, "swap")) {
     events.push(swapNotifyEvent(source, now));
   }
@@ -641,22 +642,22 @@ function mergeUpcomingIntoLog(
       event.fireAt = Math.min(event.fireAt, now);
       continue;
     }
-    delete log.scheduled[id];
+    Reflect.deleteProperty(log.scheduled, id);
   }
 }
 
-async function didFireDueEvents(
+function didFireDueEvents(
   log: NotifyLog,
   source: NotificationSource,
   generation: number,
   now: number,
-): Promise<boolean> {
+): boolean {
   for (const [id, event] of Object.entries(log.scheduled)) {
     if (event.fireAt > now) {
       continue;
     }
     if (log.fired[id] !== undefined || !isEventStillRelevant(event, source)) {
-      delete log.scheduled[id];
+      Reflect.deleteProperty(log.scheduled, id);
       continue;
     }
     if (generation !== notifyRuntime.syncGeneration) {
@@ -671,7 +672,7 @@ async function didFireDueEvents(
     if (didFire) {
       log.fired[id] = Date.now();
     }
-    delete log.scheduled[id];
+    Reflect.deleteProperty(log.scheduled, id);
   }
   return true;
 }
@@ -774,7 +775,7 @@ async function syncBrowserNotifications(
     return;
   }
   mergeUpcomingIntoLog(log, upcoming, source, now);
-  const didFinish = await didFireDueEvents(log, source, generation, now);
+  const didFinish = didFireDueEvents(log, source, generation, now);
   if (!didFinish) {
     return;
   }
@@ -787,19 +788,19 @@ async function syncBrowserNotifications(
 }
 
 /**
- * Recompute upcoming notifications from the latest optimizer snapshot.
- * No-op when the setting is off.
- */
+Recompute upcoming notifications from the latest optimizer snapshot.
+No-op when the setting is off.
+*/
 export function scheduleBrowserNotifications(source: NotificationSource): void {
   notifyRuntime.lastSource = source;
   void syncBrowserNotifications(source);
 }
 
 /**
- * Ask the site for the HTML5 Notification permission so the browser shows
- * its Allow / Block prompt. GM.notification uses the userscript manager and
- * never shows that prompt on its own.
- */
+Ask the site for the HTML5 Notification permission so the browser shows
+its Allow / Block prompt. GM.notification uses the userscript manager and
+never shows that prompt on its own.
+*/
 async function didGrantWebNotificationPermission(): Promise<boolean> {
   if (typeof Notification === "undefined") {
     return typeof GM.notification === "function";
@@ -829,8 +830,8 @@ async function didDisableBrowserNotifications(): Promise<boolean> {
 }
 
 /**
- * Turn the setting on or off. Enabling asks for permission and sends a test ping.
- */
+Turn the setting on or off. Enabling asks for permission and sends a test ping.
+*/
 export async function didSetBrowserNotifications(
   isEnabled: boolean,
   source?: NotificationSource,

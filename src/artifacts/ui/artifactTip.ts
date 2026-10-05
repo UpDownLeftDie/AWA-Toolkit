@@ -168,8 +168,8 @@ function nextArtifactNameMatch(
 }
 
 /**
- * Escape `text` and wrap known artifact display names in hover-tip spans.
- */
+Escape `text` and wrap known artifact display names in hover-tip spans.
+*/
 export function wrapArtifactNames(text: string): string {
   const entries = listArtifactNameEntries();
   let remaining = text;
@@ -301,9 +301,9 @@ function bindWindowTipDismiss(): void {
 }
 
 /**
- * Hover/focus a floating tip for `.ao-artifact-tip` names inside `root`
- * (light DOM or a shadow root). Safe to call more than once.
- */
+Hover/focus a floating tip for `.ao-artifact-tip` names inside `root`
+(light DOM or a shadow root). Safe to call more than once.
+*/
 export function bindArtifactTips(root: EventTarget): void {
   if (boundTipRoots.has(root)) {
     return;

@@ -1,17 +1,16 @@
-import js from '@eslint/js';
-import prettier from 'eslint-config-prettier';
-import sonarjs from 'eslint-plugin-sonarjs';
-import unicorn from 'eslint-plugin-unicorn';
+import narwhal from 'eslint-config-narwhal';
 import globals from 'globals';
 import ts from 'typescript-eslint';
 
 /** @type {import('eslint').Linter.Config[]} */
 export default [
-  js.configs.recommended,
-  ...ts.configs.recommended,
-  sonarjs.configs.recommended,
-  unicorn.configs.recommended,
-  prettier,
+  ...narwhal({
+    typescript: true,
+    typechecked: true,
+    strict: true,
+    stylistic: true,
+    prettier: true,
+  }),
   // recommendedTypeChecked[0] is parser-only. tsconfigRootDir keeps
   // projectService rooted on this package so the IDE matches CLI types.
   {
@@ -39,6 +38,12 @@ export default [
       '@typescript-eslint/no-unsafe-member-access': 'warn',
       '@typescript-eslint/no-unsafe-return': 'warn',
       '@typescript-eslint/no-explicit-any': 'error',
+      // Strict turns allowNumber off. Counts, prices, and status codes are
+      // interpolated all over the UI; String() at each site adds nothing.
+      '@typescript-eslint/restrict-template-expressions': [
+        'error',
+        { allowNumber: true },
+      ],
       '@typescript-eslint/no-non-null-assertion': 'error',
       'no-magic-numbers': [
         'warn',

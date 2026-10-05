@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         AWA Toolkit
 // @namespace    https://github.com/UpDownLeftDie/AWA-Toolkit
-// @version      2.3.1
+// @version      2.3.2
 // @author       jaredcat
 // @description  Artifact Optimizer, Control Center tasks, giveaway/vault filters, and UCF reading mode
 // @license      AGPL-3.0-or-later
@@ -29,6 +29,115 @@
 	var _GM = (() => typeof GM != "undefined" ? GM : void 0)();
 	var _GM_xmlhttpRequest = (() => typeof GM_xmlhttpRequest != "undefined" ? GM_xmlhttpRequest : void 0)();
 	var _unsafeWindow = (() => typeof unsafeWindow != "undefined" ? unsafeWindow : void 0)();
+	function pageWindow() {
+		try {
+			return _unsafeWindow;
+		} catch {}
+		return globalThis;
+	}
+	function optionalDocumentNode(document_, key) {
+		const value = Reflect.get(document_, key);
+		if (typeof value !== "object" || !value) return;
+		return value;
+	}
+	function documentBody(document_ = document) {
+		return optionalDocumentNode(document_, "body");
+	}
+	function documentHead(document_ = document) {
+		return optionalDocumentNode(document_, "head");
+	}
+	function firstNonEmpty(...values) {
+		for (const value of values) if (typeof value === "string" && value !== "") return value;
+		return "";
+	}
+	function asFiniteNumber(value) {
+		if (typeof value === "number" && Number.isFinite(value)) return value;
+		if (typeof value === "string" && value.trim() !== "") {
+			const parsed = Number(value.replaceAll(",", ""));
+			if (Number.isFinite(parsed)) return parsed;
+		}
+	}
+	function readPageNumber(name) {
+		try {
+			return asFiniteNumber(Reflect.get(pageWindow(), name));
+		} catch {
+			return;
+		}
+	}
+	function parseInlineNumber(document_, names) {
+		const pattern = new RegExp(String.raw`(?:var\s+|window\.)?(?:${names.join("|")})\s*=\s*(\d+)`);
+		for (const script of document_.querySelectorAll("script")) {
+			const match = pattern.exec(script.textContent);
+			if (match?.[1]) return Number(match[1]);
+		}
+	}
+	function readPageArpTier(document_ = document) {
+		if (document_ === document) {
+			const tier = readPageNumber("arp_tier");
+			if (tier !== void 0 && tier >= 0) return tier;
+		}
+		const fromScript = parseInlineNumber(document_, ["arp_tier"]);
+		if (fromScript !== void 0) return fromScript;
+		const tierImg = document_.querySelector("img[src*=\"/images/content/tier-tags/\"]");
+		const tierMatch = /tier-tags\/(\d+)\.png/.exec(tierImg?.src ?? "");
+		if (!tierMatch?.[1]) return;
+		const tier = Number(tierMatch[1]);
+		return Number.isFinite(tier) ? tier : void 0;
+	}
+	function readPageFragmentBalance(document_ = document) {
+		if (document_ === document) {
+			const fragments = readPageNumber("fragment_balance");
+			if (fragments !== void 0 && fragments >= 0) return fragments;
+		}
+		const fromScript = parseInlineNumber(document_, ["fragment_balance"]);
+		return fromScript !== void 0 && fromScript >= 0 ? fromScript : void 0;
+	}
+	function readPageRedeemableArp(document_ = document) {
+		const names = [
+			"arp_balance",
+			"user_arp",
+			"arp_points",
+			"redeemable_arp"
+		];
+		if (document_ === document) for (const name of names) {
+			const value = readPageNumber(name);
+			if (value !== void 0 && value >= 0) return value;
+		}
+		const fromScript = parseInlineNumber(document_, names);
+		return fromScript !== void 0 && fromScript >= 0 ? fromScript : void 0;
+	}
+	function giveawayKeyFromUnknown(value) {
+		if (typeof value !== "object" || !value) return;
+		const row = value;
+		const id = row.giveaway_id ?? row.giveawayId ?? row.id;
+		if (typeof id !== "string" && typeof id !== "number") return;
+		const status = typeof row.status === "string" ? row.status : "";
+		const entry = {
+			giveawayId: String(id),
+			status
+		};
+		const remaining = asFiniteNumber(row.remaining);
+		if (remaining !== void 0) entry.remaining = remaining;
+		return entry;
+	}
+	function readPageGiveawayKeys() {
+		let raw;
+		try {
+			raw = pageWindow().giveawayKeys;
+		} catch {
+			return [];
+		}
+		if (!Array.isArray(raw)) return [];
+		const keys = [];
+		for (const item of raw) {
+			const entry = giveawayKeyFromUnknown(item);
+			if (entry) keys.push(entry);
+		}
+		return keys;
+	}
+	function giveawayKeyStatus(giveawayId) {
+		return readPageGiveawayKeys().find((entry) => entry.giveawayId === giveawayId);
+	}
 	var STEAM_FREE_CACHE_KEY = "steamAppFreeCache";
 	var STEAM_FREE_TTL_PERMANENT_MS = 6048e5;
 	var STEAM_FREE_TTL_PRICE_MS = 864e5;
@@ -230,7 +339,7 @@
 		};
 	}
 	function pageText(document_ = document) {
-		return document_.body?.textContent ?? "";
+		return documentBody(document_)?.textContent ?? "";
 	}
 	function isElementDisplayNone(element) {
 		const styleAttribute = element.getAttribute("style") ?? "";
@@ -250,10 +359,10 @@
 		return false;
 	}
 	function controlLabel(element) {
-		return (element.textContent ?? "").replaceAll(/\s+/g, " ").trim();
+		return element.textContent.replaceAll(/\s+/g, " ").trim();
 	}
 	function findActivityCard(document_, title) {
-		const header = [...document_.querySelectorAll("h2, h3, h4")].find((element) => title.test(element.textContent?.trim() ?? ""));
+		const header = [...document_.querySelectorAll("h2, h3, h4")].find((element) => title.test(element.textContent.trim()));
 		return header ? header.closest(".user-profile__profile-card, .aa-card, [class*=\"profile-card\"]") ?? header.parentElement?.parentElement ?? void 0 : void 0;
 	}
 	function utcDateString$1(date = new Date()) {
@@ -299,6 +408,17 @@
 		ArtifactTier[ArtifactTier["Interstellar"] = 5] = "Interstellar";
 		return ArtifactTier;
 	}({});
+	var ARTIFACT_TIERS = [
+		0,
+		1,
+		2,
+		3,
+		4,
+		5
+	];
+	function artifactTierAt(index) {
+		return ARTIFACT_TIERS[index];
+	}
 	var TIER_LABELS = {
 		[0]: "Rust",
 		[1]: "Bronze",
@@ -952,7 +1072,10 @@
 				tier
 			});
 		};
-		for (const definition of ARTIFACTS) for (const [tier, name] of definition.tierNames.entries()) if (name) push(name, definition, tier);
+		for (const definition of ARTIFACTS) for (const [index, name] of definition.tierNames.entries()) {
+			const tier = artifactTierAt(index);
+			if (name && tier !== void 0) push(name, definition, tier);
+		}
 		for (const [name, alias] of Object.entries(TIER_NAME_ALIASES)) {
 			const definition = getArtifactById(alias.id);
 			if (definition) push(name, definition, alias.tier);
@@ -969,18 +1092,18 @@
 			};
 		}
 		for (const definition of ARTIFACTS) {
-			const index = definition.tierNames.findIndex((name) => name?.toLowerCase() === displayName.toLowerCase());
-			if (index !== -1) return {
+			const tier = artifactTierAt(definition.tierNames.findIndex((name) => name?.toLowerCase() === displayName.toLowerCase()));
+			if (tier !== void 0) return {
 				definition,
-				tier: index
+				tier
 			};
 		}
 		const normalized = normalizeName$1(displayName);
 		for (const definition of ARTIFACTS) {
-			const index = definition.tierNames.findIndex((name) => name !== void 0 && normalizeName$1(name) === normalized);
-			if (index !== -1) return {
+			const tier = artifactTierAt(definition.tierNames.findIndex((name) => name !== void 0 && normalizeName$1(name) === normalized));
+			if (tier !== void 0) return {
 				definition,
-				tier: index
+				tier
 			};
 		}
 	}
@@ -993,7 +1116,8 @@
 		return typeof value === "number" ? value : 0;
 	}
 	function fragmentCostToUpgradeFrom(tier) {
-		return tier >= 5 ? void 0 : FRAGMENT_COST_TO_TIER[tier + 1];
+		const next = artifactTierAt(tier + 1);
+		return next === void 0 ? void 0 : FRAGMENT_COST_TO_TIER[next];
 	}
 	function displayNameFor(definition, tier) {
 		return definition.tierNames[tier] ?? definition.id;
@@ -1082,31 +1206,31 @@
 		const row = statusCell.closest("tr") ?? statusCell.parentElement;
 		if (!row) return;
 		const questLink = row.querySelector("a[href*=\"/steam/quests/\"]");
-		const name = questLink?.textContent?.replaceAll(/\s+/g, " ").trim() || row.querySelector("a")?.textContent?.replaceAll(/\s+/g, " ").trim();
+		const name = firstNonEmpty(questLink?.textContent.replaceAll(/\s+/g, " ").trim(), row.querySelector("a")?.textContent.replaceAll(/\s+/g, " ").trim());
 		if (!name) return;
-		const rewardArp = parseSteamQuestRewardArp((id ? card.querySelector(`#control-center__steam-quest-reward-${id}`) : void 0)?.textContent ?? row.textContent ?? "");
+		const rewardArp = parseSteamQuestRewardArp((id ? card.querySelector(`#control-center__steam-quest-reward-${id}`) : void 0)?.textContent ?? row.textContent);
 		if (rewardArp === void 0) return;
 		const href = pathnameFromHref$1(questLink?.getAttribute("href") ?? void 0);
 		return buildSteamQuestRow({
 			name,
 			rewardArp,
-			statusText: statusCell.textContent?.trim() ?? "",
+			statusText: statusCell.textContent.trim(),
 			...id && { id },
 			...href && { href }
 		});
 	}
 	function parseSteamQuestRowFromTableRow(row) {
 		const questLink = row.querySelector("a[href*=\"/steam/quests/\"]");
-		const name = questLink?.textContent?.replaceAll(/\s+/g, " ").trim();
+		const name = questLink?.textContent.replaceAll(/\s+/g, " ").trim();
 		if (!name) return;
-		const rewardArp = parseSteamQuestRewardArp(row.textContent ?? "");
+		const rewardArp = parseSteamQuestRewardArp(row.textContent);
 		if (rewardArp === void 0) return;
-		const statusCell = [...row.querySelectorAll("td")].find((cell) => steamQuestStatusFromText(cell.textContent ?? ""));
+		const statusCell = [...row.querySelectorAll("td")].find((cell) => steamQuestStatusFromText(cell.textContent));
 		const href = pathnameFromHref$1(questLink?.getAttribute("href") ?? void 0);
 		return buildSteamQuestRow({
 			name,
 			rewardArp,
-			statusText: statusCell?.textContent?.trim() ?? "",
+			statusText: statusCell?.textContent.trim() ?? "",
 			...href && { href }
 		});
 	}
@@ -1147,8 +1271,7 @@
 		return remainingSteamQuestRowsFromList(siteState.steamQuests?.quests ?? []);
 	}
 	function remainingSteamQuestRewards(siteState) {
-		const scraped = scrapedRemainingSteamQuestRewards(siteState);
-		return scraped === void 0 ? [...BASE_ACTIVITY.steamQuestBases] : scraped;
+		return scrapedRemainingSteamQuestRewards(siteState) ?? [...BASE_ACTIVITY.steamQuestBases];
 	}
 	function scrapedRemainingSteamQuestRewards(siteState) {
 		const quests = siteState.steamQuests?.quests;
@@ -1215,11 +1338,11 @@
 		return event?.playEligibility !== "ineligible";
 	}
 	function scrapeLiveCommunityEventBanner(document_) {
-		const bannerLink = document_.querySelector(":scope a.community-event-banner") ?? document_.querySelector(":scope .community-event-banner a[href*='/steam/community-event/']") ?? [...document_.querySelectorAll(":scope a[href*='/steam/community-event/']")].find((link) => /LIVE/i.test(link.textContent ?? ""));
+		const bannerLink = document_.querySelector(":scope a.community-event-banner") ?? document_.querySelector(":scope .community-event-banner a[href*='/steam/community-event/']") ?? [...document_.querySelectorAll(":scope a[href*='/steam/community-event/']")].find((link) => /LIVE/i.test(link.textContent));
 		if (!bannerLink?.href) return;
-		const path = bannerLink.pathname || bannerLink.getAttribute("href") || "";
+		const path = firstNonEmpty(bannerLink.pathname, bannerLink.getAttribute("href"));
 		if (!path.includes("/steam/community-event/")) return;
-		const title = bannerLink.textContent?.replaceAll(/\s+/g, " ").trim();
+		const title = bannerLink.textContent.replaceAll(/\s+/g, " ").trim();
 		const result = { url: path };
 		if (title) result.title = title;
 		return result;
@@ -1714,15 +1837,15 @@
 		const needle = `${label}:`;
 		const other = label === "Personal" ? "Community:" : "Personal:";
 		const scope = [...cell.querySelectorAll("p, div, li, span, tr, td")].find((node) => {
-			const text = node.textContent ?? "";
+			const text = node.textContent;
 			return text.includes(needle) && !text.includes(other);
-		}) ?? [...cell.querySelectorAll("p, div, li, span, tr, td")].find((node) => (node.textContent ?? "").includes(needle)) ?? cell;
-		return scope.querySelector(".fa-check, .fa-check-circle, .bi-check, .bi-check-lg") ? true : /[✓✔]/.test(scope.textContent ?? "");
+		}) ?? cell;
+		return scope.querySelector(".fa-check, .fa-check-circle, .bi-check, .bi-check-lg") ? true : /[✓✔]/.test(scope.textContent);
 	}
 	function milestoneCellText(cell) {
-		const parts = [cell.textContent ?? ""];
+		const parts = [cell.textContent];
 		const sibling = cell.nextElementSibling;
-		if (sibling && !sibling.classList.contains("carousel-cell")) parts.push(sibling.textContent ?? "");
+		if (sibling && !sibling.classList.contains("carousel-cell")) parts.push(sibling.textContent);
 		return parts.join(" ").replaceAll(/\s+/g, " ").trim();
 	}
 	function parseMilestoneCell(cell) {
@@ -1739,7 +1862,7 @@
 			index,
 			personalHoursRequired,
 			arpReward,
-			rewardLabel: cell.querySelector(":scope h3")?.textContent?.trim() || cell.querySelector(":scope img[alt]")?.getAttribute("alt") || (arpReward > 0 ? `${arpReward} ARP` : "Reward"),
+			rewardLabel: firstNonEmpty(cell.querySelector(":scope h3")?.textContent.trim(), cell.querySelector(":scope img[alt]")?.getAttribute("alt"), arpReward > 0 ? `${arpReward} ARP` : "Reward"),
 			isCommunityUnlocked: /Community Unlocked/i.test(text) || isLabeledRowComplete(cell, "Community"),
 			isAwarded: /\bAwarded\b/i.test(text) && !/\bNot\s+Awarded\b/i.test(text)
 		};
@@ -1748,7 +1871,7 @@
 		return milestone;
 	}
 	function parseCommunityEventPersonalHours(document_) {
-		const hoursFromDom = document_.querySelector("#personal-hours")?.textContent?.trim();
+		const hoursFromDom = document_.querySelector("#personal-hours")?.textContent.trim();
 		if (hoursFromDom && /\d/.test(hoursFromDom)) {
 			const fromDom = Number(hoursFromDom);
 			if (Number.isFinite(fromDom)) return fromDom;
@@ -1759,7 +1882,7 @@
 			const fromText = Number(hoursFromText);
 			if (Number.isFinite(fromText)) return fromText;
 		}
-		const scriptSource = [...document_.querySelectorAll("script:not([src])")].map((script) => script.textContent ?? "").join("\n");
+		const scriptSource = [...document_.querySelectorAll("script:not([src])")].map((script) => script.textContent).join("\n");
 		const minutesMatch = /personalPlaytime\s*=\s*(\d+)/i.exec(scriptSource) ?? /personalPlaytime\s*=\s*(\d+)/i.exec(body);
 		return minutesMatch?.[1] ? Math.floor(Number(minutesMatch[1]) / 60) : 0;
 	}
@@ -1821,7 +1944,7 @@
 		};
 	}
 	function parseCommunityEventProgress(document_) {
-		const candidates = [...document_.querySelectorAll("b, strong, .progress, .event-progress")].map((node) => node.textContent?.trim() ?? "");
+		const candidates = [...document_.querySelectorAll("b, strong, .progress, .event-progress")].map((node) => node.textContent.trim());
 		candidates.push(pageText(document_));
 		for (const text of candidates) {
 			const parsed = parseHoursOfCap(text);
@@ -1844,9 +1967,9 @@
 		return title.length > 0 ? title : void 0;
 	}
 	function parseCommunityEventTitle(document_) {
-		const fromDocumentTitle = parseCommunityEventTitleFromDocumentTitle(document_.title?.replaceAll(/\s+/g, " ").trim() ?? "");
+		const fromDocumentTitle = parseCommunityEventTitleFromDocumentTitle(document_.title.replaceAll(/\s+/g, " ").trim());
 		if (fromDocumentTitle) return fromDocumentTitle;
-		const fromEventLabel = document_.querySelector(".event-title-date, :scope .community-event-view .event-name")?.textContent?.replaceAll(/\s+/g, " ").trim();
+		const fromEventLabel = document_.querySelector(".event-title-date, :scope .community-event-view .event-name")?.textContent.replaceAll(/\s+/g, " ").trim();
 		return fromEventLabel && !isCommunityEventLiveDateBar(fromEventLabel) ? fromEventLabel : void 0;
 	}
 	function isCommunityEventLiveDateBar(text) {
@@ -1856,7 +1979,7 @@
 	function readCommunityEventLiveBadge(document_) {
 		if (document_.querySelector(".event-closed")) return false;
 		if (document_.querySelector(".live-text")) return true;
-		return isCommunityEventLiveDateBar(document_.querySelector(".event-title-date, .live-container")?.textContent?.replaceAll(/\s+/g, " ").trim() ?? "") || void 0;
+		return isCommunityEventLiveDateBar(document_.querySelector(".event-title-date, .live-container")?.textContent.replaceAll(/\s+/g, " ").trim() ?? "") || void 0;
 	}
 	function scrapeCommunityEventFromDocument(document_, url) {
 		const personalHours = parseCommunityEventPersonalHours(document_);
@@ -2179,100 +2302,6 @@
 		const next = state.communityEvent;
 		return next ? asceEventSignature(next) !== before : false;
 	}
-	function pageWindow() {
-		try {
-			return _unsafeWindow;
-		} catch {}
-		return globalThis;
-	}
-	function asFiniteNumber(value) {
-		if (typeof value === "number" && Number.isFinite(value)) return value;
-		if (typeof value === "string" && value.trim() !== "") {
-			const parsed = Number(value.replaceAll(",", ""));
-			if (Number.isFinite(parsed)) return parsed;
-		}
-	}
-	function readPageNumber(name) {
-		try {
-			return asFiniteNumber(pageWindow()[name]);
-		} catch {
-			return;
-		}
-	}
-	function parseInlineNumber(document_, names) {
-		const pattern = new RegExp(String.raw`(?:var\s+|window\.)?(?:${names.join("|")})\s*=\s*(\d+)`);
-		for (const script of document_.querySelectorAll("script")) {
-			const match = pattern.exec(script.textContent ?? "");
-			if (match?.[1]) return Number(match[1]);
-		}
-	}
-	function readPageArpTier(document_ = document) {
-		if (document_ === document) {
-			const tier = readPageNumber("arp_tier");
-			if (tier !== void 0 && tier >= 0) return tier;
-		}
-		const fromScript = parseInlineNumber(document_, ["arp_tier"]);
-		if (fromScript !== void 0) return fromScript;
-		const tierImg = document_.querySelector("img[src*=\"/images/content/tier-tags/\"]");
-		const tierMatch = /tier-tags\/(\d+)\.png/.exec(tierImg?.src ?? "");
-		if (!tierMatch?.[1]) return;
-		const tier = Number(tierMatch[1]);
-		return Number.isFinite(tier) ? tier : void 0;
-	}
-	function readPageFragmentBalance(document_ = document) {
-		if (document_ === document) {
-			const fragments = readPageNumber("fragment_balance");
-			if (fragments !== void 0 && fragments >= 0) return fragments;
-		}
-		const fromScript = parseInlineNumber(document_, ["fragment_balance"]);
-		return fromScript !== void 0 && fromScript >= 0 ? fromScript : void 0;
-	}
-	function readPageRedeemableArp(document_ = document) {
-		const names = [
-			"arp_balance",
-			"user_arp",
-			"arp_points",
-			"redeemable_arp"
-		];
-		if (document_ === document) for (const name of names) {
-			const value = readPageNumber(name);
-			if (value !== void 0 && value >= 0) return value;
-		}
-		const fromScript = parseInlineNumber(document_, names);
-		return fromScript !== void 0 && fromScript >= 0 ? fromScript : void 0;
-	}
-	function giveawayKeyFromUnknown(value) {
-		if (typeof value !== "object" || !value) return;
-		const row = value;
-		const id = row.giveaway_id ?? row.giveawayId ?? row.id;
-		if (typeof id !== "string" && typeof id !== "number") return;
-		const status = typeof row.status === "string" ? row.status : "";
-		const entry = {
-			giveawayId: String(id),
-			status
-		};
-		const remaining = asFiniteNumber(row.remaining);
-		if (remaining !== void 0) entry.remaining = remaining;
-		return entry;
-	}
-	function readPageGiveawayKeys() {
-		let raw;
-		try {
-			raw = pageWindow().giveawayKeys;
-		} catch {
-			return [];
-		}
-		if (!Array.isArray(raw)) return [];
-		const keys = [];
-		for (const item of raw) {
-			const entry = giveawayKeyFromUnknown(item);
-			if (entry) keys.push(entry);
-		}
-		return keys;
-	}
-	function giveawayKeyStatus(giveawayId) {
-		return readPageGiveawayKeys().find((entry) => entry.giveawayId === giveawayId);
-	}
 	var SETTINGS_KEY$1 = "artifactOptimizerSettings";
 	var HOURS_PER_DAY = 24;
 	var MS_PER_HOUR$1 = 36e5;
@@ -2524,7 +2553,7 @@
 		if (JSON.stringify(previous) !== JSON.stringify(next)) await saveArtifactSettings({ slotCooldowns: next });
 	}
 	function isNotificationTypeEnabled(settings, key) {
-		return settings.notificationTypes[key] ?? true;
+		return settings.notificationTypes[key];
 	}
 	function areAccountActionsEnabled(settings) {
 		return settings.allowAccountActions;
@@ -2556,7 +2585,8 @@
 		if (!snapshot) return;
 		const current = snapshot.artifacts.find((artifact) => artifact.instanceId === instanceId);
 		if (!current || current.tier >= ArtifactTier.Interstellar) return snapshot;
-		const toTier = current.tier + 1;
+		const toTier = artifactTierAt(current.tier + 1);
+		if (toTier === void 0) return snapshot;
 		const family = getArtifactById(current.familyId);
 		const cost = current.upgradeCost ?? fragmentCostToUpgradeFrom(current.tier) ?? 0;
 		const upgraded = {
@@ -2580,7 +2610,7 @@
 	function readFragmentBalance(document_) {
 		const fromPage = readPageFragmentBalance(document_);
 		if (fromPage !== void 0) return fromPage;
-		const text = document_.body?.textContent ?? "";
+		const text = documentBody(document_)?.textContent ?? "";
 		const match = /Fragments:\s*([\d,]+)/i.exec(text);
 		return match?.[1] ? Number(match[1].replaceAll(",", "")) : 0;
 	}
@@ -2593,10 +2623,11 @@
 	function readUsername() {
 		return readUsernameFrom(document);
 	}
+	var USER_ARTIFACTS_ROOM_PATH = "/user-artifacts-room";
 	function resolveShowroomUrl(username) {
 		const name = username ?? readUsername();
 		if (name) return `/member/${encodeURIComponent(name)}/artifacts`;
-		return document.querySelector("a[href*=\"/member/\"][href$=\"/artifacts\"]")?.pathname || "/user-artifacts-room";
+		return firstNonEmpty(document.querySelector("a[href*=\"/member/\"][href$=\"/artifacts\"]")?.pathname, USER_ARTIFACTS_ROOM_PATH);
 	}
 	function parseEquippedPosition(card) {
 		const unequip = card.parentElement?.querySelector("button[onclick*=\"unequipArtifact\"]");
@@ -2676,7 +2707,7 @@
 			}
 			const upgradeCostRaw = card.dataset.upgradeCost;
 			const parsedUpgradeCost = upgradeCostRaw === void 0 || upgradeCostRaw === "" ? void 0 : Number(upgradeCostRaw);
-			const upgradeCost = Number.isNaN(parsedUpgradeCost) ? void 0 : parsedUpgradeCost;
+			const upgradeCost = parsedUpgradeCost === void 0 || Number.isNaN(parsedUpgradeCost) ? void 0 : parsedUpgradeCost;
 			const isMaxLevel = card.dataset.maxLevel === "true" || card.dataset.maxLevel === "1" || upgradeCost === 0;
 			const owned = {
 				instanceId,
@@ -2744,7 +2775,7 @@
 		return snapshot;
 	}
 	function isArtifactsShowroomPage() {
-		const pathname = globalThis.location?.pathname ?? "";
+		const pathname = location.pathname;
 		return /\/member\/[^/]+\/artifacts\/?$/.test(pathname) || /\/user-artifacts-room\/?$/.test(pathname);
 	}
 	var ARP_LOG_ROW_SELECTOR = ".card-table-row";
@@ -2759,8 +2790,7 @@
 		return Number.isFinite(value) ? value : void 0;
 	}
 	function scrapeRedeemableArpFromDocument(document_) {
-		const fromPage = readPageRedeemableArp(document_);
-		return fromPage === void 0 ? parseRedeemableArpText(pageText(document_)) : fromPage;
+		return readPageRedeemableArp(document_) ?? parseRedeemableArpText(pageText(document_));
 	}
 	function applyRedeemableArpFromDocument(next, document_) {
 		const arp = scrapeRedeemableArpFromDocument(document_);
@@ -2779,7 +2809,7 @@
 	function scrapeArpLogRowsFromTable(document_) {
 		const entries = [];
 		for (const row of document_.querySelectorAll(ARP_LOG_ROW_SELECTOR)) {
-			const cols = [...row.children].map((element) => (element.textContent ?? "").replaceAll(/\s+/g, " ").trim());
+			const cols = [...row.children].map((element) => element.textContent.replaceAll(/\s+/g, " ").trim());
 			const date = cols.find((col) => ARP_LOG_DATE_RE.test(col));
 			const arpText = cols.findLast((col) => col !== date && ARP_LOG_AMOUNT_RE.test(col));
 			const action = cols.find((col) => col.length > 0 && col !== date && col !== arpText && !ARP_LOG_TOGGLE_RE.test(col));
@@ -2827,7 +2857,7 @@
 		return entries;
 	}
 	function isArpLogDocumentReady(document_) {
-		return document_.body ? Boolean(document_.querySelector(`${ARP_LOG_ROW_SELECTOR}, ${ARP_LOG_AFTER_ROWS_SELECTOR}`)) : false;
+		return documentBody(document_) ? Boolean(document_.querySelector(`${ARP_LOG_ROW_SELECTOR}, ${ARP_LOG_AFTER_ROWS_SELECTOR}`)) : false;
 	}
 	function arpLogSignature(document_) {
 		return isArpLogDocumentReady(document_) ? scrapeArpLogFromDocument(document_).recent.map((entry) => `${entry.date ?? ""}|${entry.action}|${entry.arp}`).join(";") : "";
@@ -3112,7 +3142,7 @@
 			battlePassSeasonId(options.knownUrl),
 			battlePassSeasonId(battlePassPathFromDocument(options.hintDocument)),
 			battlePassSeasonId(battlePassPathFromDocument(document)),
-			battlePassSeasonId(globalThis.location?.pathname)
+			battlePassSeasonId(location.pathname)
 		].filter((seasonId) => seasonId !== void 0);
 		const newest = await newestLiveSeasonId(hintedIds.length > 0 ? Math.max(...hintedIds) : 1, options.isLiveSeason ?? isLivePublicBattlePassSeason);
 		const path = newest === void 0 ? battlePassControlCenterPath(options.knownUrl) : `/control-center/battle-pass/${newest}`;
@@ -3131,7 +3161,7 @@
 		const tokensMatch = /BATTLE TOKENS\s*([\d,]+)\s*\/\s*([\d,]+)/i.exec(body);
 		if ((body.match(/Ready to claim/gi) ?? []).length === 0 && popups.length === 0) return;
 		if (isStaticBattlePassPreview(document_)) return;
-		const url = battlePassControlCenterPath(pageUrl) ?? battlePassPathFromDocument(document_) ?? battlePassControlCenterPath(globalThis.location?.pathname);
+		const url = battlePassControlCenterPath(pageUrl) ?? battlePassPathFromDocument(document_) ?? battlePassControlCenterPath(location.pathname);
 		if (!url) return;
 		const readyClaims = listReadyClaimsFromDocument(document_);
 		const { readyToClaim, readyToClaimArp } = countBattlePassClaims(document_);
@@ -3155,7 +3185,7 @@
 	}
 	var BATTLE_PASS_ENDS_RE = /battle\s*pass\s*ends?\s*in\s*(\d{1,3}(?:\s*:\s*\d{1,2}){2,3})/i;
 	function numberFromElement(document_, selector) {
-		const raw = document_.querySelector(selector)?.textContent?.replaceAll(",", "").trim();
+		const raw = document_.querySelector(selector)?.textContent.replaceAll(",", "").trim();
 		if (!raw || !/^\d+$/.test(raw)) return;
 		return Number(raw);
 	}
@@ -3227,7 +3257,8 @@
 	}
 	function readyClaimFromButton(button, popup) {
 		const form = button.closest("form");
-		const claimPath = form?.getAttribute("action")?.trim() || void 0;
+		const trimmedPath = form?.getAttribute("action")?.trim();
+		const claimPath = trimmedPath === "" ? void 0 : trimmedPath;
 		const csrfToken = form?.querySelector("input[name=\"_csrf_token\"]")?.value;
 		const claim = {
 			milestoneId: (form instanceof HTMLElement ? form.dataset.milestoneId : void 0) ?? popup.dataset.milestoneId ?? "",
@@ -3263,7 +3294,7 @@
 		return /^\d[\d,]*\s*ARP$/i.test(title.trim());
 	}
 	function battlePassPopupTitle(popup) {
-		return popup.querySelector(".bp-popup__title")?.textContent?.trim() ?? "";
+		return popup.querySelector(".bp-popup__title")?.textContent.trim() ?? "";
 	}
 	function isArpClaimPopup(popup) {
 		return isBattlePassArpRewardTitle(battlePassPopupTitle(popup));
@@ -3283,7 +3314,7 @@
 		return unique;
 	}
 	function claimButtonIdentity(button, popup) {
-		return button.closest("form")?.getAttribute("action")?.trim() || popup.dataset.milestoneId || "";
+		return firstNonEmpty(button.closest("form")?.getAttribute("action")?.trim(), popup.dataset.milestoneId);
 	}
 	function pushUniqueClaimButton(items, seen, button, popup) {
 		if (!(button instanceof HTMLElement)) return;
@@ -3313,9 +3344,9 @@
 		});
 	}
 	var CLAIM_QUEUE_GAP_MS = 1500;
-	async function waitWhile(isWaiting, timeoutMs, intervalMs = 100) {
+	async function waitWhile(isWaiting, timeoutMs) {
 		const startedAt = Date.now();
-		while (isWaiting() && Date.now() - startedAt < timeoutMs) await delay$3(intervalMs);
+		while (isWaiting() && Date.now() - startedAt < timeoutMs) await delay$3(100);
 	}
 	var claimEndpointCache = {};
 	function jsonishId(value) {
@@ -3332,9 +3363,9 @@
 	function isBattlePassClaimPath(path) {
 		const normalized = path.toLowerCase();
 		if (/giveaway|marketplace|ucf\/show|community-giveaway|vote\//.test(normalized)) return false;
-		const hasClaim = /claim/.test(normalized);
+		const hasClaim = normalized.includes("claim");
 		const hasBattlePass = /battle-?pass/.test(normalized);
-		const hasMilestone = /milestone/.test(normalized);
+		const hasMilestone = normalized.includes("milestone");
 		return hasClaim && (hasBattlePass || hasMilestone);
 	}
 	function endpointFromHref(raw) {
@@ -3413,7 +3444,7 @@
 		}
 	}
 	function collectInlineScriptText(document_) {
-		return [...document_.querySelectorAll("script:not([src])")].map((script) => script.textContent ?? "").join("\n");
+		return [...document_.querySelectorAll("script:not([src])")].map((script) => script.textContent).join("\n");
 	}
 	function pageScriptUrls(document_) {
 		const urls = [];
@@ -3433,7 +3464,7 @@
 		const readEvents = document_.defaultView?.jQuery?._data;
 		if (typeof readEvents !== "function") return;
 		const roots = [...document_.querySelectorAll(".bp-popup__claim-btn"), document_];
-		if (document_.body) roots.push(document_.body);
+		if (documentBody(document_)) roots.push(document_.body);
 		for (const root of roots) {
 			const found = endpointFromScripts((readEvents(root, "events")?.click ?? []).map((entry) => String(entry.handler ?? "")).join("\n"));
 			if (found) return found;
@@ -3448,7 +3479,7 @@
 		} catch {}
 	}
 	async function fetchBattlePassDocument(path) {
-		const resolved = path ?? await discoverBattlePassPath({ knownUrl: battlePassControlCenterPath(globalThis.location?.pathname) });
+		const resolved = path ?? await discoverBattlePassPath({ knownUrl: battlePassControlCenterPath(location.pathname) });
 		if (!resolved) return;
 		try {
 			const response = await fetch(resolved, { headers: { Accept: "text/html" } });
@@ -3622,7 +3653,7 @@
 		return location.pathname.includes("/battle-pass") ? scrapeBattlePassFromDocument(document, location.pathname) : void 0;
 	}
 	function isBattlePassDocumentReady(document_) {
-		return Boolean(document_.querySelector(".bp-popup[data-milestone-id], .bp-popup__claim-btn, .bp-popup__claimed") || /Ready to claim/i.test(document_.body?.textContent ?? ""));
+		return Boolean(document_.querySelector(".bp-popup[data-milestone-id], .bp-popup__claim-btn, .bp-popup__claimed") ?? /Ready to claim/i.test(documentBody(document_)?.textContent ?? ""));
 	}
 	async function waitForBattlePassDocument(timeoutMs = 12e3) {
 		if (isBattlePassDocumentReady(document)) return;
@@ -3661,8 +3692,8 @@
 		if (/^complete$/i.test(trimmed)) return "complete";
 		return /^incomplete$/i.test(trimmed) ? "incomplete" : void 0;
 	}
-	function dailyQuestKind(name, href) {
-		return /weekend/i.test(`${name} ${href ?? ""}`) ? "weekend" : "daily";
+	function dailyQuestKind(name, href = "") {
+		return /weekend/i.test(`${name} ${href}`) ? "weekend" : "daily";
 	}
 	function pathnameFromHref(href) {
 		if (!href) return;
@@ -3677,13 +3708,13 @@
 			const href = link.getAttribute("href") ?? "";
 			return /\/quests\//i.test(href) && !/\/steam\/quests\//i.test(href);
 		})?.textContent ?? row.querySelector("a")?.textContent ?? [...row.querySelectorAll("td")].find((cell) => {
-			const text = cell.textContent?.replaceAll(/\s+/g, " ").trim() ?? "";
+			const text = cell.textContent.replaceAll(/\s+/g, " ").trim();
 			return text.length > 0 && !dailyQuestStatusFromText(text);
 		})?.textContent)?.replaceAll(/\s+/g, " ").trim();
 		return !name || HEADER_NAME.test(name) ? void 0 : name;
 	}
 	function statusTextFromRow(row) {
-		return [...row.querySelectorAll("td, th, span, div")].find((cell) => dailyQuestStatusFromText(cell.textContent ?? ""))?.textContent?.trim() ?? "";
+		return [...row.querySelectorAll("td, th, span, div")].find((cell) => dailyQuestStatusFromText(cell.textContent))?.textContent.trim() ?? "";
 	}
 	function buildDailyQuestRow(row, statusText) {
 		const name = questNameFromRow(row);
@@ -3700,7 +3731,7 @@
 	}
 	function parseDailyQuestRowFromStatusCell(statusCell) {
 		const row = statusCell.closest("tr") ?? statusCell.parentElement;
-		return row ? buildDailyQuestRow(row, statusCell.textContent?.trim() ?? "") : void 0;
+		return row ? buildDailyQuestRow(row, statusCell.textContent.trim()) : void 0;
 	}
 	function parseDailyQuestRowFromTableRow(row) {
 		return buildDailyQuestRow(row, statusTextFromRow(row));
@@ -3744,7 +3775,7 @@
 		return earnedArp >= capArp ? "capped" : "available";
 	}
 	function parseTwitchArpStatus(document_) {
-		const status = document_.querySelector("#control-center__twitch-arp-status")?.textContent?.trim() ?? "";
+		const status = document_.querySelector("#control-center__twitch-arp-status")?.textContent.trim() ?? "";
 		const incompleteArp = /^Incomplete:\s*(\d+)\s*ARP/i.exec(status);
 		if (incompleteArp?.[1] !== void 0) return {
 			cap: "available",
@@ -3762,9 +3793,9 @@
 		const fromStatus = parseTwitchArpStatus(document_).cap;
 		if (fromStatus) return fromStatus;
 		const card = findActivityCard(document_, /^Watch Twitch$/i);
-		if (card && /Incomplete/i.test(card.textContent ?? "")) return "available";
+		if (card && /Incomplete/i.test(card.textContent)) return "available";
 		const maxReached = document_.querySelector("#control-center__twitch-max-reached");
-		return maxReached && !isElementVisiblyHidden(maxReached) && /Max Cap Reached/i.test(maxReached.textContent ?? "") ? "capped" : readWatchTwitchCap(pageText(document_));
+		return maxReached && !isElementVisiblyHidden(maxReached) && /Max Cap Reached/i.test(maxReached.textContent) ? "capped" : readWatchTwitchCap(pageText(document_));
 	}
 	function readWatchTwitchCap(body) {
 		if (/Watch Twitch[\s\S]{0,400}?Incomplete:\s*\d+\s*ARP/i.test(body)) return "available";
@@ -3774,7 +3805,7 @@
 	}
 	var TWITCH_MS_PER_ARP$2 = 6e4;
 	function parseDailyArpTwitchData(document_) {
-		const scripts = [...document_.querySelectorAll("script:not([src])")].map((script) => script.textContent ?? "").join("\n");
+		const scripts = [...document_.querySelectorAll("script:not([src])")].map((script) => script.textContent).join("\n");
 		const assignment = /dailyArpData\s*=\s*(\{[\s\S]*?\});/.exec(scripts)?.[1];
 		if (!assignment) return;
 		let parsed;
@@ -3843,15 +3874,15 @@
 		const progress = state?.watchTwitch;
 		const baseCap = progress?.capArp ?? BASE_ACTIVITY.watchTwitchBasePerDay;
 		const isFreshProgress = progress !== void 0 && utcDateString$1(new Date(progress.scrapedAt)) === utcDateString$1(now);
-		if (state?.caps.watchTwitch === "capped" || isFreshProgress && progress && !progress.isUnderCap) return 0;
-		const earned = isFreshProgress && progress ? progress.baseArp : 0;
+		if (state?.caps.watchTwitch === "capped" || isFreshProgress && !progress.isUnderCap) return 0;
+		const earned = isFreshProgress ? progress.baseArp : 0;
 		return Math.max(0, baseCap + twitchFlat - earned) * TWITCH_MS_PER_ARP$2;
 	}
 	function readQuestStatusesFromCard(card) {
-		const statuses = [...card.querySelectorAll("td, th, span, div, li")].map((element) => element.textContent?.trim() ?? "").filter((text) => /^(Incomplete|Complete)$/i.test(text));
+		const statuses = [...card.querySelectorAll("td, th, span, div, li")].map((element) => element.textContent.trim()).filter((text) => /^(Incomplete|Complete)$/i.test(text));
 		if (statuses.some((status) => /^Incomplete$/i.test(status))) return "available";
 		if (statuses.some((status) => /^Complete$/i.test(status))) return "capped";
-		const text = card.textContent ?? "";
+		const text = card.textContent;
 		if (/Incomplete/i.test(text)) return "available";
 		return /\bComplete\b/i.test(text) ? "capped" : void 0;
 	}
@@ -3867,7 +3898,7 @@
 		return card ? readQuestStatusesFromCard(card) ?? textFallback(pageText(document_)) : textFallback(pageText(document_));
 	}
 	function readSteamQuestsCapFromDocument(document_) {
-		return steamQuestsCapFromRows(scrapeSteamQuestRowsFromDocument(document_)) || readCapFromCardOrText(document_, /^Steam Quests$/i, readSteamQuestsCap);
+		return steamQuestsCapFromRows(scrapeSteamQuestRowsFromDocument(document_)) ?? readCapFromCardOrText(document_, /^Steam Quests$/i, readSteamQuestsCap);
 	}
 	function readDailyQuestsCap(body) {
 		const section = /Daily Quests([\s\S]{0,1200}?)(?=Steam Quests|Watch Twitch|OLD SCHOOL|Community Event|$)/i.exec(body);
@@ -3876,7 +3907,7 @@
 		return /\bComplete\b/i.test(section[1]) ? "capped" : void 0;
 	}
 	function readDailyQuestsCapFromDocument(document_) {
-		return dailyQuestsCapFromRows(scrapeDailyQuestRowsFromDocument(document_)) || readCapFromCardOrText(document_, /^Daily Quests$/i, readDailyQuestsCap);
+		return dailyQuestsCapFromRows(scrapeDailyQuestRowsFromDocument(document_)) ?? readCapFromCardOrText(document_, /^Daily Quests$/i, readDailyQuestsCap);
 	}
 	function readDailyCalendarCap(body) {
 		if (/Daily Login Calendar[\s\S]{0,120}Claimed/i.test(body)) return "capped";
@@ -3891,7 +3922,7 @@
 		if (fromText) return fromText;
 		const card = findActivityCard(document_, /^(Today'?s Reward|28-Day Daily Login Rewards|Daily Login)/i);
 		if (!card) return;
-		const claimControl = [...card.querySelectorAll("button, a")].find((element) => /^claim$/i.test(element.textContent?.trim() ?? ""));
+		const claimControl = [...card.querySelectorAll("button, a")].find((element) => /^claim$/i.test(element.textContent.trim()));
 		if (!claimControl) return "capped";
 		if (claimControl instanceof HTMLButtonElement && claimControl.disabled) return "capped";
 		return claimControl.getAttribute("aria-disabled") === "true" ? "capped" : "available";
@@ -3903,8 +3934,7 @@
 		return /Daily Login (?:Calendar|Streak)/i.test(entry.action);
 	}
 	function isLatePreviousPollStamp(recent, index, pollStartDate) {
-		const entry = recent[index];
-		if (!entry || entry.date !== pollStartDate) return false;
+		if (recent[index]?.date !== pollStartDate) return false;
 		let isSawPreviousDay = false;
 		for (let cursor = index + 1; cursor < recent.length; cursor += 1) {
 			const row = recent[cursor];
@@ -3965,7 +3995,7 @@
 		return Boolean(document_.querySelector(CONTROL_CENTER_WIDGET));
 	}
 	function isControlCenterTwitchDataReady(document_) {
-		return document_.querySelector("#control-center__twitch-arp-status")?.textContent?.trim() ? true : document_ !== document && parseDailyArpTwitchData(document_) !== void 0;
+		return document_.querySelector("#control-center__twitch-arp-status")?.textContent.trim() ? true : document_ !== document && parseDailyArpTwitchData(document_) !== void 0;
 	}
 	function isControlCenterActivityReady(document_) {
 		return isControlCenterDocumentReady(document_) && isControlCenterTwitchDataReady(document_);
@@ -4099,15 +4129,15 @@
 		return MONTHLY_VAULT_CLAIM_USED_RE.test(pageText(document_));
 	}
 	function isVaultCardClaimedByUser(item) {
-		return VAULT_CLAIMED_BADGE_RE.test((item.textContent ?? "").replaceAll(/\s+/g, " "));
+		return VAULT_CLAIMED_BADGE_RE.test(item.textContent.replaceAll(/\s+/g, " "));
 	}
 	function vaultCardName(item) {
-		return item.dataset.productName?.trim() || item.querySelector(".product-name, .gv-product-name, h3, h4")?.textContent?.trim() || item.getAttribute("title") || "Game Vault item";
+		return firstNonEmpty(item.dataset.productName?.trim(), item.querySelector(".product-name, .gv-product-name, h3, h4")?.textContent.trim(), item.getAttribute("title"), "Game Vault item");
 	}
 	function vaultCardPrice(item) {
 		const fromData = Number(item.dataset.productPrice);
 		if (Number.isFinite(fromData) && fromData > 0) return fromData;
-		const match = /(\d{1,7})\s*ARP/i.exec((item.textContent ?? "").replaceAll(/\s+/g, " "));
+		const match = /(\d{1,7})\s*ARP/i.exec(item.textContent.replaceAll(/\s+/g, " "));
 		if (!match?.[1]) return;
 		const price = Number(match[1].replaceAll(",", ""));
 		return Number.isFinite(price) && price > 0 ? price : void 0;
@@ -4149,7 +4179,7 @@
 	function hasVaultClaimActionFromDocument(document_) {
 		const cards = document_.querySelectorAll(VAULT_CARD_SELECTORS);
 		if (cards.length > 0) return [...cards].some((item) => {
-			const text = (item.textContent ?? "").replaceAll(/\s+/g, " ");
+			const text = item.textContent.replaceAll(/\s+/g, " ");
 			return VAULT_CLAIM_ACTION_RE.test(text) && !VAULT_CLAIMED_BADGE_RE.test(text);
 		});
 		const text = pageText(document_).replaceAll(/\s+/g, " ");
@@ -4234,8 +4264,8 @@
 	async function saveSiteState(state) {
 		await _GM.setValue(SITE_STATE_KEY, JSON.stringify(state));
 	}
-	function applyWatchTwitchFromDocument(next, document_) {
-		const progress = scrapeWatchTwitchProgressFromDocument(document_, next.watchTwitch);
+	function applyWatchTwitchFromDocument(next) {
+		const progress = scrapeWatchTwitchProgressFromDocument(document, next.watchTwitch);
 		if (progress) next.watchTwitch = progress;
 	}
 	function applyControlCenterPage(next) {
@@ -4243,7 +4273,7 @@
 		Object.assign(next.caps, scrapeControlCenterCaps());
 		applySteamQuestsFromDocument(next, document);
 		applyDailyQuestsFromDocument(next, document);
-		applyWatchTwitchFromDocument(next, document);
+		applyWatchTwitchFromDocument(next);
 		applyBattlePassEndFromDocument(next, document);
 		const banner = scrapeLiveCommunityEventBanner(document);
 		if (banner) {
@@ -4269,7 +4299,7 @@
 		if (userArpTier !== void 0) next.userArpTier = userArpTier;
 		applyRedeemableArpFromDocument(next, document);
 		if (path.includes("/control-center") && !path.includes("/battle-pass")) applyControlCenterPage(next);
-		if (path.includes("/steam/questsetup") || path.includes("/rewards/terms") || path.includes("/faq-contact")) applyWatchTwitchFromDocument(next, document);
+		if (path.includes("/steam/questsetup") || path.includes("/rewards/terms") || path.includes("/faq-contact")) applyWatchTwitchFromDocument(next);
 		if (path.includes("/marketplace") || path.includes("/game-vault")) applyGameVaultDocument(next, document);
 		if (path.includes("/battle-pass")) {
 			const battlePass = scrapeBattlePass();
@@ -4719,8 +4749,8 @@
 		const B = BASE_ACTIVITY;
 		const breakdown = {};
 		let flatSum = 0;
-		const isEnabled = (key) => (acts[key]?.enabled ?? false) && (acts[key]?.frequency ?? 0) > 0;
-		const freq = (key) => isEnabled(key) ? acts[key]?.frequency ?? 0 : 0;
+		const isEnabled = (key) => acts[key].enabled && acts[key].frequency > 0;
+		const freq = (key) => isEnabled(key) ? acts[key].frequency : 0;
 		if (isEnabled("timeOnSite")) {
 			const tosDays = completableUtcDayStarts(waitMs, TIME_ON_SITE_DURATION_MS$2, {
 				todayAvailable: isActivityAvailable(caps, "timeOnSite"),
@@ -4841,8 +4871,8 @@
 		for (const artifact of owned) {
 			if (artifact.tier >= ArtifactTier.Interstellar) continue;
 			const family = getArtifactById(artifact.familyId);
-			const toTier = artifact.tier + 1;
-			if (family?.effects[toTier] === void 0) continue;
+			const toTier = artifactTierAt(artifact.tier + 1);
+			if (toTier === void 0 || family?.effects[toTier] === void 0) continue;
 			const fragmentCost = artifact.upgradeCost ?? fragmentCostToUpgradeFrom(artifact.tier);
 			if (fragmentCost === void 0) continue;
 			const arpGain = monthlyUpgradeGain(artifact, toTier);
@@ -4906,7 +4936,7 @@
 				bonusArp: 0,
 				timeWatched: 0,
 				isUnderCap: true,
-				remainingMs: (watchTwitch.capArp ?? BASE_ACTIVITY.watchTwitchBasePerDay) * 6e4
+				remainingMs: watchTwitch.capArp * 6e4
 			} }
 		};
 	}
@@ -5891,7 +5921,7 @@
 		if (!style) {
 			style = document.createElement("style");
 			style.id = STYLE_ID$1;
-			(document.head || document.documentElement).append(style);
+			(documentHead() ?? document.documentElement).append(style);
 		}
 		style.textContent = buildOptimizerCss();
 	}
@@ -6705,13 +6735,13 @@
 		};
 		const best = result.best;
 		const current = result.current;
-		if (best && (best.allArpPct ?? 0) > (current?.allArpPct ?? 0) && swapWaitMs > 0) return {
+		if (best && best.allArpPct > (current?.allArpPct ?? 0) && swapWaitMs > 0) return {
 			stats: activityStatsForArtifacts(best.artifacts),
 			waitMs: swapWaitMs
 		};
 	}
 	function isActivityEnabled(settings, key) {
-		return settings.activities[key]?.enabled;
+		return settings.activities[key].enabled;
 	}
 	function communityEventTodoUrgency(pending, etaMs) {
 		if (pending.waitingPersonalArp > 0) return actionUrgency({
@@ -6753,15 +6783,16 @@
 		todos.push(todo);
 	}
 	function battlePassClaimCountLabel(readyAll, readyArp) {
-		if (readyArp <= 0) return readyAll === 1 ? "1 Battle Pass reward" : `${readyAll} Battle Pass rewards`;
-		if (readyAll === readyArp) return readyArp === 1 ? "1 Battle Pass ARP Boost" : `${readyArp} Battle Pass ARP Boosts`;
-		return `${readyAll} Battle Pass rewards (${readyArp === 1 ? "1 ARP Boost" : `${readyArp} ARP Boosts`})`;
+		if (readyArp <= 0) return readyAll === 1 ? "1 Battle Pass reward" : `${String(readyAll)} Battle Pass rewards`;
+		if (readyAll === readyArp) return readyArp === 1 ? "1 Battle Pass ARP Boost" : `${String(readyArp)} Battle Pass ARP Boosts`;
+		const boosts = readyArp === 1 ? "1 ARP Boost" : `${String(readyArp)} ARP Boosts`;
+		return `${String(readyAll)} Battle Pass rewards (${boosts})`;
 	}
 	function holdArpBoostReason(readyArp) {
-		return `Does not claim ${readyArp === 1 ? "1 ARP Boost" : `${readyArp} ARP Boosts`} — those wait for All-ARP%`;
+		return `Does not claim ${readyArp === 1 ? "1 ARP Boost" : `${String(readyArp)} ARP Boosts`} — those wait for All-ARP%`;
 	}
 	function nonArpBattlePassClaimLabel(nonArp) {
-		return nonArp === 1 ? "1 cosmetic / fragment" : `${nonArp} cosmetics / fragments`;
+		return nonArp === 1 ? "1 cosmetic / fragment" : `${String(nonArp)} cosmetics / fragments`;
 	}
 	function pushHeldArpBattlePassTodos(todos, siteState, readyArp, hasScheduledAllArp, allArpReadyAtMs = 0) {
 		const nonArp = battlePassReadyNonArp(siteState.battlePass);
@@ -6881,26 +6912,26 @@
 	function twitchArpReason(options) {
 		const arp = Math.round(options.watchRemainingMs / 6e4 * (1 + options.allArpPct));
 		if (arp <= 0) return;
-		if (options.upcomingReset === "utc") return { text: `+${arp} ARP after 00:00 UTC` };
+		if (options.upcomingReset === "utc") return { text: `+${String(arp)} ARP after 00:00 UTC` };
 		if (options.phase === "after" && options.waitMs > 0) {
 			const left = msAfterUnlockBeforeReset(options.waitMs);
-			if (left > 0) return { text: `+${arp} ARP (fits in ${formatMs(left)} before reset)` };
+			if (left > 0) return { text: `+${String(arp)} ARP (fits in ${formatMs(left)} before reset)` };
 		}
-		return { text: `+${arp} ARP` };
+		return { text: `+${String(arp)} ARP` };
 	}
 	function discordPollActivityLabel(bonus, options) {
 		if (options.phase === "after") return "Vote Discord Poll";
-		const bonusPart = bonus > 0 ? ` (+${bonus} equipped bonus)` : "";
+		const bonusPart = bonus > 0 ? ` (+${String(bonus)} equipped bonus)` : "";
 		const nextPost = formatMs(msUntilNextDiscordPollPost());
 		if (options.phase === "before") return `Vote Discord Poll now — next post in ${nextPost}${bonusPart}`;
 		return `Vote Discord Poll${options.beforeSwap ? " before swapping" : ""}${bonusPart}`;
 	}
 	function steamQuestCountLabel(count) {
 		if (count === 1) return "1 Steam Quest";
-		return count > 1 ? `${count} Steam Quests` : "Steam Quest(s)";
+		return count > 1 ? `${String(count)} Steam Quests` : "Steam Quest(s)";
 	}
 	function steamQuestsActivityLabel(bonus, options) {
-		const bonusPart = bonus > 0 ? ` (+${bonus} equipped bonus)` : "";
+		const bonusPart = bonus > 0 ? ` (+${String(bonus)} equipped bonus)` : "";
 		const beforePart = options.beforeSwap ? " before swapping" : "";
 		return `Complete ${steamQuestCountLabel(options.pendingCount)}${beforePart}${bonusPart}`;
 	}
@@ -6909,9 +6940,9 @@
 		if (count === 0) return "Daily Quests";
 		const daily = pending.filter((quest) => quest.kind === "daily").length;
 		const weekend = pending.filter((quest) => quest.kind === "weekend").length;
-		if (daily > 0 && weekend > 0) return count === 2 ? "Daily and Weekend Quests" : `${count} Daily and Weekend Quests`;
-		if (weekend > 0) return count === 1 ? "Weekend Quest" : `${count} Weekend Quests`;
-		return count === 1 ? "Daily Quest" : `${count} Daily Quests`;
+		if (daily > 0 && weekend > 0) return count === 2 ? "Daily and Weekend Quests" : `${String(count)} Daily and Weekend Quests`;
+		if (weekend > 0) return count === 1 ? "Weekend Quest" : `${String(count)} Weekend Quests`;
+		return count === 1 ? "Daily Quest" : `${String(count)} Daily Quests`;
 	}
 	function dailyQuestsActivityLabel(pending, options) {
 		const beforePart = options.beforeSwap ? " before swapping" : "";
@@ -6935,19 +6966,19 @@
 			default: return key;
 		}
 	}
-	function msAfterUnlockBeforeReset(waitMs, now = new Date()) {
-		return Math.max(0, msUntilUtcMidnight(now) - waitMs);
+	function msAfterUnlockBeforeReset(waitMs) {
+		return Math.max(0, msUntilUtcMidnight() - waitMs);
 	}
-	function canFinishTwitchAfterUnlock(waitMs, watchRemainingMs, bufferMs, now = new Date()) {
-		return Math.max(0, msUntilUtcMidnight(now) - waitMs - bufferMs) >= watchRemainingMs;
+	function canFinishTwitchAfterUnlock(waitMs, watchRemainingMs, bufferMs) {
+		return Math.max(0, msUntilUtcMidnight(new Date()) - waitMs - bufferMs) >= watchRemainingMs;
 	}
-	function activityWindowArp(combo, key, siteState, options) {
+	function activityWindowArp(combo, key, siteState) {
 		const stats = loadoutStats(combo);
 		const allArpPct = stats?.allArpPct ?? combo?.allArpPct ?? 0;
 		let base = 0;
 		switch (key) {
 			case "watchTwitch":
-				base = siteState === void 0 || options?.fullDay === true ? (siteState?.watchTwitch?.capArp ?? BASE_ACTIVITY.watchTwitchBasePerDay) + (stats?.watchTwitchFlat ?? comboBonusForActivity(combo, key)) : twitchWatchRemainingMs(siteState, stats?.watchTwitchFlat ?? comboBonusForActivity(combo, key)) / 6e4;
+				base = siteState === void 0 ? BASE_ACTIVITY.watchTwitchBasePerDay + (stats?.watchTwitchFlat ?? comboBonusForActivity(combo, key)) : twitchWatchRemainingMs(siteState, stats?.watchTwitchFlat ?? comboBonusForActivity(combo, key)) / 6e4;
 				break;
 			case "dailyQuests":
 				base = BASE_ACTIVITY.dailyQuestBase;
@@ -6956,8 +6987,7 @@
 				base = BASE_ACTIVITY.timeOnSiteBasePerDay + (stats?.timeOnSiteFlat ?? 0);
 				break;
 			case "steamQuests": {
-				const remaining = siteState ? remainingSteamQuestRewards(siteState) : [...BASE_ACTIVITY.steamQuestBases];
-				const bases = options?.fullDay === true ? [...BASE_ACTIVITY.steamQuestBases] : remaining;
+				const bases = siteState ? remainingSteamQuestRewards(siteState) : [...BASE_ACTIVITY.steamQuestBases];
 				const flat = stats?.steamQuestsFlat ?? comboBonusForActivity(combo, key);
 				return (bases.reduce((sum, value) => sum + value, 0) + flat * bases.length) * (1 + allArpPct);
 			}
@@ -7278,7 +7308,7 @@
 		};
 	}
 	function flatBonusReason(amount, label, waitMs) {
-		return waitMs > msUntilUtcMidnight() ? `+${amount} ${label} after unlock` : `+${amount} ${label}`;
+		return waitMs > msUntilUtcMidnight() ? `+${String(amount)} ${label} after unlock` : `+${String(amount)} ${label}`;
 	}
 	function pushAllArpEquipReasons(reasons, allArpPct, siteState) {
 		if (allArpPct <= 0) return;
@@ -7298,7 +7328,7 @@
 		const stats = activityStatsForArtifacts(stepArtifacts);
 		const isPreloadNextUtcDay = options.isPreloadNextUtcDay === true;
 		pushAllArpEquipReasons(reasons, stats.allArpPct, siteState);
-		if (stats.marketDiscountPct >= .1) reasons.push({ text: `${Math.round(stats.marketDiscountPct * 100)}% Game Vault / marketplace discount before buying` });
+		if (stats.marketDiscountPct >= .1) reasons.push({ text: `${String(Math.round(stats.marketDiscountPct * 100))}% Game Vault / marketplace discount before buying` });
 		if (isPreloadNextUtcDay) reasons.push({ text: "Start 24h lock before 00:00 UTC reset" });
 		const isNextUtcResetInLock = isResetInWearWindow(msUntilUtcMidnight(), waitMs);
 		const isSteamDueNow = isActivityPending(caps, "steamQuests");
@@ -7360,7 +7390,7 @@
 	function deferredSteamFollowUpReason(deferred, best) {
 		const bonus = activityStatsForArtifacts(deferred.artifacts).steamQuestsFlat;
 		const incoming = artifactsNotInOther(deferred.artifacts, best.artifacts);
-		return { text: `Then ${loadoutLabel(incoming.length > 0 ? incoming : artifactsForDisplay(deferred))} for +${bonus} Steam` };
+		return { text: `Then ${loadoutLabel(incoming.length > 0 ? incoming : artifactsForDisplay(deferred))} for +${String(bonus)} Steam` };
 	}
 	function appendFoldedDeferredSteamReason(laterReasons, best, deferred) {
 		if (!deferred || !shouldFoldDeferredSteam(best, deferred, true)) return;
@@ -7519,7 +7549,7 @@
 			todos.push({
 				kind: "caution",
 				tone: hasScheduledAllArp ? "warn" : "muted",
-				text: `Don't claim Battle Pass ARP Boost yet (${arpReady} ready)`,
+				text: `Don't claim Battle Pass ARP Boost yet (${String(arpReady)} ready)`,
 				reasons: [{ text: hasScheduledAllArp ? "Claim after All-ARP% is on" : "More boosts may unlock — claim when All-ARP% is already on" }]
 			});
 		}
@@ -7691,7 +7721,7 @@
 			const instanceId = upgrade.artifact.instanceId;
 			if (!instanceIds.has(instanceId)) continue;
 			const todo = {
-				text: `Upgrade ${upgrade.artifact.displayName} to ${TIER_LABELS[upgrade.toTier]} (${upgrade.fragmentCost} frag)`,
+				text: `Upgrade ${upgrade.artifact.displayName} to ${TIER_LABELS[upgrade.toTier]} (${String(upgrade.fragmentCost)} frag)`,
 				urgency: {
 					kind: "action",
 					readyAtMs: 0,
@@ -7723,10 +7753,10 @@
 	function discordPollTodoText(options) {
 		const { slot, bonus, nextPostMs } = options;
 		if (slot === "afterFull" || slot === "afterNow") return "Vote Discord Poll";
-		const bonusPart = bonus > 0 ? ` (+${bonus} equipped bonus)` : "";
+		const bonusPart = bonus > 0 ? ` (+${String(bonus)} equipped bonus)` : "";
 		const nextPost = formatMs(nextPostMs);
 		if (slot === "before") return `Vote Discord Poll now — next post in ${nextPost}${bonusPart}`;
-		return bonus > 0 ? `Vote Discord Poll (+${bonus} already equipped)` : "Vote Discord Poll";
+		return bonus > 0 ? `Vote Discord Poll (+${String(bonus)} already equipped)` : "Vote Discord Poll";
 	}
 	function discordPollTodoReasons(slot) {
 		return slot === "afterFull" || slot === "afterNow" ? [{ text: "After equipping" }] : void 0;
@@ -7930,7 +7960,7 @@
 			const label = todo.equipCombo === "allArp" ? "Equip All-ARP%" : "Equip";
 			return `<button type="button" class="ao-equip-btn" data-equip="${todo.equipCombo}">${label}</button>`;
 		}
-		if (todo.upgradeInstanceId !== void 0) return `<button type="button" class="ao-upgrade-btn" data-id="${todo.upgradeInstanceId}">Upgrade</button>`;
+		if (todo.upgradeInstanceId !== void 0) return `<button type="button" class="ao-upgrade-btn" data-id="${String(todo.upgradeInstanceId)}">Upgrade</button>`;
 		if (todo.claimBattlePass === true) return `<button type="button" class="ao-claim-btn"${todo.claimBattlePassSkipArp === true ? " data-skip-arp=\"1\"" : ""}>${battlePassClaimButtonLabel(todo.claimBattlePassSkipArp === true)}</button>`;
 		return "";
 	}
@@ -7956,7 +7986,7 @@
 			return `<div class="ao-caution${actionTodoToneClass(todo.tone)}" role="note">${renderActionTodoBody(todo)}</div>`;
 		}).join("");
 		const items = steps.map((todo, index) => {
-			return `<li class="ao-todo-item${actionTodoToneClass(todo.tone)}"><span class="ao-todo-index">${index + 1}.</span><div class="ao-todo-text">${renderActionTodoBody(todo)}</div>${renderTodoActionButton(todo, options)}</li>`;
+			return `<li class="ao-todo-item${actionTodoToneClass(todo.tone)}"><span class="ao-todo-index">${String(index + 1)}.</span><div class="ao-todo-text">${renderActionTodoBody(todo)}</div>${renderTodoActionButton(todo, options)}</li>`;
 		}).join("");
 		const listHtml = steps.length > 0 ? `<ul class="ao-todo-list">${items}</ul>` : "";
 		return `
@@ -7985,7 +8015,7 @@
 		return words ? words.replaceAll(/\b\w/g, (letter) => letter.toUpperCase()) : "New giveaway";
 	}
 	function titleFromCard(element) {
-		const headingText = element.querySelector("h1, h2, h3, h4, .giveaways__listing-post-title, .post-title, .tile-title")?.textContent?.replaceAll(/\s+/g, " ").trim();
+		const headingText = element.querySelector("h1, h2, h3, h4, .giveaways__listing-post-title, .post-title, .tile-title")?.textContent.replaceAll(/\s+/g, " ").trim();
 		if (headingText) return headingText;
 		return element.title.trim() || "";
 	}
@@ -8031,14 +8061,14 @@
 	function scrapeOfficialGiveawaysFromDocument(document_) {
 		const found = new Map();
 		for (const post of document_.querySelectorAll(".giveaways__listing-post, [data-url-link*=\"/ucf/show/\"]")) addGiveaway(found, post.dataset.urlLink ?? "", titleFromCard(post));
-		for (const link of document_.querySelectorAll("a[href*=\"/ucf/show/\"][href*=\"/Giveaway/\"]")) addGiveaway(found, link.href, link.textContent?.replaceAll(/\s+/g, " ").trim() ?? "");
-		const hrefMatches = (document_.documentElement?.getHTML() ?? "").matchAll(new RegExp(SHOW_GIVEAWAY_HREF.source, "gi"));
+		for (const link of document_.querySelectorAll("a[href*=\"/ucf/show/\"][href*=\"/Giveaway/\"]")) addGiveaway(found, link.href, link.textContent.replaceAll(/\s+/g, " ").trim());
+		const hrefMatches = document_.documentElement.getHTML().matchAll(new RegExp(SHOW_GIVEAWAY_HREF.source, "gi"));
 		for (const match of hrefMatches) if (match[0]) addGiveaway(found, match[0], "");
 		return found.values().toArray();
 	}
 	function scrapeLiveGiveaways() {
 		const listing = isOfficialGiveawayListingPath(location.pathname) ? scrapeOfficialGiveawaysFromDocument(document) : [];
-		const pageTitle = document.querySelector("h1, .ucf-title, .content-title")?.textContent?.replaceAll(/\s+/g, " ").trim() ?? document.title.split("|", 1)[0]?.trim() ?? "";
+		const pageTitle = document.querySelector("h1, .ucf-title, .content-title")?.textContent.replaceAll(/\s+/g, " ").trim() ?? document.title.split("|", 1)[0]?.trim() ?? "";
 		const current = scrapeGiveawayFromPath(location.pathname, pageTitle);
 		return mergeGiveaways([listing, current ? [current] : []]);
 	}
@@ -8260,7 +8290,7 @@
 		await _GM.setValue(NOTIFY_LOG_KEY, JSON.stringify(log));
 	}
 	function pruneFired(log, now) {
-		for (const [id, at] of Object.entries(log.fired)) if (now - at > FIRED_KEEP_MS) delete log.fired[id];
+		for (const [id, at] of Object.entries(log.fired)) if (now - at > FIRED_KEEP_MS) Reflect.deleteProperty(log.fired, id);
 	}
 	function clearPendingTimers() {
 		for (const timer of pendingTimers.values()) clearTimeout(timer);
@@ -8495,14 +8525,14 @@
 				event.fireAt = Math.min(event.fireAt, now);
 				continue;
 			}
-			delete log.scheduled[id];
+			Reflect.deleteProperty(log.scheduled, id);
 		}
 	}
-	async function didFireDueEvents(log, source, generation, now) {
+	function didFireDueEvents(log, source, generation, now) {
 		for (const [id, event] of Object.entries(log.scheduled)) {
 			if (event.fireAt > now) continue;
 			if (log.fired[id] !== void 0 || !isEventStillRelevant(event, source)) {
-				delete log.scheduled[id];
+				Reflect.deleteProperty(log.scheduled, id);
 				continue;
 			}
 			if (generation !== notifyRuntime.syncGeneration) return false;
@@ -8512,7 +8542,7 @@
 				tag: event.id,
 				url: event.url
 			})) log.fired[id] = Date.now();
-			delete log.scheduled[id];
+			Reflect.deleteProperty(log.scheduled, id);
 		}
 		return true;
 	}
@@ -8582,7 +8612,7 @@
 		if (isKindEnabled(source, "giveaway")) upcoming.push(...await collectNewGiveaways(log, now));
 		if (generation !== notifyRuntime.syncGeneration) return;
 		mergeUpcomingIntoLog(log, upcoming, source, now);
-		if (!await didFireDueEvents(log, source, generation, now)) return;
+		if (!didFireDueEvents(log, source, generation, now)) return;
 		pruneFired(log, Date.now());
 		await saveNotifyLog(log);
 		if (generation !== notifyRuntime.syncGeneration) return;
@@ -8701,7 +8731,7 @@
 	async function waitForCommunityEventHours(document_) {
 		const started = Date.now();
 		while (Date.now() - started < 4e3) {
-			if (document_.querySelector("#personal-hours")?.textContent?.trim()) break;
+			if (document_.querySelector("#personal-hours")?.textContent.trim()) break;
 			await delay$1(250);
 		}
 	}
@@ -8753,10 +8783,10 @@
 		}
 	}
 	function hasPersonalHours(document_) {
-		const domHours = document_.querySelector("#personal-hours")?.textContent?.trim();
+		const domHours = document_.querySelector("#personal-hours")?.textContent.trim();
 		if (domHours && /\d/.test(domHours)) return true;
-		if (/Your Total Hours:\s*[\d.]+/i.test(document_.body?.textContent ?? "")) return true;
-		const scripts = [...document_.querySelectorAll("script:not([src])")].map((script) => script.textContent ?? "").join("\n");
+		if (/Your Total Hours:\s*[\d.]+/i.test(documentBody(document_)?.textContent ?? "")) return true;
+		const scripts = [...document_.querySelectorAll("script:not([src])")].map((script) => script.textContent).join("\n");
 		return /personalPlaytime\s*=\s*\d+/i.test(scripts);
 	}
 	async function waitForGameVaultUi(document_) {
@@ -8767,7 +8797,7 @@
 		}
 	}
 	function requiresIframeFallback(path, fetched) {
-		if (path.includes("/artifacts") || path.includes("/user-artifacts-room")) return !fetched.body?.querySelector(":scope a.artifact-list-item.change-artifact-modal, :scope .slot img");
+		if (path.includes("/artifacts") || path.includes("/user-artifacts-room")) return !documentBody(fetched)?.querySelector(":scope a.artifact-list-item.change-artifact-modal, :scope .slot img");
 		if (path.includes("/arp-log")) return !isArpLogDocumentReady(fetched);
 		if (path.includes("/battle-pass")) return !isBattlePassDocumentReady(fetched);
 		if (path.includes("/game-vault")) return !isGameVaultMonthlyClaimUsedFromDocument(fetched);
@@ -8776,7 +8806,7 @@
 	}
 	function hasSteamPlayEligibilitySignal(document_) {
 		if (document_.querySelector(".btn-check-owned-games, .btn-start-quest, .alert-steam, a[href^='steam://']")) return true;
-		return [...document_.querySelectorAll("a, button")].map((element) => (element.textContent ?? "").replaceAll(/\s+/g, " ").trim()).some((label) => /^(Check Game|Visit Steam|Sync Games|Launch Game)$/i.test(label)) || /completed this quest/i.test(document_.body?.textContent ?? "");
+		return [...document_.querySelectorAll("a, button")].map((element) => element.textContent.replaceAll(/\s+/g, " ").trim()).some((label) => /^(Check Game|Visit Steam|Sync Games|Launch Game)$/i.test(label)) || /completed this quest/i.test(documentBody(document_)?.textContent ?? "");
 	}
 	async function loadRemotePage(path) {
 		const fetched = await fetchDocument$1(path);
@@ -8808,7 +8838,7 @@
 		if (advertised && advertised !== stored) return true;
 		const bp = state?.battlePass;
 		if (!bp || typeof bp.readyToClaimArp !== "number") return true;
-		const scrapedAt = Date.parse(bp.scrapedAt ?? "");
+		const scrapedAt = Date.parse(bp.scrapedAt);
 		return Number.isNaN(scrapedAt) || Date.now() - scrapedAt > BATTLE_PASS_STALE_MS;
 	}
 	async function refreshBattlePassOnly(next, path) {
@@ -8841,14 +8871,16 @@
 		const at = Date.parse(scrapedAt);
 		return !Number.isNaN(at) && at >= utcDayStartMs(now);
 	}
-	function isArpLogFresh(state, now = new Date()) {
+	function isArpLogFresh(state) {
+		const now = new Date();
 		const arpLog = state?.arpLog;
 		if (!arpLog || arpLog.recent.length === 0) return false;
 		const scrapedAt = arpLog.scrapedAt;
 		if (!isScrapedWithin(scrapedAt, ARP_LOG_STALE_MS) || !isScrapedSinceUtcMidnight(scrapedAt, now)) return false;
 		return Date.parse(scrapedAt) >= lastDiscordPollPostAt(now).getTime();
 	}
-	function isCommunityEventFresh(state, now = new Date()) {
+	function isCommunityEventFresh(state) {
+		const now = new Date();
 		const event = state?.communityEvent;
 		if (!event?.isLive) return state?.caps.steamCommunityEvent !== "available" && isCapsFresh(state, now);
 		if (event.milestones.length === 0) return false;
@@ -9119,7 +9151,7 @@
 		return !isSnapshotFresh$1(snapshot) || !areSlotLocksFresh(snapshot);
 	}
 	function requiresRemoteSiteHydrate(state, options = {}) {
-		return !state || options.force || !isCapsFresh(state) || shouldRescrapeBattlePass(state) || !isArpLogFresh(state) || shouldRefreshCommunityEventArpLog(state) || !isCommunityEventFresh(state) || requiresSteamQuestEligibilityFetch(state);
+		return !state || options.force === true || !isCapsFresh(state) || shouldRescrapeBattlePass(state) || !isArpLogFresh(state) || shouldRefreshCommunityEventArpLog(state) || !isCommunityEventFresh(state) || requiresSteamQuestEligibilityFetch(state);
 	}
 	function shouldRefreshCommunityEventArpLog(state) {
 		const event = state.communityEvent;
@@ -10205,7 +10237,7 @@
 		}
 		if (key === "visitPages") return cooldowns.visitPagesDate === today;
 		if (key === "watchVideos") return cooldowns.watchVideosDate === today;
-		return key === "readArticles" ? cooldowns.readArticlesDate === today : key === "gameVault" && cooldowns.gameVaultDate === today;
+		return (key === "readArticles" ? cooldowns.readArticlesDate : cooldowns.gameVaultDate) === today;
 	}
 	function buildTodo(achievement, settings, username) {
 		const canAutomate = achievement.automation !== void 0 && isAchievementAutomationEnabled(settings, achievement.automation);
@@ -10510,10 +10542,10 @@
 		}
 	}
 	function parseCount(document_) {
-		const fromBody = parseCountFromText(document_.body?.textContent ?? "");
+		const fromBody = parseCountFromText(documentBody(document_)?.textContent ?? "");
 		if (fromBody) return fromBody;
 		for (const element of document_.querySelectorAll("h1, h2, h3, h4, h5, strong, span, div, p")) {
-			const text = element.textContent ?? "";
+			const text = element.textContent;
 			const lowered = text.replaceAll(/\s+/g, " ").toLowerCase();
 			if (!lowered.includes("achievements") || !lowered.includes("/")) continue;
 			const parsed = parseCountFromText(text);
@@ -10566,7 +10598,8 @@
 		};
 	}
 	function hasGmStorage() {
-		return typeof _GM?.getValue === "function";
+		const gm = Reflect.get(globalThis, "GM");
+		return typeof gm === "object" && gm !== null && "getValue" in gm && typeof gm.getValue === "function";
 	}
 	function assertGmStorage() {
 		if (!hasGmStorage()) throw new TypeError("GM storage is unavailable. For pnpm run dev, install the userscript served at http://localhost:3000 (named server:AWA Toolkit). A custom stub that only @requires that file does not get @grant, so recommendations never load.");
@@ -10691,7 +10724,6 @@
 	function renderNotifyTypeSwitches(settings) {
 		const switches = NOTIFICATION_TYPE_KEYS.map((key) => {
 			const copy = NOTIFICATION_TYPE_COPY[key];
-			if (!copy) return "";
 			return renderNotifySwitch({
 				id: `ao-notify-type-${key}`,
 				title: copy.title,
@@ -10916,7 +10948,7 @@
 		const caps = siteState.caps;
 		const rows = Object.keys(ACTIVITY_LABELS).map((key) => {
 			const status = caps[key];
-			if (!status || status === "unknown") return "";
+			if (status === "unknown") return "";
 			const label = ACTIVITY_LABELS[key] ?? key;
 			const word = status === "available" ? "available" : "done / capped";
 			return `<div class="${(status === "available" ? "" : " ao-muted").trim()}">${escapeHtml(label)} · ${word}</div>`;
@@ -11042,7 +11074,7 @@
     </div>
     ${hydrateBanner}
     ${achievementsHtml}
-    <div class="ao-muted">Inventory snapshot: ${scrapedAt} · Fragments: ${fragments}</div>
+    <div class="ao-muted">Inventory snapshot: ${scrapedAt} · Fragments: ${String(fragments)}</div>
     ${vaultDiscount}
     ${extras}
     ${renderSectionDivider()}
@@ -11068,7 +11100,7 @@
       </div>
       <div class="ao-row">
         Manual fragment override (blank = scraped):
-        <input type="number" id="ao-manual-frags" min="0" step="1" value="${settings.manualFragments ?? ""}" placeholder="auto"/>
+        <input type="number" id="ao-manual-frags" min="0" step="1" value="${String(settings.manualFragments)}" placeholder="auto"/>
       </div>
       <div class="ao-heading">Preferred Twitch streamers</div>
       <div class="ao-muted">One login per line. Live preferred channels open first (top to bottom). If none are live: random Featured/Hive/Nexus with "drops" in the title, then any Featured/Hive/Nexus, then any "drops" title, then a random remaining stream.</div>
@@ -11130,8 +11162,8 @@
 		if (!login) return;
 		const details = row.querySelector(".quest-list__quest-details");
 		const nameText = [...details?.children ?? []].find((child) => !child.classList.contains("small"))?.textContent ?? row.querySelector("img")?.getAttribute("alt") ?? link?.textContent;
-		const title = details?.querySelector(".small")?.textContent?.replaceAll(/\s+/g, " ").trim() ?? "";
-		const displayName = nameText?.replaceAll(/\s+/g, " ").trim() || login;
+		const title = details?.querySelector(".small")?.textContent.replaceAll(/\s+/g, " ").trim() ?? "";
+		const displayName = nameText?.replaceAll(/\s+/g, " ").trim() ?? login;
 		const resolvedGroup = group === "partner" && (row.classList.contains("speed-boost") || row.querySelector(".featured") !== null) ? "featured" : group;
 		return {
 			login,
@@ -11150,7 +11182,7 @@
 		let group = "partner";
 		for (const node of body.querySelectorAll(".card-table-heading, .card-table-row")) {
 			if (node.classList.contains("card-table-heading")) {
-				group = headingGroup(node.textContent ?? "") ?? group;
+				group = headingGroup(node.textContent) ?? group;
 				continue;
 			}
 			const stream = streamFromRow(node, group);
@@ -11246,7 +11278,7 @@
 			button.textContent = "Picking…";
 			handleOpenTwitchStream().finally(() => {
 				button.disabled = false;
-				button.textContent = previous ?? "Open stream";
+				button.textContent = previous;
 			});
 		});
 	}
@@ -11291,9 +11323,9 @@
 		}
 		const resolved = await resolveLoadoutPlan(combo, current, settings, label, result);
 		if (!resolved) return;
-		const currentlyEquipped = (current?.artifacts ?? []).filter((a) => a.equippedPosition !== void 0).map((a) => ({
-			artifactId: a.instanceId,
-			position: a.equippedPosition
+		const currentlyEquipped = (current?.artifacts ?? []).filter((artifact) => artifact.equippedPosition !== void 0).map((artifact) => ({
+			artifactId: artifact.instanceId,
+			position: artifact.equippedPosition
 		}));
 		const { allOk, results, applied } = await applyLoadout(resolved.now, currentlyEquipped);
 		if (allOk) {
@@ -11418,7 +11450,8 @@
 	async function handleAddManual(root) {
 		const familyId = root.querySelector("#ao-manual-family")?.value;
 		if (!familyId) return;
-		const tier = Number(root.querySelector("#ao-manual-tier")?.value);
+		const tier = artifactTierAt(Number(root.querySelector("#ao-manual-tier")?.value));
+		if (tier === void 0) return;
 		await saveArtifactSettings({
 			manualArtifacts: [...(await getArtifactSettings()).manualArtifacts, {
 				familyId,
@@ -11626,7 +11659,7 @@
 		return panelTree(modal);
 	}
 	function resolveShowroomInsertTarget() {
-		let target = [...document.querySelectorAll("div, p, span")].find((element) => /^Fragments:\s*\d+/i.test(element.textContent?.trim() ?? "")) ?? document.querySelector("#weapon-section") ?? void 0;
+		let target = [...document.querySelectorAll("div, p, span")].find((element) => /^Fragments:\s*\d+/i.test(element.textContent.trim())) ?? document.querySelector("#weapon-section") ?? void 0;
 		if (!target) return;
 		const link = target.closest("a");
 		if (link) target = link;
@@ -11692,7 +11725,7 @@
 		document.querySelector(`#${MODAL_ID}`)?.remove();
 		document.querySelector(`#${BACKDROP_ID}`)?.remove();
 	}
-	async function createOptimizerModal() {
+	function createOptimizerModal() {
 		destroyOptimizerModal();
 		ensureOptimizerStyles();
 	}
@@ -11766,7 +11799,7 @@
 		});
 	}
 	function parkElement(element) {
-		const parent = document.body ?? document.documentElement;
+		const parent = documentBody() ?? document.documentElement;
 		if (element.parentElement !== parent) parent.prepend(element);
 	}
 	function findControlCenterMount() {
@@ -11823,14 +11856,14 @@
 	function findAchievementsMount() {
 		return document.querySelector("main.flex-shrink-0 > .container") ?? document.querySelector("main > .container") ?? void 0;
 	}
-	async function waitForAchievementsMount(timeoutMs = 12e3) {
+	async function waitForAchievementsMount() {
 		if (findAchievementsMount()) return;
 		await new Promise((resolve) => {
 			let isSettled = false;
 			const observer = new MutationObserver(() => {
 				if (findAchievementsMount()) finish();
 			});
-			const timer = setTimeout(finish, timeoutMs);
+			const timer = setTimeout(finish, 12e3);
 			function finish() {
 				if (isSettled) return;
 				isSettled = true;
@@ -12104,15 +12137,13 @@
 		tree.querySelector("#ao-cc-equip-allarp")?.addEventListener("click", () => {
 			confirmAndApplyCombo(data.result.allArpLoadout, data.result.current, data.settings, "All-ARP%", data.result);
 		});
-		bindUpgradeButtons(tree, async () => {});
+		bindUpgradeButtons(tree, () => Promise.resolve());
 		bindClaimAllButtons(tree);
 		bindOpenTwitchButtons(tree);
 		bindVaultDiscountActions(tree, () => {
 			injectControlCenterPanel({ force: true });
 		});
-		bindAchievementOpenButtons(tree, async () => {
-			injectControlCenterPanel({ force: true });
-		});
+		bindAchievementOpenButtons(tree, () => injectControlCenterPanel({ force: true }));
 		tree.querySelector("#ao-cc-artifacts")?.addEventListener("click", () => {
 			location.assign("/user-artifacts-room");
 		});
@@ -12187,7 +12218,8 @@
 		const live = scrapeBattlePassFromDocument(document);
 		const cached = gatheredCache.current;
 		const battlePass = live ?? cached?.siteState.battlePass;
-		const count = live?.readyToClaim ?? (listBattlePassClaimButtons().length || battlePass?.readyToClaim || 0);
+		const claimButtonCount = listBattlePassClaimButtons().length;
+		const count = live?.readyToClaim ?? (claimButtonCount > 0 ? claimButtonCount : battlePass?.readyToClaim ?? 0);
 		if (count <= 0) return `
       <div class="ao-heading">Battle Pass</div>
       <div class="ao-muted">No rewards waiting to claim</div>
@@ -12225,7 +12257,7 @@
 		bindClaimAllButtons(panelTree(panel));
 	}
 	async function injectAchievementsPanel(options = {}) {}
-	async function initArtifactOptimizer() {
+	function initArtifactOptimizer() {
 		ensureOptimizerStyles();
 		watchOptimizerMenuButton();
 		if (isControlCenterPage()) {
@@ -12265,7 +12297,7 @@
 				await saveSiteState(state);
 			})();
 		}
-		await createOptimizerModal();
+		createOptimizerModal();
 		warmNotificationSchedule();
 	}
 	var defaultSettings = {
@@ -12363,7 +12395,7 @@
 		return closeMs !== void 0 && closeMs <= Date.now();
 	}
 	function isGiveawayEntered(giveaway) {
-		return /you have entered this giveaway/i.test(giveaway.textContent ?? "");
+		return /you have entered this giveaway/i.test(giveaway.textContent);
 	}
 	function combineFilterMode(current, mode, isMatching) {
 		if (!isMatching || mode === "off") return current;
@@ -12434,7 +12466,7 @@
           filter: grayscale(0.55);
         }
       `;
-		(document.head ?? document.documentElement).append(style);
+		(documentHead() ?? document.documentElement).append(style);
 	}
 	function watchPageFilters() {
 		const currentPath = location.pathname;
@@ -12606,7 +12638,7 @@
                 <div class="setting">
                   <label class="settingsLabel">
                     User tier:
-                    <input id="manualSetTier" type="text" inputmode="numeric" pattern="[0-9]*" size="1" maxlength="2" ${isHigherTierOff || settings.autoSyncTier ? "disabled" : ""} value="${settings.userTier || ""}"
+                    <input id="manualSetTier" type="text" inputmode="numeric" pattern="[0-9]*" size="1" maxlength="2" ${isHigherTierOff || settings.autoSyncTier ? "disabled" : ""} value="${String(settings.userTier)}"
                     aria-describedby="manualSetTierDesc">
                   </label>
                   <span id="manualSetTierDesc" class="sr-only">
@@ -12813,7 +12845,7 @@
 	var RULE_ROW_CLASS = "awa-ucf-table-rule";
 	var UCF_POST_PATH = /\/ucf\/show\//i;
 	var NAVBAR_OFFSET_PX = 80;
-	var NAVBAR_OFFSET = `${NAVBAR_OFFSET_PX}px`;
+	var NAVBAR_OFFSET = `${String(NAVBAR_OFFSET_PX)}px`;
 	var STICKY_GAP_PX = 8;
 	var TABLE_SCOPE = ":is(.ucf__content, .discussion__op-content, .js-comments-post)";
 	var DATA_TABLE = "table:has(:is(th + th, td + td))";
@@ -13123,7 +13155,7 @@
 		if (!style) {
 			style = document.createElement("style");
 			style.id = STYLE_ID;
-			(document.head || document.documentElement).append(style);
+			(documentHead() ?? document.documentElement).append(style);
 		}
 		style.textContent = buildReadingModeCss();
 	}
@@ -13174,7 +13206,7 @@
 		walk(cell);
 	}
 	function isRuleRow(row) {
-		const text = (row.textContent ?? "").replaceAll(/\s+/g, "");
+		const text = row.textContent.replaceAll(/\s+/g, "");
 		return text.length > 0 && !/\p{L}|\p{N}/u.test(text);
 	}
 	function prepareTables() {
@@ -13357,12 +13389,14 @@
 		observeForRerender();
 	}
 	function waitForBody() {
-		if (document.body) return Promise.resolve(document.body);
+		const existing = documentBody();
+		if (existing) return Promise.resolve(existing);
 		return new Promise((resolve) => {
 			const observer = new MutationObserver(() => {
-				if (!document.body) return;
+				const body = documentBody();
+				if (!body) return;
 				observer.disconnect();
-				resolve(document.body);
+				resolve(body);
 			});
 			observer.observe(document.documentElement, { childList: true });
 		});

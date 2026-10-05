@@ -1,5 +1,5 @@
 import { applyLoadout, upgradeArtifact } from '../api';
-import type { ArtifactTier } from '../data';
+import { artifactTierAt } from '../data';
 import {
   didSetBrowserNotifications,
   isNotificationPermissionGranted,
@@ -144,10 +144,13 @@ export async function confirmAndApplyCombo(
   }
 
   const currentlyEquipped = (current?.artifacts ?? [])
-    .filter((a) => a.equippedPosition !== undefined)
-    .map((a) => ({
-      artifactId: a.instanceId,
-      position: a.equippedPosition as ArtifactSlot,
+    .filter(
+      (artifact): artifact is typeof artifact & { equippedPosition: number } =>
+        artifact.equippedPosition !== undefined,
+    )
+    .map((artifact) => ({
+      artifactId: artifact.instanceId,
+      position: artifact.equippedPosition,
     }));
 
   const { allOk, results, applied } = await applyLoadout(
@@ -246,8 +249,8 @@ function allArpTargetArtifacts(
 }
 
 /**
- * Recommended is already on — offer All-ARP% into free slots when available.
- */
+Recommended is already on — offer All-ARP% into free slots when available.
+*/
 async function resolveAllArpWhenRecommendedEquipped(
   current: ScoredCombo | undefined,
   settings: ArtifactOptimizerSettings,
@@ -408,9 +411,12 @@ export async function handleAddManual(root: HTMLElement): Promise<void> {
   if (!familyId) {
     return;
   }
-  const tier = Number(
-    root.querySelector<HTMLSelectElement>('#ao-manual-tier')?.value,
-  ) as ArtifactTier;
+  const tier = artifactTierAt(
+    Number(root.querySelector<HTMLSelectElement>('#ao-manual-tier')?.value),
+  );
+  if (tier === undefined) {
+    return;
+  }
   const settings = await getArtifactSettings();
   await saveArtifactSettings({
     manualArtifacts: [...settings.manualArtifacts, { familyId, tier }],

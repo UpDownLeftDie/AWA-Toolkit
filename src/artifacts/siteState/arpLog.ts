@@ -1,4 +1,4 @@
-import { readPageRedeemableArp } from "../../pageGlobals";
+import { documentBody, readPageRedeemableArp } from "../../pageGlobals";
 import { pageText } from "./shared";
 import type { SiteState } from "./types";
 
@@ -10,10 +10,10 @@ export interface ArpLogEntry {
 
 const ARP_LOG_ROW_SELECTOR = ".card-table-row";
 /**
- * Pagination / chart sit after the row list in SSR, so they only exist once
- * the table (or an empty list) has been parsed. `#from` is above the rows
- * and is not a ready signal.
- */
+Pagination / chart sit after the row list in SSR, so they only exist once
+the table (or an empty list) has been parsed. `#from` is above the rows
+and is not a ready signal.
+*/
 const ARP_LOG_AFTER_ROWS_SELECTOR = "#arp-logs-per-page, #arp-log-chart";
 const ARP_LOG_DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 const ARP_LOG_AMOUNT_RE = /^[+]?\d[\d,]*$/;
@@ -43,7 +43,7 @@ export function scrapeRedeemableArpFromDocument(
   document_: Document,
 ): number | undefined {
   const fromPage = readPageRedeemableArp(document_);
-  return fromPage === undefined ? parseRedeemableArpText(pageText(document_)) : fromPage;
+  return fromPage ?? parseRedeemableArpText(pageText(document_));
 }
 
 export function applyRedeemableArpFromDocument(
@@ -71,7 +71,7 @@ function scrapeArpLogRowsFromTable(document_: Document): ArpLogEntry[] {
   const entries: ArpLogEntry[] = [];
   for (const row of document_.querySelectorAll(ARP_LOG_ROW_SELECTOR)) {
     const cols = [...row.children].map((element) =>
-      (element.textContent ?? "").replaceAll(/\s+/g, " ").trim(),
+      (element.textContent).replaceAll(/\s+/g, " ").trim(),
     );
     const date = cols.find((col) => ARP_LOG_DATE_RE.test(col));
     const arpText = cols.findLast(
@@ -138,13 +138,13 @@ function scrapeArpLogRowsFromText(body: string): ArpLogEntry[] {
 }
 
 /**
- * Log rows are SSR'd into `.card-table-row`, but `@run-at document-start`
- * can scrape before `<body>` (or the table) exists. An empty scrape still
- * stamps `scrapedAt`, which then blocks the 6h background re-fetch — Discord
- * Poll completion is only visible here, so that miss sticks until Refresh.
- */
+Log rows are SSR'd into `.card-table-row`, but `@run-at document-start`
+can scrape before `<body>` (or the table) exists. An empty scrape still
+stamps `scrapedAt`, which then blocks the 6h background re-fetch — Discord
+Poll completion is only visible here, so that miss sticks until Refresh.
+*/
 export function isArpLogDocumentReady(document_: Document): boolean {
-  return document_.body ? Boolean(
+  return documentBody(document_) ? Boolean(
     document_.querySelector(
       `${ARP_LOG_ROW_SELECTOR}, ${ARP_LOG_AFTER_ROWS_SELECTOR}`,
     ),
@@ -186,8 +186,8 @@ export async function waitForArpLogDocument(timeoutMs = 12_000): Promise<void> {
 }
 
 /**
- * Best-effort ARP Log scrape (action rows + balance header).
- */
+Best-effort ARP Log scrape (action rows + balance header).
+*/
 export function scrapeArpLogFromDocument(document_: Document): ArpLogState {
   const body = pageText(document_);
   const state: ArpLogState = {
@@ -223,10 +223,10 @@ export function scrapeArpLogFromDocument(document_: Document): ArpLogState {
 }
 
 /**
- * Sentinel `scrapedAt` for a scrape we don't trust as "seen the log". Any
- * empty scrape lands here so `isArpLogFresh` always treats it as stale and
- * the next open retries instead of coasting on a fake-fresh stamp.
- */
+Sentinel `scrapedAt` for a scrape we don't trust as "seen the log". Any
+empty scrape lands here so `isArpLogFresh` always treats it as stale and
+the next open retries instead of coasting on a fake-fresh stamp.
+*/
 const ARP_LOG_UNSEEN_SCRAPED_AT = new Date(0).toISOString();
 
 function mergeArpLogScrapedAt(
@@ -240,23 +240,23 @@ function mergeArpLogScrapedAt(
 }
 
 /**
- * Merge a fresh ARP Log scrape with whatever's cached.
- *
- * The background fetch requests an explicit `from`/`to` window, but a user
- * browsing to `/arp-log` themselves gets the page's unfiltered default view,
- * which only lists the 10 most recent rows. Replacing the cached (wider)
- * `recent` with that would throw away days of history the background fetch
- * already captured. Entries have no stable id, so rows are deduped on
- * (date, action, arp) — the same identity a repeat scrape of the same
- * underlying row would produce.
- *
- * An empty scrape never advances `scrapedAt`. In the fresh-install case
- * (no previous log) a fetch that came back as a page shell would otherwise
- * stamp `{ scrapedAt: now, recent: [] }` and coast for the whole 6h TTL,
- * hiding a Discord Poll vote cast right after. The sentinel epoch stamp
- * keeps the merged state defined (so callers don't have to null-check)
- * while ensuring `isArpLogFresh` always retries next open.
- */
+Merge a fresh ARP Log scrape with whatever's cached.
+
+The background fetch requests an explicit `from`/`to` window, but a user
+browsing to `/arp-log` themselves gets the page's unfiltered default view,
+which only lists the 10 most recent rows. Replacing the cached (wider)
+`recent` with that would throw away days of history the background fetch
+already captured. Entries have no stable id, so rows are deduped on
+(date, action, arp) — the same identity a repeat scrape of the same
+underlying row would produce.
+
+An empty scrape never advances `scrapedAt`. In the fresh-install case
+(no previous log) a fetch that came back as a page shell would otherwise
+stamp `{ scrapedAt: now, recent: [] }` and coast for the whole 6h TTL,
+hiding a Discord Poll vote cast right after. The sentinel epoch stamp
+keeps the merged state defined (so callers don't have to null-check)
+while ensuring `isArpLogFresh` always retries next open.
+*/
 export function mergeArpLogScrape(
   scraped: ArpLogState,
   previous: ArpLogState | undefined,

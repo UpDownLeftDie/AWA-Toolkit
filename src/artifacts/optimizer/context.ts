@@ -52,8 +52,8 @@ export function msUntilNextUtcMidnight(now = Date.now()): number {
 }
 
 /**
- * Steam Quest week rolls at Monday 00:00 UTC.
- */
+Steam Quest week rolls at Monday 00:00 UTC.
+*/
 export function msUntilNextSteamQuestWeek(now = Date.now()): number {
   const date = new Date(now);
   const day = date.getUTCDay();
@@ -69,9 +69,9 @@ export function msUntilNextSteamQuestWeek(now = Date.now()): number {
 }
 
 /**
- * True when a reset at `delayMs` from now still lands while this loadout is
- * worn (`waitMs` until equip, then `horizonMs` lock — default 24h).
- */
+True when a reset at `delayMs` from now still lands while this loadout is
+worn (`waitMs` until equip, then `horizonMs` lock — default 24h).
+*/
 export function isResetInWearWindow(
   delayMs: number,
   waitMs = 0,
@@ -84,16 +84,16 @@ const MS_PER_DAY = 86_400_000;
 const MS_PER_HOUR = 60 * 60 * 1000;
 
 /**
- * Default practical end of a UTC daily sit (`utcDailyEndBufferHours` = 1 →
- * about 23:00 UTC). Override per user via Artifact Optimizer settings.
- */
+Default practical end of a UTC daily sit (`utcDailyEndBufferHours` = 1 →
+about 23:00 UTC). Override per user via Artifact Optimizer settings.
+*/
 export const UTC_DAILY_END_BUFFER_MS =
   DEFAULT_UTC_DAILY_END_BUFFER_HOURS * MS_PER_HOUR;
 
 /**
- * Overlap between an activity's availability window and this loadout's wear
- * window (`waitMs` until equip, then `horizonMs` lock).
- */
+Overlap between an activity's availability window and this loadout's wear
+window (`waitMs` until equip, then `horizonMs` lock).
+*/
 export function wearWindowOverlapMs(
   availableFromMs: number,
   availableUntilMs: number,
@@ -108,10 +108,10 @@ export function wearWindowOverlapMs(
 }
 
 /**
- * True when `durationMs` still fits in the overlap of availability and wear.
- * Instant claims (`durationMs === 0`) need a real overlap — zero overlap is
- * not "completable" or every future weekly would count in every 24h lock.
- */
+True when `durationMs` still fits in the overlap of availability and wear.
+Instant claims (`durationMs === 0`) need a real overlap — zero overlap is
+not "completable" or every future weekly would count in every 24h lock.
+*/
 export function canCompleteInWearWindow(
   availableFromMs: number,
   availableUntilMs: number,
@@ -129,13 +129,13 @@ export function canCompleteInWearWindow(
 }
 
 /**
- * True when `durationMs` still fits in the UTC day *outside* this loadout's
- * wear window — before `waitMs` or after the 24h lock — with the user's
- * cutoff (default 23:00 UTC). A delayed All-ARP% lock is not charged for
- * Twitch the player can still finish on a flat set.
- *
- * `waitMs === 0` still counts as "before": finish this sit, then equip.
- */
+True when `durationMs` still fits in the UTC day *outside* this loadout's
+wear window — before `waitMs` or after the 24h lock — with the user's
+cutoff (default 23:00 UTC). A delayed All-ARP% lock is not charged for
+Twitch the player can still finish on a flat set.
+
+`waitMs === 0` still counts as "before": finish this sit, then equip.
+*/
 export function canCompleteOutsideWearWindow(
   availableFromMs: number,
   availableUntilMs: number,
@@ -158,12 +158,12 @@ export function canCompleteOutsideWearWindow(
 }
 
 /**
- * UTC-day start offsets (ms from now) whose dailies can still be finished
- * while this loadout is worn. `0` is today when `todayAvailable`.
- *
- * A 24h lock that starts after today's reset still covers tonight's leftover
- * plus tomorrow after 00:00 UTC — both count toward lifetime ARP.
- */
+UTC-day start offsets (ms from now) whose dailies can still be finished
+while this loadout is worn. `0` is today when `todayAvailable`.
+
+A 24h lock that starts after today's reset still covers tonight's leftover
+plus tomorrow after 00:00 UTC — both count toward lifetime ARP.
+*/
 export function completableUtcDayStarts(
   waitMs: number,
   durationMs: number,
@@ -199,9 +199,9 @@ export function completableUtcDayStarts(
 }
 
 /**
- * True when a weekly activity that ends at `weekendMs` cannot be finished
- * after this loadout's lock — it must be done while worn, or it is lost.
- */
+True when a weekly activity that ends at `weekendMs` cannot be finished
+after this loadout's lock — it must be done while worn, or it is lost.
+*/
 export function isWeeklyForcedIntoLock(
   weekendMs: number,
   waitMs: number,
@@ -211,8 +211,8 @@ export function isWeeklyForcedIntoLock(
 }
 
 /**
- * ms until this combo can go on (0 when it is already the equipped set).
- */
+ms until this combo can go on (0 when it is already the equipped set).
+*/
 export function comboEquipWaitMs(
   combo: OwnedArtifact[],
   owned: OwnedArtifact[],
@@ -247,10 +247,10 @@ export function comboEquipWaitMs(
 }
 
 /**
- * Soonest All-ARP% deadline in this 24h window (UTC reset, and community
- * unlock when ASCE ETA is inside the lock). Slots that unlock before this
- * can still complete Zorathian / HPC; slots locked past it cannot.
- */
+Soonest All-ARP% deadline in this 24h window (UTC reset, and community
+unlock when ASCE ETA is inside the lock). Slots that unlock before this
+can still complete Zorathian / HPC; slots locked past it cannot.
+*/
 export function pinHorizonMs(siteState: SiteState, now = Date.now()): number {
   const untilReset = msUntilNextUtcMidnight(now);
   const event = siteState.communityEvent;

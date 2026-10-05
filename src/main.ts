@@ -1,24 +1,27 @@
 import { initArtifactOptimizer } from './artifacts/ui';
+import { documentBody } from './pageGlobals';
 import { initFilters } from './siteFilters';
 import { initUcfReadingMode } from './ucf/readingMode';
 
 function waitForBody(): Promise<HTMLElement> {
-  if (document.body) {
-    return Promise.resolve(document.body);
+  const existing = documentBody();
+  if (existing) {
+    return Promise.resolve(existing);
   }
   return new Promise((resolve) => {
     const observer = new MutationObserver(() => {
-      if (!document.body) {
+      const body = documentBody();
+      if (!body) {
         return;
       }
       observer.disconnect();
-      resolve(document.body);
+      resolve(body);
     });
     observer.observe(document.documentElement, { childList: true });
   });
 }
 
-void initArtifactOptimizer();
+initArtifactOptimizer();
 await waitForBody();
 await initFilters();
 await initUcfReadingMode();

@@ -74,10 +74,10 @@ function resultFromResponse(
 }
 
 /**
- * AWA artifact POSTs: HTTP 200 with `{ success: false }` for locked slots.
- * Match the site's jQuery encoding (JSON body + form content-type).
- * Battle Pass claim forms are real `application/x-www-form-urlencoded`.
- */
+AWA artifact POSTs: HTTP 200 with `{ success: false }` for locked slots.
+Match the site's jQuery encoding (JSON body + form content-type).
+Battle Pass claim forms are real `application/x-www-form-urlencoded`.
+*/
 async function postRequest(
   path: string,
   body: Record<string, unknown>,
@@ -167,9 +167,9 @@ export async function upgradeArtifact(artifactId: number): Promise<ApiResult> {
 }
 
 /**
- * POST the live Battle Pass claim form (`/battle-pass/claim/{instanceId}` +
- * `_csrf_token`). Path comes from `form[data-claim-form]` — not a guessed URL.
- */
+POST the live Battle Pass claim form (`/battle-pass/claim/{instanceId}` +
+`_csrf_token`). Path comes from `form[data-claim-form]` — not a guessed URL.
+*/
 export async function claimBattlePassReward(
   path: string,
   body: Record<string, unknown> = {},
@@ -178,10 +178,10 @@ export async function claimBattlePassReward(
 }
 
 /**
- * Pick a free "upgrade" target for AWA's stuck 24h lock bug (Megumin FAQ):
- * posting Upgrade on a maxed card spends 0 fragments and refreshes slot locks.
- * Prefer H`erkow Warrior Script when owned.
- */
+Pick a free "upgrade" target for AWA's stuck 24h lock bug (Megumin FAQ):
+posting Upgrade on a maxed card spends 0 fragments and refreshes slot locks.
+Prefer H`erkow Warrior Script when owned.
+*/
 export function pickStuckLockNudgeTarget(
   artifacts: {
     instanceId: number;
@@ -210,9 +210,9 @@ export function pickStuckLockNudgeTarget(
 }
 
 /**
- * Kick AWA's stuck-lock bug by upgrading a maxed (0-frag) artifact.
- * Safe to call on Refresh — no fragments spent when the card is already max.
- */
+Kick AWA's stuck-lock bug by upgrading a maxed (0-frag) artifact.
+Safe to call on Refresh — no fragments spent when the card is already max.
+*/
 export async function nudgeStuckSlotLocks(
   artifacts: {
     instanceId: number;
@@ -239,10 +239,10 @@ export async function nudgeStuckSlotLocks(
 }
 
 /**
- * Equip a recommended loadout into free / specified slots.
- * Uses /change-user-artifacts as an in-place replace (same as the site modal) —
- * do NOT unequip first; emptying a slot can burn the 24h cooldown and leave it empty.
- */
+Equip a recommended loadout into free / specified slots.
+Uses /change-user-artifacts as an in-place replace (same as the site modal) —
+do NOT unequip first; emptying a slot can burn the 24h cooldown and leave it empty.
+*/
 export async function applyLoadout(
   targets: { artifactId: number; position: ArtifactSlot }[],
   currentlyEquipped: { artifactId: number; position: ArtifactSlot }[],

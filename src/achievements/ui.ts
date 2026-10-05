@@ -57,8 +57,8 @@ function renderCategoryAutomationSwitches(
 }
 
 /**
- * Master "Run automatically" switch plus per-action toggles.
- */
+Master "Run automatically" switch plus per-action toggles.
+*/
 export function renderAchievementAutoControls(
   settings: AchievementSettings,
 ): string {

@@ -4,6 +4,7 @@ import {
   ArtifactTier,
   BASE_ACTIVITY,
   displayNameFor,
+  artifactTierAt,
   fragmentCostToUpgradeFrom,
   getArtifactById,
   getNumericEffect,
@@ -127,8 +128,8 @@ function nextUpgradeCandidate(
       continue;
     }
     const family = getArtifactById(artifact.familyId);
-    const toTier = (artifact.tier + 1) as ArtifactTier;
-    if (family?.effects[toTier] === undefined) {
+    const toTier = artifactTierAt(artifact.tier + 1);
+    if (toTier === undefined || family?.effects[toTier] === undefined) {
       continue;
     }
     const fragmentCost =
@@ -227,7 +228,7 @@ function siteStateAtNextUtcDay(state: SiteState, midnightMs: number): SiteState 
         timeWatched: 0,
         isUnderCap: true,
         remainingMs:
-          (watchTwitch.capArp ?? BASE_ACTIVITY.watchTwitchBasePerDay) *
+          watchTwitch.capArp *
           60_000,
       },
     }),
@@ -380,14 +381,14 @@ export function findBestCombo(
 }
 
 /**
- * True when an All-ARP% lock starting at `waitMs` nets more lifetime ARP than
- * keeping the best flat set.
- *
- * Twitch/ToS/dailies that still fit outside the lock (before equip or after
- * the 24h cooldown, by the user's UTC cutoff) are not a cost — do those on
- * the flat set. Calendar auto-claims at 00:00 UTC on whatever is equipped, so
- * a midnight inside the lock is forced. Community extra is lump × All-ARP%.
- */
+True when an All-ARP% lock starting at `waitMs` nets more lifetime ARP than
+keeping the best flat set.
+
+Twitch/ToS/dailies that still fit outside the lock (before equip or after
+the 24h cooldown, by the user's UTC cutoff) are not a cost — do those on
+the flat set. Calendar auto-claims at 00:00 UTC on whatever is equipped, so
+a midnight inside the lock is forced. Community extra is lump × All-ARP%.
+*/
 export function isAllArpWorthTheLock(
   allArpArtifacts: OwnedArtifact[],
   owned: OwnedArtifact[],
@@ -601,10 +602,10 @@ function forcedDailyArpDelta(
 }
 
 /**
- * Later community lump we can still All-ARP% if we do not start a new 24h lock.
- * 75k in 5h with a 12h slot lock is a miss; every ARP gate after that is the
- * plan — do not drop them just because an optimistic ETA sits near the lock.
- */
+Later community lump we can still All-ARP% if we do not start a new 24h lock.
+75k in 5h with a 12h slot lock is a miss; every ARP gate after that is the
+plan — do not drop them just because an optimistic ETA sits near the lock.
+*/
 export function resolveDeferredAllArp(
   owned: OwnedArtifact[],
   context: OptimizerContext,
@@ -667,9 +668,9 @@ export function resolveDeferredAllArp(
 }
 
 /**
- * Extra Steam ARP this week vs Twitch/calendar lost for one 24h lock.
- * Warrior Script +1 × 3 quests is not worth dropping Collapsed Star's Twitch day.
- */
+Extra Steam ARP this week vs Twitch/calendar lost for one 24h lock.
+Warrior Script +1 × 3 quests is not worth dropping Collapsed Star's Twitch day.
+*/
 function isExtraSteamWorthDisplacedDailies(
   best: ScoredCombo,
   steam: ScoredCombo,
@@ -689,11 +690,11 @@ function isExtraSteamWorthDisplacedDailies(
 }
 
 /**
- * Steam Quests remaining this week normally win the 24h pick (dailies reset;
- * we pick a lock day). If a higher-value lock beat Steam (community All-ARP%),
- * still offer the Steam-flat set as a side swap after that wear — not instead
- * of it. Skip when the extra Steam flat costs more daily ARP than it adds.
- */
+Steam Quests remaining this week normally win the 24h pick (dailies reset;
+we pick a lock day). If a higher-value lock beat Steam (community All-ARP%),
+still offer the Steam-flat set as a side swap after that wear — not instead
+of it. Skip when the extra Steam flat costs more daily ARP than it adds.
+*/
 export function resolveDeferredSteam(
   owned: OwnedArtifact[],
   context: OptimizerContext,
@@ -755,9 +756,9 @@ export function resolveDeferredSteam(
 }
 
 /**
- * When 24h ARP ties: prefer All-ARP% (Zorathian / HPC, Megumin community META),
- * then the currently equipped set so we don't swap for no gain.
- */
+When 24h ARP ties: prefer All-ARP% (Zorathian / HPC, Megumin community META),
+then the currently equipped set so we don't swap for no gain.
+*/
 function comboTieBreakDelta(
   scored: ScoredCombo,
   best: ScoredCombo,
@@ -775,9 +776,9 @@ function comboTieBreakDelta(
 }
 
 /**
- * Pick the best owned 1–3 piece loadout by a primary metric, with totalScore
- * then All-ARP% / currently-equipped as tie-breaks.
- */
+Pick the best owned 1–3 piece loadout by a primary metric, with totalScore
+then All-ARP% / currently-equipped as tie-breaks.
+*/
 export function findBestComboBy(
   owned: OwnedArtifact[],
   context: OptimizerContext,
@@ -997,8 +998,8 @@ export function unconstrainedAllArpCombo(
 }
 
 /**
- * When the All-ARP% set can actually go on (per-slot remaining), not a flat 24h.
- */
+When the All-ARP% set can actually go on (per-slot remaining), not a flat 24h.
+*/
 export function allArpEquipWaitMs(
   owned: OwnedArtifact[],
   settings: ArtifactOptimizerSettings,
@@ -1013,12 +1014,12 @@ export function allArpEquipWaitMs(
 }
 
 /**
- * Hold BP ARP Boosts while All-ARP% is off and the season still has time.
- * Also used while scoring so All-ARP% is not inflated by a claim that may wait.
- * Do not swap onto All-ARP% just because a boost is ready — twitch / community
- * can be worth more, and All-ARP% may go on later for those. Claim when already
- * wearing it, or when the season ends before it can go on.
- */
+Hold BP ARP Boosts while All-ARP% is off and the season still has time.
+Also used while scoring so All-ARP% is not inflated by a claim that may wait.
+Do not swap onto All-ARP% just because a boost is ready — twitch / community
+can be worth more, and All-ARP% may go on later for those. Claim when already
+wearing it, or when the season ends before it can go on.
+*/
 export function shouldWaitForAllArpBeforeBattlePass(
   owned: OwnedArtifact[],
   settings: ArtifactOptimizerSettings,

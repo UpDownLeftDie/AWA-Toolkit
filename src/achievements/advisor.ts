@@ -56,8 +56,8 @@ function collectNextUnearned(
 }
 
 /**
- * When automation already ran for this UTC day, hide the item until the next day.
- */
+When automation already ran for this UTC day, hide the item until the next day.
+*/
 function isSatisfiedForCurrentInterval(
   achievement: AchievementDefinition,
   settings: AchievementSettings,
@@ -80,7 +80,7 @@ function isSatisfiedForCurrentInterval(
   if (key === "watchVideos") {
     return cooldowns.watchVideosDate === today;
   }
-  return key === "readArticles" ? cooldowns.readArticlesDate === today : key === "gameVault" && cooldowns.gameVaultDate === today;
+  return (key === "readArticles" ? cooldowns.readArticlesDate : cooldowns.gameVaultDate) === today;
 }
 
 function buildTodo(
@@ -140,10 +140,10 @@ function emptyTodos(snapshot: AchievementSnapshot | undefined): ActionTodo[] {
 }
 
 /**
- * Next unearned achievements that are not already daily ARP work.
- * Chains collapse to the lowest unearned rank.
- * Automations already done for today are hidden until the next UTC day.
- */
+Next unearned achievements that are not already daily ARP work.
+Chains collapse to the lowest unearned rank.
+Automations already done for today are hidden until the next UTC day.
+*/
 export function buildAchievementTodos(
   snapshot: AchievementSnapshot | undefined,
   settings: AchievementSettings,

@@ -1,11 +1,11 @@
 /**
- * ASCE (AWA community event data sync) — hourly community-hours history.
- * https://github.com/MarvashMagalli/ASCE
- *
- * Timestamps are when ASCE fetched AWA, not when AWA itself updated. Late
- * posts after :30 were often manual — treat clock times as approximate.
- * Slot-align to the reported `hour` so fetch jitter does not skew the rate.
- */
+ASCE (AWA community event data sync) — hourly community-hours history.
+https://github.com/MarvashMagalli/ASCE
+
+Timestamps are when ASCE fetched AWA, not when AWA itself updated. Late
+posts after :30 were often manual — treat clock times as approximate.
+Slot-align to the reported `hour` so fetch jitter does not skew the rate.
+*/
 import { GM, GM_xmlhttpRequest } from '$';
 import type { SiteState } from './siteState/types';
 import {
@@ -25,9 +25,9 @@ const ASCE_HOURS_URL =
 const ASCE_CONFIG_URL =
   'https://raw.githubusercontent.com/MarvashMagalli/ASCE/main/configAWA.json';
 /**
- * ASCE updates about once an hour. Refresh mid-cycle so the next file is
- * picked up without hammering GitHub.
- */
+ASCE updates about once an hour. Refresh mid-cycle so the next file is
+picked up without hammering GitHub.
+*/
 const ASCE_CACHE_TTL_MS = 25 * 60 * 1000;
 const ASCE_ERROR_TTL_MS = 30 * 60 * 1000;
 const ASCE_SAMPLE_MAX = 96;
@@ -142,9 +142,9 @@ export function isAsceFeedForEvent(
 }
 
 /**
- * Use the reported clock hour on that calendar day, not the fetch minute.
- * ASCE timestamps are scrape times; some late :30+ rows were manual.
- */
+Use the reported clock hour on that calendar day, not the fetch minute.
+ASCE timestamps are scrape times; some late :30+ rows were manual.
+*/
 function asceSlotMs(timestamp: string, hour: number): number | undefined {
   const match = /^(\d{4})-(\d{2})-(\d{2})[ T](\d{2}):(\d{2}):(\d{2})/.exec(
     timestamp,
@@ -462,10 +462,10 @@ function applyFeedIfLive(state: SiteState, feed: AsceCommunityFeed): void {
 }
 
 /**
- * Apply GM-cached ASCE if present (no GitHub wait). Starts a background
- * fetch when the cache is missing, stale, or from a build that dropped
- * stretch goals.
- */
+Apply GM-cached ASCE if present (no GitHub wait). Starts a background
+fetch when the cache is missing, stale, or from a build that dropped
+stretch goals.
+*/
 export async function applyAsceCommunityHours(state: SiteState): Promise<void> {
   const event = state.communityEvent;
   if (!event?.isLive) {
@@ -489,9 +489,9 @@ export async function applyAsceCommunityHours(state: SiteState): Promise<void> {
 }
 
 /**
- * Await the in-flight / stale ASCE fetch and apply it. True when community
- * hours / ETA inputs changed from what was already on `state`.
- */
+Await the in-flight / stale ASCE fetch and apply it. True when community
+hours / ETA inputs changed from what was already on `state`.
+*/
 export async function didRefreshAsceCommunityHours(
   state: SiteState,
   options: { force?: boolean } = {},

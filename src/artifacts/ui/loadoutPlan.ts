@@ -45,9 +45,9 @@ export function utcResetDeadlineLabel(now = new Date()): string {
 }
 
 /**
- * Worn loadouts and planned display copies (every piece has a slot) stay in
- * slot 1–3 order. Other lists stay alphabetical.
- */
+Worn loadouts and planned display copies (every piece has a slot) stay in
+slot 1–3 order. Other lists stay alphabetical.
+*/
 export function sortArtifactsForDisplay<
   T extends { displayName: string; equippedPosition?: number },
 >(artifacts: T[]): T[] {
@@ -136,9 +136,9 @@ export function maxSlotCooldownMs(
 }
 
 /**
- * Per-slot cooldown labels (same shape as the panel note). Prefer this over a
- * single max/min — slots unlock independently.
- */
+Per-slot cooldown labels (same shape as the panel note). Prefer this over a
+single max/min — slots unlock independently.
+*/
 export function formatLockedSlotParts(
   settings: ArtifactOptimizerSettings,
   lockedSlots: ArtifactSlot[],
@@ -166,8 +166,8 @@ export function hasAnySlotOnCooldown(
 }
 
 /**
- * Showroom lock icons decide lock state. GM timers are not consulted.
- */
+Showroom lock icons decide lock state. GM timers are not consulted.
+*/
 export function isSlotLockedForEquip(
   current: ScoredCombo | undefined,
   position: ArtifactSlot,
@@ -210,9 +210,9 @@ export function plannedEquipLabel(change: {
 }
 
 /**
- * Monthly ARP proxy for a loadout — same weights as upgrade / search scoring.
- * Used to decide which partial fill maximizes lifetime ARP for the next lock.
- */
+Monthly ARP proxy for a loadout — same weights as upgrade / search scoring.
+Used to decide which partial fill maximizes lifetime ARP for the next lock.
+*/
 function loadoutMonthlyScore(artifacts: ScoredCombo['artifacts']): number {
   const bonuses = collectBonuses(artifacts);
   return (
@@ -234,8 +234,8 @@ function loadoutMonthlyScore(artifacts: ScoredCombo['artifacts']): number {
 }
 
 /**
- * Marginal monthly value of adding `artifact` onto an already-chosen basis.
- */
+Marginal monthly value of adding `artifact` onto an already-chosen basis.
+*/
 function marginalEquipScore(
   artifact: ScoredCombo['artifacts'][number],
   basis: ScoredCombo['artifacts'],
@@ -253,9 +253,9 @@ function compareByName(
 }
 
 /**
- * Order pieces by marginal value onto `basis` (highest first). Used so that if
- * only some API equips succeed, the best activator lands before weaker ones.
- */
+Order pieces by marginal value onto `basis` (highest first). Used so that if
+only some API equips succeed, the best activator lands before weaker ones.
+*/
 function sortByMarginalEquipPriority(
   pieces: ScoredCombo['artifacts'],
   basis: ScoredCombo['artifacts'],
@@ -268,14 +268,14 @@ function sortByMarginalEquipPriority(
 }
 
 /**
- * Choose which of the recommended missing pieces to put in the free slots.
- *
- * Leave-one-out on the *full* combo overvalues orphan set members (each
- * Zorathian piece looks like +10% All-ARP even when one slot cannot finish the
- * set). Instead pick the subset of size `slotCount` that maximizes monthly ARP
- * together with pieces already kept, then order that subset by marginal gain
- * so mid-failure still prefers All-ARP activators / high flats.
- */
+Choose which of the recommended missing pieces to put in the free slots.
+
+Leave-one-out on the *full* combo overvalues orphan set members (each
+Zorathian piece looks like +10% All-ARP even when one slot cannot finish the
+set). Instead pick the subset of size `slotCount` that maximizes monthly ARP
+together with pieces already kept, then order that subset by marginal gain
+so mid-failure still prefers All-ARP activators / high flats.
+*/
 function pickImmediateEquips(
   kept: ScoredCombo['artifacts'],
   remaining: ScoredCombo['artifacts'],
@@ -326,12 +326,12 @@ function pickImmediateEquips(
 }
 
 /**
- * Keep combo pieces already in place (including locked slots we cannot touch).
- * Fill free slots now so those 24h cooldowns start immediately. Remaining
- * pieces wait on locked slots as a second step. If every remaining piece
- * already has a free slot, do them in one shot — do not split a fully
- * unlocked board into two equip todos.
- */
+Keep combo pieces already in place (including locked slots we cannot touch).
+Fill free slots now so those 24h cooldowns start immediately. Remaining
+pieces wait on locked slots as a second step. If every remaining piece
+already has a free slot, do them in one shot — do not split a fully
+unlocked board into two equip todos.
+*/
 export function planLoadoutChanges(
   combo: ScoredCombo['artifacts'],
   current: ScoredCombo | undefined,
@@ -528,10 +528,10 @@ function assembleLoadoutPlan(
 }
 
 /**
- * Target loadout in slot 1–3 order: keep pieces that stay, then fill free
- * slots from the equip plan, then assign remaining pieces to leftover slots.
- * Aligns Recommended names with Currently equipped so replacements line up.
- */
+Target loadout in slot 1–3 order: keep pieces that stay, then fill free
+slots from the equip plan, then assign remaining pieces to leftover slots.
+Aligns Recommended names with Currently equipped so replacements line up.
+*/
 function artifactsInPlannedSlotOrder(
   combo: ScoredCombo['artifacts'],
   context: LoadoutLabelContext,
@@ -589,9 +589,9 @@ function placeComboInSlot(
 }
 
 /**
- * Stamp slot-ordered display copies on every loadout the UI labels. Call once
- * after optimize so comboLabel / loadoutLabel stay argument-free.
- */
+Stamp slot-ordered display copies on every loadout the UI labels. Call once
+after optimize so comboLabel / loadoutLabel stay argument-free.
+*/
 export function attachLoadoutDisplayOrder(
   result: OptimizerResult,
   settings: ArtifactOptimizerSettings,

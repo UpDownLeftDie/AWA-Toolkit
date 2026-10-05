@@ -73,23 +73,23 @@ import {
 export type ActionTone = 'default' | 'muted' | 'warn';
 
 /**
- * Ready-now loadout the Equip button on a What-to-do step should apply.
- */
+Ready-now loadout the Equip button on a What-to-do step should apply.
+*/
 export type EquipComboKey = 'best' | 'allArp';
 
 /**
- * How a step competes in the final "What to do" order.
- *
- * Sort: kind → readyAt → chain → duration → deadline slack → ARP.
- * Ready-now actions beat scheduled waits. Dailies delayed until a later
- * All-ARP% equip use kind "schedule" so they sit after that equip (chain)
- * instead of jumping to #1 when 00:00 UTC refreshes Watch Twitch.
- */
+How a step competes in the final "What to do" order.
+
+Sort: kind → readyAt → chain → duration → deadline slack → ARP.
+Ready-now actions beat scheduled waits. Dailies delayed until a later
+All-ARP% equip use kind "schedule" so they sit after that equip (chain)
+instead of jumping to #1 when 00:00 UTC refreshes Watch Twitch.
+*/
 export type ActionTodoUrgencyKind = 'action' | 'schedule' | 'info';
 
 /**
- * Soft dependency relative to an equip/swap step.
- */
+Soft dependency relative to an equip/swap step.
+*/
 export type ActionTodoChain = 'before' | 'equip' | 'after';
 
 type LoadoutLike = ActivityLoadoutStats | ScoredCombo | undefined;
@@ -97,20 +97,20 @@ type LoadoutLike = ActivityLoadoutStats | ScoredCombo | undefined;
 export interface ActionTodoUrgency {
   kind: ActionTodoUrgencyKind;
   /**
-   * ms until the user can start (0 = now).
-   */
+  ms until the user can start (0 = now).
+  */
   readyAtMs: number;
   /**
-   * ms to finish once started (0 = instant click).
-   */
+  ms to finish once started (0 = instant click).
+  */
   durationMs: number;
   /**
-   * ms until a hard loss deadline; omit when none.
-   */
+  ms until a hard loss deadline; omit when none.
+  */
   deadlineMs?: number;
   /**
-   * ARP at stake for tie-breaks.
-   */
+  ARP at stake for tie-breaks.
+  */
   arp?: number;
   chain?: ActionTodoChain;
 }
@@ -253,8 +253,8 @@ function defaultTodoUrgency(todo: ActionTodo): ActionTodoUrgency {
 }
 
 /**
- * Global order for numbered steps. Cautions stay pinned above via render.
- */
+Global order for numbered steps. Cautions stay pinned above via render.
+*/
 function sortActionTodosByUrgency(todos: ActionTodo[]): ActionTodo[] {
   return todos.toSorted((left, right) =>
     compareActionTodoUrgency(
@@ -270,10 +270,10 @@ function phaseChain(phase: ActivityPhase): ActionTodoChain {
   return phase === 'afterNow' || phase === 'after' ? 'after' : 'before';
 }
 
-type ActivityTodoRule = {
+interface ActivityTodoRule {
   key: ActivityKey;
   isDue: (caps: SiteState['caps']) => boolean;
-};
+}
 
 const ACTIVITY_TODO_RULES: readonly ActivityTodoRule[] = [
   {
@@ -336,10 +336,10 @@ function loadoutStats(combo: LoadoutLike): ActivityLoadoutStats | undefined {
   return 'timeOnSiteFlat' in combo ? combo : undefined;
 }
 
-type PlannedWear = {
+interface PlannedWear {
   stats: ActivityLoadoutStats;
   waitMs: number;
-};
+}
 
 function plannedWearForResets(
   result: OptimizerResult,
@@ -361,11 +361,7 @@ function plannedWearForResets(
   }
   const best = result.best;
   const current = result.current;
-  if (
-    best &&
-    (best.allArpPct ?? 0) > (current?.allArpPct ?? 0) &&
-    swapWaitMs > 0
-  ) {
+  if (best && best.allArpPct > (current?.allArpPct ?? 0) && swapWaitMs > 0) {
     return {
       stats: activityStatsForArtifacts(best.artifacts),
       waitMs: swapWaitMs,
@@ -378,7 +374,7 @@ function isActivityEnabled(
   settings: ArtifactOptimizerSettings,
   key: ActivityKey,
 ): boolean {
-  return settings.activities[key]?.enabled;
+  return settings.activities[key].enabled;
 }
 
 function communityEventTodoUrgency(
@@ -461,33 +457,35 @@ function battlePassClaimCountLabel(readyAll: number, readyArp: number): string {
   if (readyArp <= 0) {
     return readyAll === 1
       ? '1 Battle Pass reward'
-      : `${readyAll} Battle Pass rewards`;
+      : `${String(readyAll)} Battle Pass rewards`;
   }
   if (readyAll === readyArp) {
     return readyArp === 1
       ? '1 Battle Pass ARP Boost'
-      : `${readyArp} Battle Pass ARP Boosts`;
+      : `${String(readyArp)} Battle Pass ARP Boosts`;
   }
-  const boosts = readyArp === 1 ? '1 ARP Boost' : `${readyArp} ARP Boosts`;
-  return `${readyAll} Battle Pass rewards (${boosts})`;
+  const boosts =
+    readyArp === 1 ? '1 ARP Boost' : `${String(readyArp)} ARP Boosts`;
+  return `${String(readyAll)} Battle Pass rewards (${boosts})`;
 }
 
 function holdArpBoostReason(readyArp: number): string {
-  const arpLabel = readyArp === 1 ? '1 ARP Boost' : `${readyArp} ARP Boosts`;
+  const arpLabel =
+    readyArp === 1 ? '1 ARP Boost' : `${String(readyArp)} ARP Boosts`;
   return `Does not claim ${arpLabel} — those wait for All-ARP%`;
 }
 
 function nonArpBattlePassClaimLabel(nonArp: number): string {
   return nonArp === 1
     ? '1 cosmetic / fragment'
-    : `${nonArp} cosmetics / fragments`;
+    : `${String(nonArp)} cosmetics / fragments`;
 }
 
 /**
- * All-ARP% is owned but not equipped, and the season still has time.
- * Cosmetics/fragments are fine to claim now (can be step 1) — copy must make
- * clear ARP Boosts are held. Full ARP Boost claims wait for All-ARP%.
- */
+All-ARP% is owned but not equipped, and the season still has time.
+Cosmetics/fragments are fine to claim now (can be step 1) — copy must make
+clear ARP Boosts are held. Full ARP Boost claims wait for All-ARP%.
+*/
 function pushHeldArpBattlePassTodos(
   todos: ActionTodo[],
   siteState: SiteState,
@@ -713,15 +711,17 @@ function twitchArpReason(options: {
     return undefined;
   }
   if (options.upcomingReset === 'utc') {
-    return { text: `+${arp} ARP after 00:00 UTC` };
+    return { text: `+${String(arp)} ARP after 00:00 UTC` };
   }
   if (options.phase === 'after' && options.waitMs > 0) {
     const left = msAfterUnlockBeforeReset(options.waitMs);
     if (left > 0) {
-      return { text: `+${arp} ARP (fits in ${formatMs(left)} before reset)` };
+      return {
+        text: `+${String(arp)} ARP (fits in ${formatMs(left)} before reset)`,
+      };
     }
   }
-  return { text: `+${arp} ARP` };
+  return { text: `+${String(arp)} ARP` };
 }
 
 function discordPollActivityLabel(
@@ -735,7 +735,7 @@ function discordPollActivityLabel(
   if (options.phase === 'after') {
     return 'Vote Discord Poll';
   }
-  const bonusPart = bonus > 0 ? ` (+${bonus} equipped bonus)` : '';
+  const bonusPart = bonus > 0 ? ` (+${String(bonus)} equipped bonus)` : '';
   const nextPost = formatMs(msUntilNextDiscordPollPost());
   if (options.phase === 'before') {
     return `Vote Discord Poll now — next post in ${nextPost}${bonusPart}`;
@@ -747,7 +747,7 @@ function steamQuestCountLabel(count: number): string {
   if (count === 1) {
     return '1 Steam Quest';
   }
-  return count > 1 ? `${count} Steam Quests` : 'Steam Quest(s)';
+  return count > 1 ? `${String(count)} Steam Quests` : 'Steam Quest(s)';
 }
 
 function steamQuestsActivityLabel(
@@ -757,13 +757,13 @@ function steamQuestsActivityLabel(
     pendingCount: number;
   },
 ): string {
-  const bonusPart = bonus > 0 ? ` (+${bonus} equipped bonus)` : '';
+  const bonusPart = bonus > 0 ? ` (+${String(bonus)} equipped bonus)` : '';
   const beforePart = options.beforeSwap ? ' before swapping' : '';
   return `Complete ${steamQuestCountLabel(options.pendingCount)}${beforePart}${bonusPart}`;
 }
 
 function dailyQuestCountLabel(
-  pending: ReadonlyArray<{ kind: 'daily' | 'weekend' }>,
+  pending: readonly { kind: 'daily' | 'weekend' }[],
 ): string {
   const count = pending.length;
   if (count === 0) {
@@ -774,16 +774,16 @@ function dailyQuestCountLabel(
   if (daily > 0 && weekend > 0) {
     return count === 2
       ? 'Daily and Weekend Quests'
-      : `${count} Daily and Weekend Quests`;
+      : `${String(count)} Daily and Weekend Quests`;
   }
   if (weekend > 0) {
-    return count === 1 ? 'Weekend Quest' : `${count} Weekend Quests`;
+    return count === 1 ? 'Weekend Quest' : `${String(count)} Weekend Quests`;
   }
-  return count === 1 ? 'Daily Quest' : `${count} Daily Quests`;
+  return count === 1 ? 'Daily Quest' : `${String(count)} Daily Quests`;
 }
 
 function dailyQuestsActivityLabel(
-  pending: ReadonlyArray<{ kind: 'daily' | 'weekend' }>,
+  pending: readonly { kind: 'daily' | 'weekend' }[],
   options: {
     beforeSwap: boolean;
     utcDeadline: boolean;
@@ -807,7 +807,7 @@ function activityLabel(
     watchRemainingMs: number;
     utcDailyEndBufferMs: number;
     steamQuestCount?: number;
-    dailyQuestPending?: ReadonlyArray<{ kind: 'daily' | 'weekend' }>;
+    dailyQuestPending?: readonly { kind: 'daily' | 'weekend' }[];
   },
 ): string {
   const beforePart = options.beforeSwap ? ' before swapping' : '';
@@ -846,30 +846,29 @@ function activityLabel(
   }
 }
 
-function msAfterUnlockBeforeReset(waitMs: number, now = new Date()): number {
-  return Math.max(0, msUntilUtcMidnight(now) - waitMs);
+function msAfterUnlockBeforeReset(waitMs: number): number {
+  return Math.max(0, msUntilUtcMidnight() - waitMs);
 }
 
 function canFinishTwitchAfterUnlock(
   waitMs: number,
   watchRemainingMs: number,
   bufferMs: number,
-  now = new Date(),
 ): boolean {
+  const now = new Date();
   return (
     Math.max(0, msUntilUtcMidnight(now) - waitMs - bufferMs) >= watchRemainingMs
   );
 }
 
 /**
- * ARP from one UTC-reset activity on a loadout, including All-ARP%.
- * Used to decide whether waiting for a swap is actually better for that task.
- */
+ARP from one UTC-reset activity on a loadout, including All-ARP%.
+Used to decide whether waiting for a swap is actually better for that task.
+*/
 function activityWindowArp(
   combo: LoadoutLike,
   key: ActivityKey,
   siteState?: SiteState,
-  options?: { fullDay?: boolean },
 ): number {
   const stats = loadoutStats(combo);
   const allArpPct = stats?.allArpPct ?? combo?.allArpPct ?? 0;
@@ -877,9 +876,8 @@ function activityWindowArp(
   switch (key) {
     case 'watchTwitch': {
       base =
-        siteState === undefined || options?.fullDay === true
-          ? (siteState?.watchTwitch?.capArp ??
-              BASE_ACTIVITY.watchTwitchBasePerDay) +
+        siteState === undefined
+          ? BASE_ACTIVITY.watchTwitchBasePerDay +
             (stats?.watchTwitchFlat ?? comboBonusForActivity(combo, key))
           : twitchWatchRemainingMs(
               siteState,
@@ -896,13 +894,9 @@ function activityWindowArp(
       break;
     }
     case 'steamQuests': {
-      const remaining = siteState
+      const bases = siteState
         ? remainingSteamQuestRewards(siteState)
         : [...BASE_ACTIVITY.steamQuestBases];
-      const bases =
-        options?.fullDay === true
-          ? [...BASE_ACTIVITY.steamQuestBases]
-          : remaining;
       const flat = stats?.steamQuestsFlat ?? comboBonusForActivity(combo, key);
       return (
         (bases.reduce((sum, value) => sum + value, 0) + flat * bases.length) *
@@ -1362,13 +1356,13 @@ function sortTodosByUtcDeadline(items: ActionTodo[]): ActionTodo[] {
 }
 
 /**
- * Place due activities before or after the recommended swap.
- * Do current-loadout strengths first when a swap would drop that activity's
- * ARP; filling a free slot happens first so that 24h cooldown starts now.
- * After unlock, do activities the new set is better for. UTC-deadline
- * dailies that expire before slots unlock must be done now even if the bonus
- * isn't optimal.
- */
+Place due activities before or after the recommended swap.
+Do current-loadout strengths first when a swap would drop that activity's
+ARP; filling a free slot happens first so that 24h cooldown starts now.
+After unlock, do activities the new set is better for. UTC-deadline
+dailies that expire before slots unlock must be done now even if the bonus
+isn't optimal.
+*/
 function upcomingResetAtMs(
   key: ActivityKey,
   siteState: SiteState,
@@ -1722,8 +1716,8 @@ function flatBonusReason(
 ): string {
   const isAfterUnlock = waitMs > msUntilUtcMidnight();
   return isAfterUnlock
-    ? `+${amount} ${label} after unlock`
-    : `+${amount} ${label}`;
+    ? `+${String(amount)} ${label} after unlock`
+    : `+${String(amount)} ${label}`;
 }
 
 function pushAllArpEquipReasons(
@@ -1790,7 +1784,7 @@ function collectEquipReasons(
   // Mysterious Text Decipher (2%) are not a reason to equip / lock a slot.
   if (stats.marketDiscountPct >= VAULT_PRIORITY_DISCOUNT_PCT) {
     reasons.push({
-      text: `${Math.round(stats.marketDiscountPct * 100)}% Game Vault / marketplace discount before buying`,
+      text: `${String(Math.round(stats.marketDiscountPct * 100))}% Game Vault / marketplace discount before buying`,
     });
   }
 
@@ -1929,9 +1923,9 @@ function deferredSteamSetHeadline(waitMs: number): string {
 }
 
 /**
- * Recommended 24h lock already puts Steam flats on. The max Steam set waits
- * for that wear — fold it into the swap step so quests have one blocker.
- */
+Recommended 24h lock already puts Steam flats on. The max Steam set waits
+for that wear — fold it into the swap step so quests have one blocker.
+*/
 function shouldFoldDeferredSteam(
   best: ScoredCombo | undefined,
   deferred: OptimizerResult['deferredSteam'],
@@ -1960,7 +1954,7 @@ function deferredSteamFollowUpReason(
     incoming.length > 0 ? incoming : artifactsForDisplay(deferred),
   );
   return {
-    text: `Then ${incomingLabel} for +${bonus} Steam`,
+    text: `Then ${incomingLabel} for +${String(bonus)} Steam`,
   };
 }
 
@@ -2236,7 +2230,7 @@ function pushAllArpGuardTodos(
     todos.push({
       kind: 'caution',
       tone: hasScheduledAllArp ? 'warn' : 'muted',
-      text: `Don't claim Battle Pass ARP Boost yet (${arpReady} ready)`,
+      text: `Don't claim Battle Pass ARP Boost yet (${String(arpReady)} ready)`,
       reasons: [
         {
           text: hasScheduledAllArp
@@ -2577,7 +2571,7 @@ function upgradeTodosFor(
       continue;
     }
     const todo: ActionTodo = {
-      text: `Upgrade ${upgrade.artifact.displayName} to ${TIER_LABELS[upgrade.toTier]} (${upgrade.fragmentCost} frag)`,
+      text: `Upgrade ${upgrade.artifact.displayName} to ${TIER_LABELS[upgrade.toTier]} (${String(upgrade.fragmentCost)} frag)`,
       urgency: {
         kind: 'action',
         readyAtMs: 0,
@@ -2644,13 +2638,13 @@ function discordPollTodoText(options: {
   if (slot === 'afterFull' || slot === 'afterNow') {
     return 'Vote Discord Poll';
   }
-  const bonusPart = bonus > 0 ? ` (+${bonus} equipped bonus)` : '';
+  const bonusPart = bonus > 0 ? ` (+${String(bonus)} equipped bonus)` : '';
   const nextPost = formatMs(nextPostMs);
   if (slot === 'before') {
     return `Vote Discord Poll now — next post in ${nextPost}${bonusPart}`;
   }
   return bonus > 0
-    ? `Vote Discord Poll (+${bonus} already equipped)`
+    ? `Vote Discord Poll (+${String(bonus)} already equipped)`
     : 'Vote Discord Poll';
 }
 
@@ -2820,11 +2814,11 @@ function pushAfterSwapTodos(
 }
 
 /**
- * Maximize ARP under cooldowns: finish current-set strengths first only when
- * the next equip would drop that activity's ARP. Fill free slots now (sooner
- * cooldowns), remaining pieces when they unlock, then activities the new set
- * is better for.
- */
+Maximize ARP under cooldowns: finish current-set strengths first only when
+the next equip would drop that activity's ARP. Fill free slots now (sooner
+cooldowns), remaining pieces when they unlock, then activities the new set
+is better for.
+*/
 export function buildActionPlan(
   result: OptimizerResult,
   settings: ArtifactOptimizerSettings,
@@ -3030,7 +3024,7 @@ function renderAccountTodoButton(todo: ActionTodo): string {
     return `<button type="button" class="ao-equip-btn" data-equip="${todo.equipCombo}">${label}</button>`;
   }
   if (todo.upgradeInstanceId !== undefined) {
-    return `<button type="button" class="ao-upgrade-btn" data-id="${todo.upgradeInstanceId}">Upgrade</button>`;
+    return `<button type="button" class="ao-upgrade-btn" data-id="${String(todo.upgradeInstanceId)}">Upgrade</button>`;
   }
   if (todo.claimBattlePass === true) {
     const skipArp =
@@ -3062,10 +3056,10 @@ function isCautionTodo(todo: ActionTodo): boolean {
 }
 
 /**
- * True when the next step still uses the equipped set (e.g. finish Daily
- * Quests before a later swap). The compact summary should then show current
- * stats instead of advertising the future recommended loadout.
- */
+True when the next step still uses the equipped set (e.g. finish Daily
+Quests before a later swap). The compact summary should then show current
+stats instead of advertising the future recommended loadout.
+*/
 export function isKeepingCurrentLoadout(todos: ActionTodo[]): boolean {
   const firstStep = todos.find((todo) => !isCautionTodo(todo));
   return firstStep?.urgency?.chain !== 'equip';
@@ -3086,7 +3080,7 @@ export function renderActionPlanContents(
   const items = steps
     .map((todo, index) => {
       const toneClass = actionTodoToneClass(todo.tone);
-      return `<li class="ao-todo-item${toneClass}"><span class="ao-todo-index">${index + 1}.</span><div class="ao-todo-text">${renderActionTodoBody(todo)}</div>${renderTodoActionButton(todo, options)}</li>`;
+      return `<li class="ao-todo-item${toneClass}"><span class="ao-todo-index">${String(index + 1)}.</span><div class="ao-todo-text">${renderActionTodoBody(todo)}</div>${renderTodoActionButton(todo, options)}</li>`;
     })
     .join('');
   const listHtml =
