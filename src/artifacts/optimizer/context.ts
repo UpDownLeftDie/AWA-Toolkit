@@ -273,11 +273,9 @@ export function pinnedEquippedArtifacts(
 ): OwnedArtifact[] {
   const horizonMs = pinHorizonMs(siteState);
   return owned.filter((artifact) => {
-    if (artifact.equippedPosition === undefined) {
-      return false;
-    }
     // Showroom only — never pin from a GM timer alone.
     if (
+      artifact.equippedPosition === undefined ||
       !isShowroomSlotLocked(artifact.equippedPosition, {
         ...(slotLocks && { slotLocks }),
         ...(typeof artifact.slotLocked === 'boolean' && {

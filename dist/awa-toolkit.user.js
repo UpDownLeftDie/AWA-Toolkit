@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         AWA Toolkit
 // @namespace    https://github.com/UpDownLeftDie/AWA-Toolkit
-// @version      2.3.2
+// @version      2.3.3
 // @author       jaredcat
 // @description  Artifact Optimizer, Control Center tasks, giveaway/vault filters, and UCF reading mode
 // @license      AGPL-3.0-or-later
@@ -291,7 +291,8 @@
 	}
 	function requiresSteamFreeHydrate(state) {
 		if ((state.steamQuests?.quests ?? []).some((quest) => requiresSteamFreeLookup(quest))) return true;
-		return state.communityEvent ? requiresSteamFreeLookup(communityEventFreeGate(state.communityEvent)) : false;
+		const event = state.communityEvent;
+		return event !== void 0 && requiresSteamFreeLookup(communityEventFreeGate(event));
 	}
 	function communityEventFreeGate(event) {
 		return {
@@ -1151,7 +1152,7 @@
 	var STEAM_LIBRARY_SYNC_LABEL = /^(Check Game|Visit Steam|Sync Games)$/i;
 	var STEAM_OWNERSHIP_DENIAL = /do not own|don['’]t own|not in your steam library|not in your library|must own this game/i;
 	function hasSteamLibrarySyncControl(document_) {
-		return document_.querySelector(".btn-check-owned-games") ? true : [...document_.querySelectorAll("a, button")].some((element) => STEAM_LIBRARY_SYNC_LABEL.test(controlLabel(element)));
+		return Boolean(document_.querySelector(".btn-check-owned-games")) || [...document_.querySelectorAll("a, button")].some((element) => STEAM_LIBRARY_SYNC_LABEL.test(controlLabel(element)));
 	}
 	function hasSteamOwnershipDenialText(document_) {
 		return STEAM_OWNERSHIP_DENIAL.test(pageText(document_));
@@ -1252,8 +1253,7 @@
 		const priorByKey = new Map(previous.map((row) => [steamQuestRowKey(row), row]));
 		return scraped.map((row) => {
 			const prior = priorByKey.get(steamQuestRowKey(row));
-			if (!prior) return row;
-			if (row.eligibility !== "unknown" || prior.status !== row.status) return row;
+			if (!prior || row.eligibility !== "unknown" || prior.status !== row.status) return row;
 			const merged = {
 				...row,
 				eligibility: prior.eligibility
@@ -1840,7 +1840,7 @@
 			const text = node.textContent;
 			return text.includes(needle) && !text.includes(other);
 		}) ?? cell;
-		return scope.querySelector(".fa-check, .fa-check-circle, .bi-check, .bi-check-lg") ? true : /[✓✔]/.test(scope.textContent);
+		return Boolean(scope.querySelector(".fa-check, .fa-check-circle, .bi-check, .bi-check-lg")) || /[✓✔]/.test(scope.textContent);
 	}
 	function milestoneCellText(cell) {
 		const parts = [cell.textContent];
@@ -2300,7 +2300,7 @@
 		if (!feed) return false;
 		applyFeedIfLive(state, feed);
 		const next = state.communityEvent;
-		return next ? asceEventSignature(next) !== before : false;
+		return next !== void 0 && asceEventSignature(next) !== before;
 	}
 	var SETTINGS_KEY$1 = "artifactOptimizerSettings";
 	var HOURS_PER_DAY = 24;
@@ -2857,7 +2857,7 @@
 		return entries;
 	}
 	function isArpLogDocumentReady(document_) {
-		return documentBody(document_) ? Boolean(document_.querySelector(`${ARP_LOG_ROW_SELECTOR}, ${ARP_LOG_AFTER_ROWS_SELECTOR}`)) : false;
+		return Boolean(documentBody(document_)) && Boolean(document_.querySelector(`${ARP_LOG_ROW_SELECTOR}, ${ARP_LOG_AFTER_ROWS_SELECTOR}`));
 	}
 	function arpLogSignature(document_) {
 		return isArpLogDocumentReady(document_) ? scrapeArpLogFromDocument(document_).recent.map((entry) => `${entry.date ?? ""}|${entry.action}|${entry.arp}`).join(";") : "";
@@ -3798,8 +3798,7 @@
 		return maxReached && !isElementVisiblyHidden(maxReached) && /Max Cap Reached/i.test(maxReached.textContent) ? "capped" : readWatchTwitchCap(pageText(document_));
 	}
 	function readWatchTwitchCap(body) {
-		if (/Watch Twitch[\s\S]{0,400}?Incomplete:\s*\d+\s*ARP/i.test(body)) return "available";
-		if (/Watch Twitch[\s\S]{0,400}?\bIncomplete\b/i.test(body)) return "available";
+		if (/Watch Twitch[\s\S]{0,400}?Incomplete:\s*\d+\s*ARP/i.test(body) || /Watch Twitch[\s\S]{0,400}?\bIncomplete\b/i.test(body)) return "available";
 		if (/Watch Twitch[\s\S]{0,240}Max Cap Reached/i.test(body) && !/twitch-max-reached[^>]*display:\s*none/i.test(body)) return "capped";
 		return /Watch Twitch[\s\S]{0,80}\bComplete\b/i.test(body) ? "capped" : void 0;
 	}
@@ -3995,7 +3994,8 @@
 		return Boolean(document_.querySelector(CONTROL_CENTER_WIDGET));
 	}
 	function isControlCenterTwitchDataReady(document_) {
-		return document_.querySelector("#control-center__twitch-arp-status")?.textContent.trim() ? true : document_ !== document && parseDailyArpTwitchData(document_) !== void 0;
+		const status = document_.querySelector("#control-center__twitch-arp-status")?.textContent.trim();
+		return Boolean(status) || document_ !== document && parseDailyArpTwitchData(document_) !== void 0;
 	}
 	function isControlCenterActivityReady(document_) {
 		return isControlCenterDocumentReady(document_) && isControlCenterTwitchDataReady(document_);
@@ -4519,8 +4519,7 @@
 	function pinnedEquippedArtifacts(owned, settings, siteState, slotLocks) {
 		const horizonMs = pinHorizonMs(siteState);
 		return owned.filter((artifact) => {
-			if (artifact.equippedPosition === void 0) return false;
-			if (!isShowroomSlotLocked(artifact.equippedPosition, {
+			if (artifact.equippedPosition === void 0 || !isShowroomSlotLocked(artifact.equippedPosition, {
 				...slotLocks && { slotLocks },
 				...typeof artifact.slotLocked === "boolean" && { equippedSlotLocked: artifact.slotLocked }
 			})) return false;
@@ -5083,8 +5082,7 @@
 	}
 	function resolveDeferredAllArp(owned, context) {
 		const event = context.siteState.communityEvent;
-		if (!event?.isLive || !canEarnCommunityEventArp(event)) return;
-		if (hasAllArpEffect(currentLoadout(owned))) return;
+		if (!event?.isLive || !canEarnCommunityEventArp(event) || hasAllArpEffect(currentLoadout(owned))) return;
 		const artifacts = unconstrainedAllArpCombo(owned);
 		if (!artifacts) return;
 		const waitMs = allArpEquipWaitMs(owned, context.settings, context.snapshot.slotLocks, resolveNow(context));
@@ -5233,17 +5231,17 @@
 		const combo = unconstrainedAllArpCombo(owned);
 		return combo ? comboEquipWaitMs(combo, owned, settings, slotLocks, now) : void 0;
 	}
-	function shouldWaitForAllArpBeforeBattlePass(owned, settings, siteState, slotLocks) {
+	function shouldWaitForAllArpBeforeBattlePass(owned, settings, siteState, slotLocks, now = Date.now()) {
 		if (!hasInventoryAllArp(owned) || hasAllArpEffect(currentLoadout(owned)) || battlePassClaimableArp(siteState.battlePass) <= 0) return false;
-		const waitMs = allArpEquipWaitMs(owned, settings, slotLocks);
+		const waitMs = allArpEquipWaitMs(owned, settings, slotLocks, now);
 		if (waitMs === void 0) return false;
-		const bpLeft = battlePassRemainingMs(siteState.battlePass);
+		const bpLeft = battlePassRemainingMs(siteState.battlePass, now);
 		return bpLeft === void 0 || waitMs + BP_CLAIM_BUFFER_MS < bpLeft;
 	}
 	function shouldDeferBattlePassForContext(context) {
 		const cached = deferBattlePassCache.get(context);
 		if (cached !== void 0) return cached;
-		const shouldDefer = shouldWaitForAllArpBeforeBattlePass(resolveOwnedList(context), context.settings, context.siteState, context.snapshot.slotLocks);
+		const shouldDefer = shouldWaitForAllArpBeforeBattlePass(resolveOwnedList(context), context.settings, context.siteState, context.snapshot.slotLocks, resolveNow(context));
 		deferBattlePassCache.set(context, shouldDefer);
 		return shouldDefer;
 	}
@@ -7763,8 +7761,7 @@
 	}
 	function buildDiscordPollAction(options) {
 		const { result, settings, siteState, needsSwap, waitMs } = options;
-		if (!isActivityEnabled(settings, "discordPoll")) return;
-		if (hasVotedCurrentDiscordPoll(siteState.arpLog) || !isActivityAvailable(siteState.caps, "discordPoll")) return;
+		if (!isActivityEnabled(settings, "discordPoll") || hasVotedCurrentDiscordPoll(siteState.arpLog) || !isActivityAvailable(siteState.caps, "discordPoll")) return;
 		const nextPostMs = msUntilNextDiscordPollPost();
 		const current = result.current;
 		const best = result.best;
@@ -8229,8 +8226,7 @@
 		return ids.length > 0 ? ids : void 0;
 	}
 	function parseScheduledNotify(value) {
-		if (!isRecord(value) || !isNotifyKind(value.kind)) return;
-		if (typeof value.id !== "string" || typeof value.fireAt !== "number" || typeof value.title !== "string" || typeof value.body !== "string") return;
+		if (!isRecord(value) || !isNotifyKind(value.kind) || typeof value.id !== "string" || typeof value.fireAt !== "number" || typeof value.title !== "string" || typeof value.body !== "string") return;
 		const event = {
 			id: value.id,
 			kind: value.kind,
@@ -8817,17 +8813,16 @@
 		return (await loadRemotePage(path))?.document;
 	}
 	function isSnapshotFresh$1(snapshot) {
-		if (!snapshot || snapshot.artifacts.length === 0) return false;
-		if (!snapshot.slotLocks) return false;
+		if (!snapshot || snapshot.artifacts.length === 0 || !snapshot.slotLocks) return false;
 		const scrapedAt = Date.parse(snapshot.scrapedAt);
 		return !Number.isNaN(scrapedAt) && Date.now() - scrapedAt < STALE_MS$1;
 	}
 	function areSlotLocksFresh(snapshot) {
-		return snapshot?.slotLocks ? isScrapedWithin(snapshot.scrapedAt, SLOT_LOCK_STALE_MS) : false;
+		if (!snapshot?.slotLocks) return false;
+		return isScrapedWithin(snapshot.scrapedAt, SLOT_LOCK_STALE_MS);
 	}
 	function isCapsFresh(state, now = new Date()) {
-		if (!state || !isScrapedWithin(state.updatedAt, STALE_MS$1)) return false;
-		if (!isScrapedSinceUtcMidnight(state.updatedAt, now)) return false;
+		if (!state || !isScrapedWithin(state.updatedAt, STALE_MS$1) || !isScrapedSinceUtcMidnight(state.updatedAt, now)) return false;
 		if (Object.values(state.caps).every((status) => status === "unknown")) return false;
 		if (state.caps.steamQuests === "available" && (state.steamQuests?.quests.length ?? 0) === 0) return false;
 		return true;
@@ -10681,8 +10676,7 @@
 		return state.communityEvent?.isLive === true && (state.communityEvent.communityHoursSource !== "asce" || hasPendingAsceRefresh());
 	}
 	function requiresBackgroundHydrate(data, options = {}) {
-		if (options.force) return true;
-		if (hasElapsedShowroomLock(data.settings, data.snapshot?.slotLocks)) return true;
+		if (options.force || hasElapsedShowroomLock(data.settings, data.snapshot?.slotLocks)) return true;
 		if (!isArtifactsShowroomPage() && requiresRemoteSnapshotHydrate(data.snapshot)) return true;
 		return requiresRemoteSiteHydrate(data.siteState) || requiresSteamFreeHydrate(data.siteState) || requiresAsceHydrate(data.siteState);
 	}

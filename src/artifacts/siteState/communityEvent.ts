@@ -1352,11 +1352,13 @@ function isLabeledRowComplete(cell: Element, label: string): boolean {
     },
   );
   const scope = row ?? cell;
-  return scope.querySelector(
-    '.fa-check, .fa-check-circle, .bi-check, .bi-check-lg',
-  )
-    ? true
-    : /[✓✔]/.test(scope.textContent);
+  return (
+    Boolean(
+      scope.querySelector(
+        '.fa-check, .fa-check-circle, .bi-check, .bi-check-lg',
+      ),
+    ) || /[✓✔]/.test(scope.textContent)
+  );
 }
 
 function milestoneCellText(cell: Element): string {

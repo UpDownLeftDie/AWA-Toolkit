@@ -282,7 +282,11 @@ export function requiresSteamFreeHydrate(state: SiteState): boolean {
   if (quests.some((quest) => requiresSteamFreeLookup(quest))) {
     return true;
   }
-  return state.communityEvent ? requiresSteamFreeLookup(communityEventFreeGate(state.communityEvent)) : false;
+  const event = state.communityEvent;
+  return (
+    event !== undefined &&
+    requiresSteamFreeLookup(communityEventFreeGate(event))
+  );
 }
 
 function communityEventFreeGate(

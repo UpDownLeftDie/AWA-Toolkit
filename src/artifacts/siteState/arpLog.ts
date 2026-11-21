@@ -144,11 +144,14 @@ stamps `scrapedAt`, which then blocks the 6h background re-fetch — Discord
 Poll completion is only visible here, so that miss sticks until Refresh.
 */
 export function isArpLogDocumentReady(document_: Document): boolean {
-  return documentBody(document_) ? Boolean(
-    document_.querySelector(
-      `${ARP_LOG_ROW_SELECTOR}, ${ARP_LOG_AFTER_ROWS_SELECTOR}`,
-    ),
-  ) : false;
+  return (
+    Boolean(documentBody(document_)) &&
+    Boolean(
+      document_.querySelector(
+        `${ARP_LOG_ROW_SELECTOR}, ${ARP_LOG_AFTER_ROWS_SELECTOR}`,
+      ),
+    )
+  );
 }
 
 export function arpLogSignature(document_: Document): string {

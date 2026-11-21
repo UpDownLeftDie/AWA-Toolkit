@@ -139,15 +139,10 @@ function optionalNumberIds(value: unknown): number[] | undefined {
 }
 
 function parseScheduledNotify(value: unknown): ScheduledNotify | undefined {
-  if (!isRecord(value) || !isNotifyKind(value.kind)) {
-    return undefined;
-  }
-  if (
-    typeof value.id !== "string" ||
+  if (!isRecord(value) || !isNotifyKind(value.kind) || typeof value.id !== "string" ||
     typeof value.fireAt !== "number" ||
     typeof value.title !== "string" ||
-    typeof value.body !== "string"
-  ) {
+    typeof value.body !== "string") {
     return undefined;
   }
   const event: ScheduledNotify = {

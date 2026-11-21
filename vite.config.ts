@@ -4,6 +4,7 @@ import { defineConfig } from 'vite';
 import monkey from 'vite-plugin-monkey';
 
 const require = createRequire(import.meta.url);
+const { version } = require('./package.json') as { version: string };
 const installUrl =
   'https://raw.githubusercontent.com/UpDownLeftDie/AWA-Toolkit/main/dist/awa-toolkit.user.js';
 
@@ -38,6 +39,8 @@ export default defineConfig(({ command }) => {
             : installUrl,
           license: 'AGPL-3.0-or-later',
           ...require(resolve(process.cwd(), 'src', 'meta.ts')).default,
+          // package.json is the release version; keep userscript header in sync.
+          version,
         },
       }),
     ],

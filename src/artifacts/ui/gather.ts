@@ -319,12 +319,12 @@ export function requiresBackgroundHydrate(
   data: GatheredData,
   options: { force?: boolean } = {},
 ): boolean {
-  if (options.force) {
-    return true;
-  }
   // Timer elapsed + Showroom still locked: hydrate so we can run Megumin's
   // 0-frag upgrade even when the snapshot is otherwise "fresh".
-  if (hasElapsedShowroomLock(data.settings, data.snapshot?.slotLocks)) {
+  if (
+    options.force ||
+    hasElapsedShowroomLock(data.settings, data.snapshot?.slotLocks)
+  ) {
     return true;
   }
   if (

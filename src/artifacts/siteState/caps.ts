@@ -113,10 +113,10 @@ function readWatchTwitchCapFromDocument(
 function readWatchTwitchCap(body: string): CapStatus | undefined {
   // Plain-text fallback when dedicated Twitch status nodes are missing.
   // Incomplete must win over a hidden "Max Cap Reached" in the same card.
-  if (/Watch Twitch[\s\S]{0,400}?Incomplete:\s*\d+\s*ARP/i.test(body)) {
-    return 'available';
-  }
-  if (/Watch Twitch[\s\S]{0,400}?\bIncomplete\b/i.test(body)) {
+  if (
+    /Watch Twitch[\s\S]{0,400}?Incomplete:\s*\d+\s*ARP/i.test(body) ||
+    /Watch Twitch[\s\S]{0,400}?\bIncomplete\b/i.test(body)
+  ) {
     return 'available';
   }
   if (
@@ -601,7 +601,10 @@ export function isControlCenterTwitchDataReady(document_: Document): boolean {
   const status = document_
     .querySelector('#control-center__twitch-arp-status')
     ?.textContent.trim();
-  return status ? true : document_ !== document && parseDailyArpTwitchData(document_) !== undefined;
+  return (
+    Boolean(status) ||
+    (document_ !== document && parseDailyArpTwitchData(document_) !== undefined)
+  );
 }
 
 export function isControlCenterActivityReady(document_: Document): boolean {

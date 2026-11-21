@@ -336,11 +336,8 @@ async function loadRemoteDocument(path: string): Promise<Document | undefined> {
 }
 
 function isSnapshotFresh(snapshot: ArtifactSnapshot | undefined): boolean {
-  if (!snapshot || snapshot.artifacts.length === 0) {
-    return false;
-  }
   // Older snapshots lack lock data — force a Showroom refresh.
-  if (!snapshot.slotLocks) {
+  if (!snapshot || snapshot.artifacts.length === 0 || !snapshot.slotLocks) {
     return false;
   }
   const scrapedAt = Date.parse(snapshot.scrapedAt);
@@ -348,19 +345,23 @@ function isSnapshotFresh(snapshot: ArtifactSnapshot | undefined): boolean {
 }
 
 function areSlotLocksFresh(snapshot: ArtifactSnapshot | undefined): boolean {
-  return snapshot?.slotLocks ? isScrapedWithin(snapshot.scrapedAt, SLOT_LOCK_STALE_MS) : false;
+  if (!snapshot?.slotLocks) {
+    return false;
+  }
+  return isScrapedWithin(snapshot.scrapedAt, SLOT_LOCK_STALE_MS);
 }
 
 function isCapsFresh(
   state: SiteState | undefined,
   now = new Date(),
 ): boolean {
-  if (!state || !isScrapedWithin(state.updatedAt, STALE_MS)) {
-    return false;
-  }
   // Twitch / calendar / dailies / time-on-site all reset at 00:00 UTC — a
   // scrape from before today can't reflect that.
-  if (!isScrapedSinceUtcMidnight(state.updatedAt, now)) {
+  if (
+    !state ||
+    !isScrapedWithin(state.updatedAt, STALE_MS) ||
+    !isScrapedSinceUtcMidnight(state.updatedAt, now)
+  ) {
     return false;
   }
   const isCapsUnknown = Object.values(state.caps).every(

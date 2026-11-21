@@ -611,10 +611,7 @@ export function resolveDeferredAllArp(
   context: OptimizerContext,
 ): OptimizerResult['deferredAllArp'] | undefined {
   const event = context.siteState.communityEvent;
-  if (!event?.isLive || !canEarnCommunityEventArp(event)) {
-    return undefined;
-  }
-  if (hasAllArpEffect(currentLoadout(owned))) {
+  if (!event?.isLive || !canEarnCommunityEventArp(event) || hasAllArpEffect(currentLoadout(owned))) {
     return undefined;
   }
   const artifacts = unconstrainedAllArpCombo(owned);
@@ -1025,15 +1022,16 @@ export function shouldWaitForAllArpBeforeBattlePass(
   settings: ArtifactOptimizerSettings,
   siteState: SiteState,
   slotLocks?: Partial<Record<ArtifactSlotPosition, boolean>>,
+  now = Date.now(),
 ): boolean {
   if (!hasInventoryAllArp(owned) || hasAllArpEffect(currentLoadout(owned)) || (battlePassClaimableArp(siteState.battlePass) <= 0)) {
     return false;
   }
-  const waitMs = allArpEquipWaitMs(owned, settings, slotLocks);
+  const waitMs = allArpEquipWaitMs(owned, settings, slotLocks, now);
   if (waitMs === undefined) {
     return false;
   }
-  const bpLeft = battlePassRemainingMs(siteState.battlePass);
+  const bpLeft = battlePassRemainingMs(siteState.battlePass, now);
   return bpLeft === undefined || waitMs + BP_CLAIM_BUFFER_MS < bpLeft;
 }
 
@@ -1049,6 +1047,7 @@ export function shouldDeferBattlePassForContext(
     context.settings,
     context.siteState,
     context.snapshot.slotLocks,
+    resolveNow(context),
   );
   deferBattlePassCache.set(context, shouldDefer);
   return shouldDefer;

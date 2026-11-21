@@ -507,5 +507,5 @@ export async function didRefreshAsceCommunityHours(
   }
   applyFeedIfLive(state, feed);
   const next = state.communityEvent;
-  return next ? asceEventSignature(next) !== before : false;
+  return next !== undefined && asceEventSignature(next) !== before;
 }

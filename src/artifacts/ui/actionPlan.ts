@@ -2664,11 +2664,9 @@ function buildDiscordPollAction(options: {
   waitMs: number;
 }): { slot: DiscordPollSlot; todo: ActionTodo } | undefined {
   const { result, settings, siteState, needsSwap, waitMs } = options;
-  if (!isActivityEnabled(settings, 'discordPoll')) {
-    return undefined;
-  }
   // ARP Log is the only completion signal — trust it even if caps lagged.
   if (
+    !isActivityEnabled(settings, 'discordPoll') ||
     hasVotedCurrentDiscordPoll(siteState.arpLog) ||
     !isActivityAvailable(siteState.caps, 'discordPoll')
   ) {

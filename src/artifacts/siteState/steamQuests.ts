@@ -35,8 +35,11 @@ const STEAM_OWNERSHIP_DENIAL =
   /do not own|don['’]t own|not in your steam library|not in your library|must own this game/i;
 
 function hasSteamLibrarySyncControl(document_: Document): boolean {
-  return document_.querySelector('.btn-check-owned-games') ? true : [...document_.querySelectorAll('a, button')].some((element) =>
-    STEAM_LIBRARY_SYNC_LABEL.test(controlLabel(element)),
+  return (
+    Boolean(document_.querySelector('.btn-check-owned-games')) ||
+    [...document_.querySelectorAll('a, button')].some((element) =>
+      STEAM_LIBRARY_SYNC_LABEL.test(controlLabel(element)),
+    )
   );
 }
 
@@ -229,10 +232,7 @@ function mergeSteamQuestRows(
   );
   return scraped.map((row) => {
     const prior = priorByKey.get(steamQuestRowKey(row));
-    if (!prior) {
-      return row;
-    }
-    if (row.eligibility !== 'unknown' || prior.status !== row.status) {
+    if (!prior || row.eligibility !== 'unknown' || prior.status !== row.status) {
       return row;
     }
     const merged: SteamQuestRow = {

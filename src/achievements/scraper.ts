@@ -453,10 +453,10 @@ export async function loadAchievementSnapshot(): Promise<
       return undefined;
     }
     const snapshot = parsed as AchievementSnapshot;
-    return typeof snapshot.scrapedAt !== 'string' ||
-      typeof snapshot.items !== 'object'
-      ? undefined
-      : snapshot;
+    return typeof snapshot.scrapedAt === 'string' &&
+      typeof snapshot.items === 'object'
+      ? snapshot
+      : undefined;
   } catch {
     return undefined;
   }

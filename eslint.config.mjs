@@ -61,6 +61,10 @@ export default [
       // Autofix rewrites guards as ternaries, which then trip
       // unicorn/prefer-logical-operator-over-ternary and sonarjs/no-selector-parameter.
       'unicorn/prefer-ternary': 'off',
+      // Action helpers like showAoDialog return boolean; a verb prefix is correct.
+      'unicorn/consistent-boolean-name': 'off',
+      // Optional trailing args are common for Document / slotLocks overrides.
+      'unicorn/prefer-options-parameter': 'off',
       'unicorn/prefer-global-number-constants': 'off',
       'unicorn/prefer-number-properties': [
         'error',
