@@ -249,6 +249,17 @@ function isStaticBattlePassPreview(document_: Document): boolean {
   );
 }
 
+/**
+Popup shells can paint before CLAIM / COMPLETE markers. Without those (or
+legacy "Ready to claim" copy) the track is still loading — do not cache 0.
+*/
+function hasBattlePassClaimUi(document_: Document): boolean {
+  return Boolean(
+    document_.querySelector('.bp-popup__claim-btn, .bp-popup__claimed') ??
+      /Ready to claim/i.test(documentBody(document_)?.textContent ?? ''),
+  );
+}
+
 export function scrapeBattlePassFromDocument(
   document_: Document,
   pageUrl?: string,
@@ -260,6 +271,11 @@ export function scrapeBattlePassFromDocument(
   // Tokens can be in the fetch HTML while claim popups are client-rendered.
   // Treat that as "not loaded" so we don't cache 0 ready over real boosts.
   if (legacyClaims === 0 && popups.length === 0) {
+    return undefined;
+  }
+  // Popup shells alone are not a loaded track — same premature-0 risk as a
+  // remote empty shell.
+  if (!hasBattlePassClaimUi(document_)) {
     return undefined;
   }
   // `/battle-pass/{id}` is a logged-out rewards map (every milestone locked).
@@ -400,10 +416,43 @@ export function battlePassRemainingMs(
   return parsed === undefined || Number.isNaN(scrapedAt) ? undefined : Math.max(0, parsed - (now - scrapedAt));
 }
 
+/**
+Remote empty / partial shells (claimed markers in SSR, CLAIM buttons only after
+JS) must not wipe a same-season visit that already saw ready claims. Live
+visits are trusted — including a real 0 after the user claims on the page.
+*/
+function isSparseBattlePassScrape(
+  scraped: BattlePassState,
+  previous: BattlePassState | undefined,
+  source: 'visit' | 'remote',
+): boolean {
+  if (source !== 'remote' || !previous) {
+    return false;
+  }
+  const scrapedId = battlePassSeasonId(scraped.url);
+  const previousId = battlePassSeasonId(previous.url);
+  if (
+    scrapedId !== undefined &&
+    previousId !== undefined &&
+    scrapedId !== previousId
+  ) {
+    return false;
+  }
+  const previousReady =
+    previous.readyToClaim > 0 || (previous.readyClaims?.length ?? 0) > 0;
+  return (
+    previousReady &&
+    scraped.readyToClaim === 0 &&
+    (scraped.readyClaims?.length ?? 0) === 0
+  );
+}
+
 export function mergeBattlePassScrape(
   scraped: BattlePassState,
   previous: BattlePassState | undefined,
+  options: { source?: 'visit' | 'remote' } = {},
 ): BattlePassState {
+  const source = options.source ?? 'visit';
   const scrapedId = battlePassSeasonId(scraped.url);
   const previousId = battlePassSeasonId(previous?.url);
   // Visiting an ended pass must not replace the current season's ready claims.
@@ -413,6 +462,9 @@ export function mergeBattlePassScrape(
     previousId !== undefined &&
     scrapedId < previousId
   ) {
+    return previous;
+  }
+  if (previous && isSparseBattlePassScrape(scraped, previous, source)) {
     return previous;
   }
   if (scraped.endsAt || !previous?.endsAt) {
@@ -1249,11 +1301,8 @@ export function scrapeBattlePass(): BattlePassState | undefined {
 }
 
 export function isBattlePassDocumentReady(document_: Document): boolean {
-  return Boolean(
-    document_.querySelector(
-      '.bp-popup[data-milestone-id], .bp-popup__claim-btn, .bp-popup__claimed',
-    ) ?? /Ready to claim/i.test(documentBody(document_)?.textContent ?? ''),
-  );
+  // Popup shells paint before CLAIM / COMPLETE — those alone are not ready.
+  return hasBattlePassClaimUi(document_);
 }
 
 export async function waitForBattlePassDocument(

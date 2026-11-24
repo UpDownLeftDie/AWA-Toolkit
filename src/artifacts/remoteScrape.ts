@@ -351,16 +351,18 @@ function areSlotLocksFresh(snapshot: ArtifactSnapshot | undefined): boolean {
   return isScrapedWithin(snapshot.scrapedAt, SLOT_LOCK_STALE_MS);
 }
 
-function isCapsFresh(
+export function isCapsFresh(
   state: SiteState | undefined,
   now = new Date(),
 ): boolean {
   // Twitch / calendar / dailies / time-on-site all reset at 00:00 UTC — a
   // scrape from before today can't reflect that.
+  const capsAt = state?.capsScrapedAt;
   if (
     !state ||
-    !isScrapedWithin(state.updatedAt, STALE_MS) ||
-    !isScrapedSinceUtcMidnight(state.updatedAt, now)
+    !capsAt ||
+    !isScrapedWithin(capsAt, STALE_MS) ||
+    !isScrapedSinceUtcMidnight(capsAt, now)
   ) {
     return false;
   }
@@ -411,7 +413,9 @@ async function refreshBattlePassOnly(
   }
   const battlePass = scrapeBattlePassFromDocument(battleDocument, path);
   if (battlePass) {
-    next.battlePass = mergeBattlePassScrape(battlePass, next.battlePass);
+    next.battlePass = mergeBattlePassScrape(battlePass, next.battlePass, {
+      source: 'remote',
+    });
   }
 }
 
@@ -952,6 +956,7 @@ function applyControlCenterDocument(
   applyDailyQuestsFromDocument(next, controlDocument);
   applyWatchTwitchProgress(next, controlDocument);
   applyBattlePassEndFromDocument(next, controlDocument);
+  next.capsScrapedAt = new Date().toISOString();
 }
 
 async function applyRemoteBattlePass(
@@ -971,7 +976,9 @@ async function applyRemoteBattlePass(
   }
   const battlePass = scrapeBattlePassFromDocument(document_, resolved);
   if (battlePass) {
-    next.battlePass = mergeBattlePassScrape(battlePass, next.battlePass);
+    next.battlePass = mergeBattlePassScrape(battlePass, next.battlePass, {
+      source: 'remote',
+    });
   }
 }
 
@@ -1131,7 +1138,8 @@ export async function ensureSiteState(
   // Merge scrapes already keep ASCE hours / samples / play eligibility; force
   // just means "don't trust TTL". Short cooldown stops Refresh spam.
   const isForceCaps =
-    isForce && !isScrapedWithin(existing.updatedAt, FORCE_REFRESH_COOLDOWN_MS);
+    isForce &&
+    !isScrapedWithin(existing.capsScrapedAt, FORCE_REFRESH_COOLDOWN_MS);
   // Always re-pull ARP Log on Refresh — Discord Poll / calendar completion
   // only show up there, and a vote cast right after open must clear the step.
   const isForceArpLog = isForce;
@@ -1174,7 +1182,6 @@ export async function ensureSiteState(
 
   const next: SiteState = {
     ...existing,
-    updatedAt: new Date().toISOString(),
     caps: { ...existing.caps },
   };
 

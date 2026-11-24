@@ -6,6 +6,7 @@ import {
   battlePassPathFromDocument,
   battlePassSeasonId,
   discoverBattlePassPath,
+  isBattlePassDocumentReady,
   isPublicBattlePassSeasonPage,
   mergeBattlePassScrape,
   newerBattlePassPath,
@@ -310,6 +311,42 @@ describe('scrapeBattlePassFromDocument', () => {
     ).toBeUndefined();
   });
 
+  it('treats popup shells without claim/claimed UI as not loaded', () => {
+    const popup = element('div', 'bp-popup', {
+      attrs: { 'data-milestone-id': '40' },
+    });
+    const root = element('div', 'bp-landing bp-landing--personal', {
+      children: [popup],
+    });
+    const document_ = asDocument(root);
+    expect(isBattlePassDocumentReady(document_)).toBe(false);
+    expect(
+      scrapeBattlePassFromDocument(
+        document_,
+        '/control-center/battle-pass/2',
+      ),
+    ).toBeUndefined();
+  });
+
+  it('is ready when claimed markers exist even with zero CLAIM buttons', () => {
+    const claimed = element('div', 'bp-popup__claimed', { text: 'COMPLETE' });
+    const popup = element('div', 'bp-popup', {
+      attrs: { 'data-milestone-id': '40' },
+      children: [claimed],
+    });
+    const root = element('div', 'bp-landing bp-landing--personal', {
+      children: [popup],
+    });
+    const document_ = asDocument(root);
+    expect(isBattlePassDocumentReady(document_)).toBe(true);
+    const state = scrapeBattlePassFromDocument(
+      document_,
+      '/control-center/battle-pass/2',
+    );
+    expect(state?.readyToClaim).toBe(0);
+    expect(state?.url).toBe('/control-center/battle-pass/2');
+  });
+
   it('reads the personal track: season url, token counters, and countdown', () => {
     const title = element('h3', 'bp-popup__title', { text: 'ARP Boost' });
     const csrf = element('input', '', {
@@ -374,6 +411,31 @@ describe('scrapeBattlePassFromDocument', () => {
         current,
       ).url,
     ).toBe('/control-center/battle-pass/4');
+  });
+
+  it('keeps previous ready claims when a remote scrape is sparse zero', () => {
+    const current: BattlePassState = {
+      ...passState('/control-center/battle-pass/2', 3),
+      readyClaims: [
+        {
+          milestoneId: '40',
+          isArp: true,
+          claimPath: '/battle-pass/claim/99',
+        },
+      ],
+    };
+    const remoteEmpty = passState('/control-center/battle-pass/2', 0);
+    expect(
+      mergeBattlePassScrape(remoteEmpty, current, { source: 'remote' }),
+    ).toBe(current);
+  });
+
+  it('lets a live visit zero out ready claims after claiming', () => {
+    const current = passState('/control-center/battle-pass/2', 3);
+    const afterClaim = passState('/control-center/battle-pass/2', 0);
+    expect(
+      mergeBattlePassScrape(afterClaim, current, { source: 'visit' }),
+    ).toEqual(afterClaim);
   });
 
   it('labels skip-ARP claim buttons as non-ARP, not bare Claim rewards', () => {

@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         AWA Toolkit
 // @namespace    https://github.com/UpDownLeftDie/AWA-Toolkit
-// @version      2.3.3
+// @version      2.3.4
 // @author       jaredcat
 // @description  Artifact Optimizer, Control Center tasks, giveaway/vault filters, and UCF reading mode
 // @license      AGPL-3.0-or-later
@@ -3155,11 +3155,15 @@
 	function isStaticBattlePassPreview(document_) {
 		return Boolean(document_.querySelector(".bp-landing--static, .bp-landing__login-prompt") && !document_.querySelector(".bp-popup__claim-btn, .bp-popup__claimed, form[data-claim-form]"));
 	}
+	function hasBattlePassClaimUi(document_) {
+		return Boolean(document_.querySelector(".bp-popup__claim-btn, .bp-popup__claimed") ?? /Ready to claim/i.test(documentBody(document_)?.textContent ?? ""));
+	}
 	function scrapeBattlePassFromDocument(document_, pageUrl) {
 		const body = pageText(document_);
 		const popups = document_.querySelectorAll(".bp-popup[data-milestone-id]");
 		const tokensMatch = /BATTLE TOKENS\s*([\d,]+)\s*\/\s*([\d,]+)/i.exec(body);
 		if ((body.match(/Ready to claim/gi) ?? []).length === 0 && popups.length === 0) return;
+		if (!hasBattlePassClaimUi(document_)) return;
 		if (isStaticBattlePassPreview(document_)) return;
 		const url = battlePassControlCenterPath(pageUrl) ?? battlePassPathFromDocument(document_) ?? battlePassControlCenterPath(location.pathname);
 		if (!url) return;
@@ -3227,10 +3231,19 @@
 		const scrapedAt = Date.parse(battlePass.scrapedAt);
 		return parsed === void 0 || Number.isNaN(scrapedAt) ? void 0 : Math.max(0, parsed - (now - scrapedAt));
 	}
-	function mergeBattlePassScrape(scraped, previous) {
+	function isSparseBattlePassScrape(scraped, previous, source) {
+		if (source !== "remote" || !previous) return false;
+		const scrapedId = battlePassSeasonId(scraped.url);
+		const previousId = battlePassSeasonId(previous.url);
+		if (scrapedId !== void 0 && previousId !== void 0 && scrapedId !== previousId) return false;
+		return (previous.readyToClaim > 0 || (previous.readyClaims?.length ?? 0) > 0) && scraped.readyToClaim === 0 && (scraped.readyClaims?.length ?? 0) === 0;
+	}
+	function mergeBattlePassScrape(scraped, previous, options = {}) {
+		const source = options.source ?? "visit";
 		const scrapedId = battlePassSeasonId(scraped.url);
 		const previousId = battlePassSeasonId(previous?.url);
 		if (previous && scrapedId !== void 0 && previousId !== void 0 && scrapedId < previousId) return previous;
+		if (previous && isSparseBattlePassScrape(scraped, previous, source)) return previous;
 		if (scraped.endsAt || !previous?.endsAt) return scraped;
 		const merged = {
 			...scraped,
@@ -3653,7 +3666,7 @@
 		return location.pathname.includes("/battle-pass") ? scrapeBattlePassFromDocument(document, location.pathname) : void 0;
 	}
 	function isBattlePassDocumentReady(document_) {
-		return Boolean(document_.querySelector(".bp-popup[data-milestone-id], .bp-popup__claim-btn, .bp-popup__claimed") ?? /Ready to claim/i.test(documentBody(document_)?.textContent ?? ""));
+		return hasBattlePassClaimUi(document_);
 	}
 	async function waitForBattlePassDocument(timeoutMs = 12e3) {
 		if (isBattlePassDocumentReady(document)) return;
@@ -4247,22 +4260,28 @@
 	function isSiteState(value) {
 		return typeof value === "object" && !!value && "caps" in value;
 	}
+	function withoutLegacyUpdatedAt(state) {
+		const payload = { ...state };
+		delete payload.updatedAt;
+		return payload;
+	}
 	async function loadSiteState() {
 		const raw = await _GM.getValue(SITE_STATE_KEY);
 		if (!raw) return;
 		try {
 			const parsed = typeof raw === "string" ? JSON.parse(raw) : raw;
 			if (!isSiteState(parsed)) return;
+			const cleaned = withoutLegacyUpdatedAt(parsed);
 			return {
-				...parsed,
-				caps: normalizeCaps(parsed.caps)
+				...cleaned,
+				caps: normalizeCaps(cleaned.caps)
 			};
 		} catch {
 			return;
 		}
 	}
 	async function saveSiteState(state) {
-		await _GM.setValue(SITE_STATE_KEY, JSON.stringify(state));
+		await _GM.setValue(SITE_STATE_KEY, JSON.stringify(withoutLegacyUpdatedAt(state)));
 	}
 	function applyWatchTwitchFromDocument(next) {
 		const progress = scrapeWatchTwitchProgressFromDocument(document, next.watchTwitch);
@@ -4275,6 +4294,7 @@
 		applyDailyQuestsFromDocument(next, document);
 		applyWatchTwitchFromDocument(next);
 		applyBattlePassEndFromDocument(next, document);
+		next.capsScrapedAt = new Date().toISOString();
 		const banner = scrapeLiveCommunityEventBanner(document);
 		if (banner) {
 			next.caps.steamCommunityEvent = "available";
@@ -4303,7 +4323,7 @@
 		if (path.includes("/marketplace") || path.includes("/game-vault")) applyGameVaultDocument(next, document);
 		if (path.includes("/battle-pass")) {
 			const battlePass = scrapeBattlePass();
-			if (battlePass) next.battlePass = mergeBattlePassScrape(battlePass, next.battlePass);
+			if (battlePass) next.battlePass = mergeBattlePassScrape(battlePass, next.battlePass, { source: "visit" });
 		}
 		if (path.includes("/arp-log") && isArpLogDocumentReady(document)) next.arpLog = mergeArpLogScrape(scrapeArpLogFromDocument(document), next.arpLog);
 		if (path.includes("/steam/community-event")) applyCommunityEventPage(next);
@@ -4312,16 +4332,12 @@
 		if (next.communityEvent) next.communityEvent = reconcileCommunityEventWithArpLog(next.communityEvent, next.arpLog);
 	}
 	async function refreshSiteStateFromPage() {
-		const previous = await loadSiteState() ?? {
-			updatedAt: new Date().toISOString(),
-			caps: { ...DEFAULT_CAPS },
-			gameVault: []
-		};
+		const previous = await loadSiteState() ?? emptySiteState();
 		if (location.pathname.includes("/arp-log")) await waitForArpLogDocument();
+		if (location.pathname.includes("/battle-pass")) await waitForBattlePassDocument();
 		if (location.pathname.includes("/control-center") && !location.pathname.includes("/battle-pass")) await waitForControlCenterDocument();
 		const next = {
 			...previous,
-			updatedAt: new Date().toISOString(),
 			caps: { ...previous.caps }
 		};
 		applyLiveDocumentToSiteState(next);
@@ -4363,6 +4379,16 @@
 				persistIfChanged();
 			}, 250);
 		};
+		const flushPendingPersist = () => {
+			if (debounceTimer === void 0) return;
+			clearTimeout(debounceTimer);
+			debounceTimer = void 0;
+			persistIfChanged();
+		};
+		window.addEventListener("pagehide", flushPendingPersist);
+		document.addEventListener("visibilitychange", () => {
+			if (document.visibilityState === "hidden") flushPendingPersist();
+		});
 		(async () => {
 			await options.waitForReady();
 			await persistIfChanged();
@@ -4418,7 +4444,6 @@
 	}
 	function emptySiteState() {
 		return {
-			updatedAt: new Date(0).toISOString(),
 			caps: { ...DEFAULT_CAPS },
 			gameVault: []
 		};
@@ -8822,7 +8847,8 @@
 		return isScrapedWithin(snapshot.scrapedAt, SLOT_LOCK_STALE_MS);
 	}
 	function isCapsFresh(state, now = new Date()) {
-		if (!state || !isScrapedWithin(state.updatedAt, STALE_MS$1) || !isScrapedSinceUtcMidnight(state.updatedAt, now)) return false;
+		const capsAt = state?.capsScrapedAt;
+		if (!state || !capsAt || !isScrapedWithin(capsAt, STALE_MS$1) || !isScrapedSinceUtcMidnight(capsAt, now)) return false;
 		if (Object.values(state.caps).every((status) => status === "unknown")) return false;
 		if (state.caps.steamQuests === "available" && (state.steamQuests?.quests.length ?? 0) === 0) return false;
 		return true;
@@ -8841,7 +8867,7 @@
 		const battleDocument = await loadRemoteDocument(path);
 		if (!battleDocument) return;
 		const battlePass = scrapeBattlePassFromDocument(battleDocument, path);
-		if (battlePass) next.battlePass = mergeBattlePassScrape(battlePass, next.battlePass);
+		if (battlePass) next.battlePass = mergeBattlePassScrape(battlePass, next.battlePass, { source: "remote" });
 	}
 	async function refreshGameVaultOnly(next) {
 		const vaultDocument = await loadRemoteDocument(GAME_VAULT_PATH$1);
@@ -9091,13 +9117,14 @@
 		applyDailyQuestsFromDocument(next, controlDocument);
 		applyWatchTwitchProgress(next, controlDocument);
 		applyBattlePassEndFromDocument(next, controlDocument);
+		next.capsScrapedAt = new Date().toISOString();
 	}
 	async function applyRemoteBattlePass(next, battlePassPath, controlDocument, battleDocument) {
 		const resolved = newerBattlePassPath(battlePassPath, controlDocument) ?? battlePassPath;
 		const document_ = resolved && resolved !== battlePassPath ? await loadRemoteDocument(resolved) : battleDocument;
 		if (!document_ || !resolved) return;
 		const battlePass = scrapeBattlePassFromDocument(document_, resolved);
-		if (battlePass) next.battlePass = mergeBattlePassScrape(battlePass, next.battlePass);
+		if (battlePass) next.battlePass = mergeBattlePassScrape(battlePass, next.battlePass, { source: "remote" });
 	}
 	async function refreshActivityPages(next, battlePassPath) {
 		const [controlDocument, questDocument, battleDocument, vaultDocument] = await Promise.all([
@@ -9163,7 +9190,7 @@
 			force: isForce
 		});
 		const hasBattlePassSeasonChanged = battlePassPath !== void 0 && battlePassPath !== battlePassControlCenterPath(existing.battlePass?.url);
-		const isForceCaps = isForce && !isScrapedWithin(existing.updatedAt, FORCE_REFRESH_COOLDOWN_MS$1);
+		const isForceCaps = isForce && !isScrapedWithin(existing.capsScrapedAt, FORCE_REFRESH_COOLDOWN_MS$1);
 		const isForceArpLog = isForce;
 		const isForceEvent = isForce && !isScrapedWithin(existing.communityEvent?.scrapedAt, FORCE_REFRESH_COOLDOWN_MS$1);
 		const requiresCapsRefresh = isForceCaps || !isCapsFresh(existing);
@@ -9180,7 +9207,6 @@
 		}
 		const next = {
 			...existing,
-			updatedAt: new Date().toISOString(),
 			caps: { ...existing.caps }
 		};
 		if (requiresCapsRefresh) await refreshActivityPages(next, battlePassPath);
@@ -10949,7 +10975,7 @@
 		}).filter(Boolean);
 		if (rows.length === 0) return "";
 		return `<div class="ao-note">
-      <div><strong>Activity caps</strong>${siteState.updatedAt ? ` · ${escapeHtml(new Date(siteState.updatedAt).toLocaleString())}` : ""}</div>
+      <div><strong>Activity caps</strong>${siteState.capsScrapedAt ? ` · ${escapeHtml(new Date(siteState.capsScrapedAt).toLocaleString())}` : ""}</div>
       ${rows.join("")}
     </div>`;
 	}

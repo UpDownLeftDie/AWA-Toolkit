@@ -26,7 +26,7 @@ function vaultOpenState(
   overrides: Partial<SiteState> = {},
 ): SiteState {
   return {
-    updatedAt: isoAt(NOW_MS),
+    capsScrapedAt: isoAt(NOW_MS),
     caps: {
       timeOnSite: 'available',
       watchTwitch: 'available',

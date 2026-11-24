@@ -467,8 +467,8 @@ function renderActivityCapsCard(siteState: SiteState | undefined): string {
   if (rows.length === 0) {
     return '';
   }
-  const updated = siteState.updatedAt
-    ? ` · ${escapeHtml(new Date(siteState.updatedAt).toLocaleString())}`
+  const updated = siteState.capsScrapedAt
+    ? ` · ${escapeHtml(new Date(siteState.capsScrapedAt).toLocaleString())}`
     : '';
   return `<div class="ao-note">
       <div><strong>Activity caps</strong>${updated}</div>

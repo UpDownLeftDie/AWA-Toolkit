@@ -76,6 +76,15 @@ function isSiteState(value: unknown): value is SiteState {
   return typeof value === "object" && !!value && "caps" in value;
 }
 
+/**
+Strip legacy GM `updatedAt` — freshness is per-resource stamps only.
+*/
+function withoutLegacyUpdatedAt(state: SiteState): SiteState {
+  const payload = { ...state } as SiteState & { updatedAt?: string };
+  delete payload.updatedAt;
+  return payload;
+}
+
 export async function loadSiteState(): Promise<SiteState | undefined> {
   const raw: string | SiteState | undefined = await GM.getValue(SITE_STATE_KEY);
   if (!raw) {
@@ -86,9 +95,10 @@ export async function loadSiteState(): Promise<SiteState | undefined> {
     if (!isSiteState(parsed)) {
       return undefined;
     }
+    const cleaned = withoutLegacyUpdatedAt(parsed);
     return {
-      ...parsed,
-      caps: normalizeCaps(parsed.caps),
+      ...cleaned,
+      caps: normalizeCaps(cleaned.caps),
     };
   } catch {
     return undefined;
@@ -96,7 +106,7 @@ export async function loadSiteState(): Promise<SiteState | undefined> {
 }
 
 export async function saveSiteState(state: SiteState): Promise<void> {
-  await GM.setValue(SITE_STATE_KEY, JSON.stringify(state));
+  await GM.setValue(SITE_STATE_KEY, JSON.stringify(withoutLegacyUpdatedAt(state)));
 }
 
 function applyWatchTwitchFromDocument(next: SiteState): void {
@@ -118,6 +128,8 @@ function applyControlCenterPage(next: SiteState): void {
   applyDailyQuestsFromDocument(next, document);
   applyWatchTwitchFromDocument(next);
   applyBattlePassEndFromDocument(next, document);
+  // Caps TTL must not advance on BP / ARP Log / vault visits — only here.
+  next.capsScrapedAt = new Date().toISOString();
   const banner = scrapeLiveCommunityEventBanner(document);
   if (banner) {
     next.caps.steamCommunityEvent = "available";
@@ -176,7 +188,9 @@ export function applyLiveDocumentToSiteState(next: SiteState): void {
   if (path.includes("/battle-pass")) {
     const battlePass = scrapeBattlePass();
     if (battlePass) {
-      next.battlePass = mergeBattlePassScrape(battlePass, next.battlePass);
+      next.battlePass = mergeBattlePassScrape(battlePass, next.battlePass, {
+        source: "visit",
+      });
     }
   }
 
@@ -210,14 +224,13 @@ export function applyLiveDocumentToSiteState(next: SiteState): void {
 }
 
 export async function refreshSiteStateFromPage(): Promise<SiteState> {
-  const previous = (await loadSiteState()) ?? {
-    updatedAt: new Date().toISOString(),
-    caps: { ...DEFAULT_CAPS },
-    gameVault: [],
-  };
+  const previous = (await loadSiteState()) ?? emptySiteState();
 
   if (location.pathname.includes("/arp-log")) {
     await waitForArpLogDocument();
+  }
+  if (location.pathname.includes("/battle-pass")) {
+    await waitForBattlePassDocument();
   }
   if (
     location.pathname.includes("/control-center") &&
@@ -228,7 +241,6 @@ export async function refreshSiteStateFromPage(): Promise<SiteState> {
 
   const next: SiteState = {
     ...previous,
-    updatedAt: new Date().toISOString(),
     caps: { ...previous.caps },
   };
   applyLiveDocumentToSiteState(next);
@@ -294,6 +306,24 @@ function watchLiveSiteStatePage(options: {
       void persistIfChanged();
     }, 250);
   };
+
+  const flushPendingPersist = (): void => {
+    if (debounceTimer === undefined) {
+      return;
+    }
+    clearTimeout(debounceTimer);
+    debounceTimer = undefined;
+    void persistIfChanged();
+  };
+
+  // Claim buttons can appear and then navigate away within the 250ms
+  // debounce — flush so CC sees the visit scrape.
+  window.addEventListener("pagehide", flushPendingPersist);
+  document.addEventListener("visibilitychange", () => {
+    if (document.visibilityState === "hidden") {
+      flushPendingPersist();
+    }
+  });
 
   void (async () => {
     await options.waitForReady();
@@ -390,7 +420,6 @@ export async function applySteamFreeToPlayResolution(
 
 export function emptySiteState(): SiteState {
   return {
-    updatedAt: new Date(0).toISOString(),
     caps: { ...DEFAULT_CAPS },
     gameVault: [],
   };

@@ -12,7 +12,7 @@ const MONDAY_AFTER_RESET = utcAt(2026, 7, 24, 3, 10);
 
 function pendingSteamTwitchState(nowMs: number) {
   return {
-    updatedAt: isoAt(nowMs),
+    capsScrapedAt: isoAt(nowMs),
     caps: {
       timeOnSite: 'capped' as const,
       watchTwitch: 'available' as const,

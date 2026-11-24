@@ -21,7 +21,7 @@ function baseCaps(
 
 export function baselineScenario(_dayOffset: number, nowMs: number): SiteState {
   return {
-    updatedAt: isoAt(nowMs),
+    capsScrapedAt: isoAt(nowMs),
     caps: baseCaps(nowMs),
     gameVault: [],
   };
@@ -86,7 +86,7 @@ export function steamWeekComplete(
   nowMs: number,
 ): SiteState {
   return {
-    updatedAt: isoAt(nowMs),
+    capsScrapedAt: isoAt(nowMs),
     caps: baseCaps(nowMs, { steamQuests: 'capped' }),
     gameVault: [],
     steamQuests: {

@@ -16,7 +16,7 @@ function siteState(nowMs: number, battlePass: {
   endsAt?: string;
 }) {
   return {
-    updatedAt: isoAt(nowMs),
+    capsScrapedAt: isoAt(nowMs),
     caps: {
       timeOnSite: 'capped' as const,
       watchTwitch: 'capped' as const,

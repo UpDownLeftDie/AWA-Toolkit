@@ -28,8 +28,13 @@ export interface ActivityCapState {
 }
 
 export interface SiteState {
-  updatedAt: string;
   caps: ActivityCapState;
+  /**
+  When Control Center caps were last applied (visit or remote). Caps TTL
+  is keyed only on this — other page visits must not fake-freshen Discord /
+  Twitch / calendar.
+  */
+  capsScrapedAt?: string;
   gameVault: GameVaultItem[];
   /**
   Next Game Vault open time from `#game-vault-timer` while claims are closed.

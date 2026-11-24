@@ -17,7 +17,7 @@ const AFTER_POLL_POST = utcAt(2026, 8, 10, 16, 50);
 
 function discordDueState(nowMs: number) {
   return {
-    updatedAt: isoAt(nowMs),
+    capsScrapedAt: isoAt(nowMs),
     caps: {
       timeOnSite: 'capped' as const,
       watchTwitch: 'capped' as const,

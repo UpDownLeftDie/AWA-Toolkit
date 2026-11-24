@@ -186,6 +186,7 @@ function earnDailyArp(
   snapshot: ArtifactSnapshot,
   siteState: SiteState,
   settings: ArtifactOptimizerSettings,
+  nowMs: number,
 ): number {
   const loadout = currentLoadout(snapshot.artifacts);
   if (loadout.length === 0) {
@@ -216,7 +217,7 @@ function earnDailyArp(
     settings.activities.dailyQuests?.enabled &&
     isActivityAvailable(siteState.caps, 'dailyQuests')
   ) {
-    const day = new Date(siteState.updatedAt).getUTCDay();
+    const day = new Date(nowMs).getUTCDay();
     const weekend =
       day === 0 || day === 6 ? BASE_ACTIVITY.weekendQuestBase : 0;
     total += Math.round(
@@ -571,7 +572,7 @@ function runLifetimeSim(
       }
     }
 
-    const daily = earnDailyArp(state.snapshot, siteState, state.settings);
+    const daily = earnDailyArp(state.snapshot, siteState, state.settings, nowMs);
     const steam = awardSteamQuests(state, siteState, nowMs);
     const community = awardCommunityMilestones(state, siteState);
     const shouldClaimBp =

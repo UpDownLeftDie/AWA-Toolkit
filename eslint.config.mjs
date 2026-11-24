@@ -58,6 +58,7 @@ export default [
       'no-throw-literal': 'error',
       'prefer-promise-reject-errors': 'error',
       'unicorn/filename-case': 'off',
+      'unicorn/prefer-combined-guards': 'off',
       // Autofix rewrites guards as ternaries, which then trip
       // unicorn/prefer-logical-operator-over-ternary and sonarjs/no-selector-parameter.
       'unicorn/prefer-ternary': 'off',
