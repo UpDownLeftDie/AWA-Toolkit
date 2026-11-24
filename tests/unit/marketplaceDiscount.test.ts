@@ -5,7 +5,7 @@ import { buildContext } from '../../src/artifacts/optimizer/context';
 import { optimize } from '../../src/artifacts/optimizer/index';
 import { appendMarketplaceFragmentNotes } from '../../src/artifacts/optimizer/notes';
 import { lockWindowArpLossLines } from '../../src/artifacts/optimizer/scoring';
-import { artifactsHaveMarketDiscount } from '../../src/artifacts/optimizer/search';
+import { hasMarketDiscountArtifacts } from '../../src/artifacts/optimizer/search';
 import { artifactsAfterImmediateEquip } from '../../src/artifacts/optimizer/swapPlan';
 import { defaultArtifactSettings } from '../../src/artifacts/settings';
 import type { ScoredCombo } from '../../src/artifacts/optimizer/types';
@@ -274,9 +274,13 @@ describe('soft path fragment notes', () => {
         },
       ],
     });
-    expect(primaryExpiringFragmentOffer(state, 0.15, 2000, NOW_MS)?.name).toBe(
-      'Soon',
-    );
+    expect(
+      primaryExpiringFragmentOffer(state, {
+        discountPct: 0.15,
+        availableArp: 2000,
+        now: NOW_MS,
+      })?.name,
+    ).toBe('Soon');
   });
 });
 
@@ -377,8 +381,8 @@ describe('one-shot marketplace discount prioritization', () => {
       'pn295-unstable-battery',
       ArtifactTier.Interstellar,
     );
-    expect(artifactsHaveMarketDiscount([chai])).toBe(false);
-    expect(artifactsHaveMarketDiscount([chai, robes, battery])).toBe(true);
+    expect(hasMarketDiscountArtifacts([chai])).toBe(false);
+    expect(hasMarketDiscountArtifacts([chai, robes, battery])).toBe(true);
   });
 
   it('keeps prioritization armed after only the unlocked discount piece equips', () => {
@@ -434,8 +438,8 @@ describe('one-shot marketplace discount prioritization', () => {
       waitMs: 60_000,
     });
     // One Stanley piece is not ≥10% — prioritization must stay on.
-    expect(artifactsHaveMarketDiscount(worn)).toBe(false);
-    expect(artifactsHaveMarketDiscount(target.artifacts)).toBe(true);
+    expect(hasMarketDiscountArtifacts(worn)).toBe(false);
+    expect(hasMarketDiscountArtifacts(target.artifacts)).toBe(true);
   });
 
   it('keeps pending and flags slotsLocked when nothing can equip yet', () => {

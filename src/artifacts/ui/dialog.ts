@@ -62,7 +62,10 @@ function renderDialogDetailBox(box: AoDialogDetailBox | undefined): string {
   return `<div class="ao-dialog-box">${title}${lines}</div>`;
 }
 
-export function showAoDialog(options: {
+/**
+Resolve when the user clicks OK (`true`) or dismisses (`false`).
+*/
+export function didAcceptAoDialog(options: {
   title?: string;
   message: string;
   /**
@@ -137,7 +140,7 @@ export async function showAoAlert(
   message: string,
   title?: string,
 ): Promise<void> {
-  await showAoDialog({
+  await didAcceptAoDialog({
     message,
     ...(title && { title }),
     confirmLabel: 'OK',
@@ -154,7 +157,7 @@ export async function didConfirmAoDialog(
     afterMessage?: string;
   } = {},
 ): Promise<boolean> {
-  return showAoDialog({
+  return didAcceptAoDialog({
     message,
     cancelLabel: 'Cancel',
     confirmLabel: options.confirmLabel ?? 'Confirm',

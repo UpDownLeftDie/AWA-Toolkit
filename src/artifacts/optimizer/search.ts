@@ -840,7 +840,7 @@ True when the worn pieces themselves hit the ≥10% market-discount bar
 (set bonus or Light Warping Platinum+). Use this — not the recommended
 target loadout — before clearing one-shot discount prioritization.
 */
-export function artifactsHaveMarketDiscount(
+export function hasMarketDiscountArtifacts(
   artifacts: OwnedArtifact[] | undefined,
 ): boolean {
   if (!artifacts || artifacts.length === 0) {

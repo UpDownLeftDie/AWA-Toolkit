@@ -61,11 +61,13 @@ export function maxSlotCooldownMs(
 }
 
 export function hasAnySlotOnCooldown(
-  current?: ScoredCombo,
-  slotLocks?: Partial<Record<ArtifactSlot, boolean>>,
+  options: {
+    current?: ScoredCombo;
+    slotLocks?: Partial<Record<ArtifactSlot, boolean>>;
+  } = {},
 ): boolean {
   return ([1, 2, 3] as const).some((position) =>
-    isSlotLockedForEquip(current, position, slotLocks),
+    isSlotLockedForEquip(options.current, position, options.slotLocks),
   );
 }
 

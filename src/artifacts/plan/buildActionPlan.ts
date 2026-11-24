@@ -75,7 +75,10 @@ function computePlanContext(
   const best = result.best;
   const current = result.current;
   const isMatchingLoadout = isSameLoadout(best?.artifacts, current?.artifacts);
-  const isLocked = hasAnySlotOnCooldown(current, result.slotLocks);
+  const isLocked = hasAnySlotOnCooldown({
+    ...(current !== undefined && { current }),
+    ...(result.slotLocks !== undefined && { slotLocks: result.slotLocks }),
+  });
   const plan = best
     ? planLoadoutChanges(best.artifacts, current, settings, result.slotLocks, nowMs)
     : undefined;

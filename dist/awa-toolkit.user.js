@@ -3406,7 +3406,8 @@
 			popup
 		});
 	}
-	function listBattlePassClaimButtons(document_ = document, options = {}) {
+	function listBattlePassClaimButtons(options = {}) {
+		const document_ = options.document ?? document;
 		const shouldSkipArpBoosts = options.shouldSkipArpBoosts === true;
 		const popups = document_.querySelectorAll(".bp-popup[data-milestone-id]");
 		const items = [];
@@ -3477,7 +3478,8 @@
 		}
 	}
 	function endpointFromClaimMarkup(document_) {
-		for (const item of listBattlePassClaimButtons(document_)) {
+		const claimButtons = listBattlePassClaimButtons({ document: document_ });
+		for (const item of claimButtons) {
 			const endpoint = firstClaimEndpoint([
 				item.button.closest("form")?.getAttribute("action") ?? void 0,
 				item.button.getAttribute("href") ?? void 0,
@@ -3639,7 +3641,10 @@
 		let claimed = 0;
 		let hasClicked = false;
 		while (claimed < 40) {
-			const next = listBattlePassClaimButtons(document_, options).find((item) => {
+			const next = listBattlePassClaimButtons({
+				document: document_,
+				...options.shouldSkipArpBoosts !== void 0 && { shouldSkipArpBoosts: options.shouldSkipArpBoosts }
+			}).find((item) => {
 				if (!item.button.isConnected || attempted.has(item.button)) return false;
 				const path = claimButtonIdentity(item.button, item.popup);
 				return !path || !skipPaths.has(path);
@@ -3664,11 +3669,17 @@
 	async function waitForBattlePassClaimButtons(document_, options = {}, timeoutMs = 8e3) {
 		const startedAt = Date.now();
 		while (Date.now() - startedAt < timeoutMs) {
-			const count = listBattlePassClaimButtons(document_, options).length;
+			const count = listBattlePassClaimButtons({
+				document: document_,
+				...options.shouldSkipArpBoosts !== void 0 && { shouldSkipArpBoosts: options.shouldSkipArpBoosts }
+			}).length;
 			if (count > 0) return count;
 			await delay$3(250);
 		}
-		return listBattlePassClaimButtons(document_, options).length;
+		return listBattlePassClaimButtons({
+			document: document_,
+			...options.shouldSkipArpBoosts !== void 0 && { shouldSkipArpBoosts: options.shouldSkipArpBoosts }
+		}).length;
 	}
 	function startPostBody(target) {
 		const body = { ...target.body };
@@ -3732,7 +3743,10 @@
 		const liveDocument = isOnBattlePassPage ? document : void 0;
 		let fetchedDocument;
 		let targets;
-		if (isOnBattlePassPage) targets = claimsFromLiveButtons(listBattlePassClaimButtons(document, { shouldSkipArpBoosts }));
+		if (isOnBattlePassPage) targets = claimsFromLiveButtons(listBattlePassClaimButtons({
+			document,
+			shouldSkipArpBoosts
+		}));
 		else {
 			fetchedDocument = await fetchBattlePassDocument(await discoverBattlePassPath({ knownUrl: options.battlePassPath }));
 			targets = fetchedDocument ? listReadyClaimsFromDocument(fetchedDocument).filter((claim) => !shouldSkipArpBoosts || !claim.isArp) : [];
@@ -3745,15 +3759,27 @@
 		};
 		let claimed = posted.claimed;
 		if (isOnBattlePassPage) {
-			await waitWhile(() => listBattlePassClaimButtons(document, { shouldSkipArpBoosts }).length > 0, 1500);
-			let remaining = listBattlePassClaimButtons(document, { shouldSkipArpBoosts }).length;
+			await waitWhile(() => listBattlePassClaimButtons({
+				document,
+				shouldSkipArpBoosts
+			}).length > 0, 1500);
+			let remaining = listBattlePassClaimButtons({
+				document,
+				shouldSkipArpBoosts
+			}).length;
 			if (remaining > 0) {
 				claimed += await clickRemainingClaimButtons(document, {
 					shouldSkipArpBoosts,
 					skipPaths: posted.postedPaths
 				});
-				await waitWhile(() => listBattlePassClaimButtons(document, { shouldSkipArpBoosts }).length > 0, 1500);
-				remaining = listBattlePassClaimButtons(document, { shouldSkipArpBoosts }).length;
+				await waitWhile(() => listBattlePassClaimButtons({
+					document,
+					shouldSkipArpBoosts
+				}).length > 0, 1500);
+				remaining = listBattlePassClaimButtons({
+					document,
+					shouldSkipArpBoosts
+				}).length;
 			}
 			return {
 				claimed,
@@ -4417,7 +4443,10 @@
 	function expiringFragmentOffers(state, now = Date.now()) {
 		return (state.marketplaceFragments ?? []).filter((offer) => isExpiringFragmentOffer(offer, now));
 	}
-	function primaryExpiringFragmentOffer(state, discountPct = 0, availableArp = state.arpLog?.redeemableArp, now = Date.now(), options = {}) {
+	function primaryExpiringFragmentOffer(state, options = {}) {
+		const discountPct = options.discountPct ?? 0;
+		const availableArp = options.availableArp ?? state.arpLog?.redeemableArp;
+		const now = options.now ?? Date.now();
 		const shouldSkip = options.shouldSkip;
 		return expiringFragmentOffers(state, now).filter((offer) => isAffordableFragmentOffer(offer, state, discountPct, availableArp)).filter((offer) => !shouldSkip?.(offer)).toSorted((left, right) => {
 			const leftEnd = fragmentOfferEndsAtMs(left) ?? Number.POSITIVE_INFINITY;
@@ -5961,7 +5990,7 @@
 	function hasMarketDiscount(combo) {
 		return combo !== void 0 && combo.artifacts.length > 0 && combo.marketDiscountPct >= .1;
 	}
-	function artifactsHaveMarketDiscount(artifacts) {
+	function hasMarketDiscountArtifacts(artifacts) {
 		if (!artifacts || artifacts.length === 0) return false;
 		return collectBonuses(artifacts).marketDiscountPct >= VAULT_PRIORITY_DISCOUNT_PCT;
 	}
@@ -6203,7 +6232,12 @@
 		const discountPct = Math.max(comboMarketDiscountPct(discountCombo), comboMarketDiscountPct(best), collectBonuses(equipped).marketDiscountPct);
 		const availableArp = projectedRedeemableArp(context, best, discountCombo);
 		const ownedFamilyIds = new Set(owned.map((artifact) => artifact.familyId));
-		const offer = primaryExpiringFragmentOffer(context.siteState, discountPct, availableArp, now, { shouldSkip: (candidate) => isOwnedArtifactOffer(candidate, ownedFamilyIds) });
+		const offer = primaryExpiringFragmentOffer(context.siteState, {
+			discountPct,
+			...availableArp !== void 0 && { availableArp },
+			now,
+			shouldSkip: (candidate) => isOwnedArtifactOffer(candidate, ownedFamilyIds)
+		});
 		if (!offer) return;
 		const endsAt = fragmentOfferEndsAtMs(offer);
 		if (endsAt === void 0) return;
@@ -6406,12 +6440,12 @@
 			});
 		}));
 	}
-	function hasAnySlotOnCooldown(current, slotLocks) {
+	function hasAnySlotOnCooldown(options = {}) {
 		return [
 			1,
 			2,
 			3
-		].some((position) => isSlotLockedForEquip(current, position, slotLocks));
+		].some((position) => isSlotLockedForEquip(options.current, position, options.slotLocks));
 	}
 	function isSlotLockedForEquip(current, position, slotLocks) {
 		const equipped = current?.artifacts.find((artifact) => artifact.equippedPosition === position);
@@ -8065,7 +8099,10 @@
 		const best = result.best;
 		const current = result.current;
 		const isMatchingLoadout = isSameLoadout(best?.artifacts, current?.artifacts);
-		const isLocked = hasAnySlotOnCooldown(current, result.slotLocks);
+		const isLocked = hasAnySlotOnCooldown({
+			...current !== void 0 && { current },
+			...result.slotLocks !== void 0 && { slotLocks: result.slotLocks }
+		});
 		const plan = best ? planLoadoutChanges(best.artifacts, current, settings, result.slotLocks, nowMs) : void 0;
 		const waitMs = plan?.waitMs ?? maxSlotCooldownMs(settings, current, result.slotLocks, nowMs);
 		const isNeedsSwap = Boolean(best && !isMatchingLoadout);
@@ -9346,7 +9383,7 @@
 		if (!box || box.lines.length === 0) return "";
 		return `<div class="ao-dialog-box">${box.title ? `<div class="ao-dialog-box-title">${escapeHtml(box.title)}</div>` : ""}${box.lines.map((line) => `<div class="ao-dialog-box-line">${escapeHtml(line)}</div>`).join("")}</div>`;
 	}
-	function showAoDialog(options) {
+	function didAcceptAoDialog(options) {
 		ensureOptimizerStyles();
 		closeAoDialog(false);
 		const root = document.createElement("div");
@@ -9393,14 +9430,14 @@
 		});
 	}
 	async function showAoAlert(message, title) {
-		await showAoDialog({
+		await didAcceptAoDialog({
 			message,
 			...title && { title },
 			confirmLabel: "OK"
 		});
 	}
 	async function didConfirmAoDialog(message, options = {}) {
-		return showAoDialog({
+		return didAcceptAoDialog({
 			message,
 			cancelLabel: "Cancel",
 			confirmLabel: options.confirmLabel ?? "Confirm",
@@ -12663,7 +12700,10 @@
 		if (!await didAllowAccountActions()) return;
 		const isOnBattlePassPage = location.pathname.includes("/battle-pass");
 		const liveAll = isOnBattlePassPage ? listBattlePassClaimButtons().length : 0;
-		const liveNonArp = isOnBattlePassPage ? listBattlePassClaimButtons(document, { shouldSkipArpBoosts: true }).length : 0;
+		const liveNonArp = isOnBattlePassPage ? listBattlePassClaimButtons({
+			document,
+			shouldSkipArpBoosts: true
+		}).length : 0;
 		const battlePass = (await loadSiteState())?.battlePass;
 		const ready = liveAll > 0 ? liveAll : battlePass?.readyToClaim ?? 0;
 		const arp = battlePassClaimableArp(battlePass);
@@ -13156,14 +13196,14 @@
       ${rows.join("")}
     </div>`;
 	}
-	function renderStatusSection(settings, siteState, slotLocks, options = {}) {
+	function renderStatusSection(settings, siteState, options = {}) {
 		const cards = [
 			renderBattlePassBlock(siteState, {
 				showClaimAll: options.showBattlePassClaimAll === true,
 				shouldSkipArpBoosts: options.shouldSkipArpBoosts === true
 			}),
 			renderCommunityEventBlock(siteState, { detailed: true }),
-			renderCooldownBlock(settings, slotLocks),
+			renderCooldownBlock(settings, options.slotLocks),
 			renderActivityCapsCard(siteState),
 			renderArpLogCard(siteState)
 		].filter(Boolean);
@@ -13236,7 +13276,8 @@
 		});
 		const upgrades = renderUpgradePath(result.upgrades, fragments, { shouldShowUpgradeButtons: areActionsEnabled });
 		const swap = formatSwapMessage(result);
-		const status = renderStatusSection(settings, siteState, snapshot?.slotLocks, {
+		const status = renderStatusSection(settings, siteState, {
+			...snapshot?.slotLocks !== void 0 && { slotLocks: snapshot.slotLocks },
 			showBattlePassClaimAll: areActionsEnabled && shouldShowBattlePassClaimAll(siteState?.battlePass, result.deferBattlePassClaims === true),
 			shouldSkipArpBoosts: shouldSkipArpInBattlePassClaimAll(siteState?.battlePass, result.deferBattlePassClaims === true)
 		});
@@ -13528,9 +13569,9 @@
 	async function confirmAndApplyLoadout(result, settings) {
 		await confirmAndApplyCombo(result.best, result.current, settings, "recommended", result);
 	}
-	async function clearMarketplaceDiscountPriorityAfterEquip(worn) {
+	async function didClearMarketplaceDiscountPriorityAfterEquip(worn) {
 		if (!(await getArtifactSettings()).marketplaceDiscountPriorityPending) return false;
-		if (!artifactsHaveMarketDiscount(Array.isArray(worn) ? worn : worn?.artifacts)) return false;
+		if (!hasMarketDiscountArtifacts(Array.isArray(worn) ? worn : worn?.artifacts)) return false;
 		await saveArtifactSettings({ marketplaceDiscountPriorityPending: false });
 		showAoToast("Market-discount equipped — you have ~24h to shop. Back to ARP optimization.");
 		return true;
@@ -13558,13 +13599,13 @@
 		const worn = wornAfterAppliedEquip(current, combo, resolved, applied);
 		if (allOk) {
 			if (applied.length > 0) await confirmShowroomLoadout(applied);
-			await clearMarketplaceDiscountPriorityAfterEquip(worn);
+			await didClearMarketplaceDiscountPriorityAfterEquip(worn);
 			notifyLoadoutResult(true, results, label);
 			return;
 		}
 		if (applied.length > 0) {
 			await confirmShowroomLoadout(applied);
-			await clearMarketplaceDiscountPriorityAfterEquip(worn);
+			await didClearMarketplaceDiscountPriorityAfterEquip(worn);
 			notifyLoadoutResult(false, results, label);
 			return;
 		}
@@ -13750,7 +13791,7 @@
 	}
 	function bindDynamicBody(root, onChanged) {
 		const pendingClear = gatheredCache.current;
-		if (pendingClear?.result.marketplaceDiscountPriority?.alreadyEquipped) clearMarketplaceDiscountPriorityAfterEquip(pendingClear.result.current).then(() => reloadOptimizerFromCache());
+		if (pendingClear?.result.marketplaceDiscountPriority?.alreadyEquipped) didClearMarketplaceDiscountPriorityAfterEquip(pendingClear.result.current).then(() => reloadOptimizerFromCache());
 		root.querySelector("#ao-account-actions")?.addEventListener("change", (event) => {
 			const input = event.currentTarget;
 			if (!(input instanceof HTMLInputElement)) return;

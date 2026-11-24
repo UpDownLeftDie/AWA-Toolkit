@@ -180,16 +180,13 @@ export function appendMarketplaceFragmentNotes(
     discountCombo,
   );
   const ownedFamilyIds = new Set(owned.map((artifact) => artifact.familyId));
-  const offer = primaryExpiringFragmentOffer(
-    context.siteState,
+  const offer = primaryExpiringFragmentOffer(context.siteState, {
     discountPct,
-    availableArp,
+    ...(availableArp !== undefined && { availableArp }),
     now,
-    {
-      shouldSkip: (candidate) =>
-        isOwnedArtifactOffer(candidate, ownedFamilyIds),
-    },
-  );
+    shouldSkip: (candidate) =>
+      isOwnedArtifactOffer(candidate, ownedFamilyIds),
+  });
   if (!offer) {
     return;
   }

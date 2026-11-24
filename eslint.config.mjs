@@ -11,6 +11,17 @@ export default [
     stylistic: true,
     prettier: true,
   }),
+  {
+    // Shared unicorn exceptions (camelCase modules; keep ternary/guards off).
+    files: ['src/**/*.ts', 'tests/**/*.ts'],
+    rules: {
+      'unicorn/filename-case': 'off',
+      'unicorn/prefer-combined-guards': 'off',
+      // Autofix rewrites guards as ternaries, which then trip
+      // unicorn/prefer-logical-operator-over-ternary and sonarjs/no-selector-parameter.
+      'unicorn/prefer-ternary': 'off',
+    },
+  },
   // recommendedTypeChecked[0] is parser-only. tsconfigRootDir keeps
   // projectService rooted on this package so the IDE matches CLI types.
   {
@@ -57,16 +68,6 @@ export default [
       'no-var': 'error',
       'no-throw-literal': 'error',
       'prefer-promise-reject-errors': 'error',
-      'unicorn/filename-case': 'off',
-      'unicorn/prefer-combined-guards': 'off',
-      // Autofix rewrites guards as ternaries, which then trip
-      // unicorn/prefer-logical-operator-over-ternary and sonarjs/no-selector-parameter.
-      'unicorn/prefer-ternary': 'off',
-      // Action helpers like showAoDialog return boolean; a verb prefix is correct.
-      'unicorn/consistent-boolean-name': 'off',
-      // Optional trailing args are common for Document / slotLocks overrides.
-      'unicorn/prefer-options-parameter': 'off',
-      'unicorn/prefer-global-number-constants': 'off',
       'unicorn/prefer-number-properties': [
         'error',
         { checkNaN: true, checkInfinity: true },
@@ -119,13 +120,6 @@ export default [
           ],
         },
       ],
-    },
-  },
-  {
-    files: ['tests/**/*.ts'],
-    rules: {
-      'unicorn/filename-case': 'off',
-      'unicorn/prefer-ternary': 'off',
     },
   },
   {

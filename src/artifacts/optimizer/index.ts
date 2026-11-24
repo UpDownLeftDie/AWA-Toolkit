@@ -190,7 +190,7 @@ export {
 } from './context';
 export { describeArtifact } from './notes';
 export {
-  artifactsHaveMarketDiscount,
+  hasMarketDiscountArtifacts,
   hasMarketDiscount,
   VAULT_PRIORITY_DISCOUNT_PCT,
 } from './search';

@@ -149,8 +149,10 @@ export async function handleClaimAllBattlePass(
     ? listBattlePassClaimButtons().length
     : 0;
   const liveNonArp = isOnBattlePassPage
-    ? listBattlePassClaimButtons(document, { shouldSkipArpBoosts: true })
-        .length
+    ? listBattlePassClaimButtons({
+        document,
+        shouldSkipArpBoosts: true,
+      }).length
     : 0;
   const state = await loadSiteState();
   const battlePass = state?.battlePass;

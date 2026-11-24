@@ -90,13 +90,17 @@ already owned).
 */
 export function primaryExpiringFragmentOffer(
   state: Pick<SiteState, 'marketplaceFragments' | 'arpLog'>,
-  discountPct = 0,
-  availableArp: number | undefined = state.arpLog?.redeemableArp,
-  now = Date.now(),
   options: {
+    discountPct?: number;
+    availableArp?: number;
+    now?: number;
     shouldSkip?: (offer: MarketplaceFragmentOffer) => boolean;
   } = {},
 ): MarketplaceFragmentOffer | undefined {
+  const discountPct = options.discountPct ?? 0;
+  const availableArp =
+    options.availableArp ?? state.arpLog?.redeemableArp;
+  const now = options.now ?? Date.now();
   const shouldSkip = options.shouldSkip;
   const candidates = expiringFragmentOffers(state, now)
     .filter((offer) =>
@@ -116,14 +120,13 @@ export function primaryExpiringFragmentOffer(
 
 export function marketplaceFragmentsCatalogPrice(
   state: Pick<SiteState, 'marketplaceFragments' | 'arpLog'>,
-  discountPct = 0,
-  availableArp: number | undefined = state.arpLog?.redeemableArp,
-  now = Date.now(),
+  options: {
+    discountPct?: number;
+    availableArp?: number;
+    now?: number;
+  } = {},
 ): number {
-  return (
-    primaryExpiringFragmentOffer(state, discountPct, availableArp, now)
-      ?.price ?? 0
-  );
+  return primaryExpiringFragmentOffer(state, options)?.price ?? 0;
 }
 
 function fragmentCardName(item: HTMLElement): string {

@@ -150,14 +150,14 @@ async function gatherAchievements(options: {
   }
 
   const cached = await loadAchievementSnapshot();
-  const needsFetch =
+  const isNeedsFetch =
     options.isRemote ||
     options.shouldForceSite ||
     requiresAchievementHydrate(cached, true, options.shouldForceSite);
 
   // Same pattern as Battle Pass / site state: fetch `/member/…/achievements`
   // in the background whenever the cache is missing, thin, or stale.
-  if (needsFetch) {
+  if (isNeedsFetch) {
     const ensureOptions: { force: boolean; username?: string } = {
       force: options.shouldForceSite || !cached || Object.keys(cached.items).length === 0,
     };

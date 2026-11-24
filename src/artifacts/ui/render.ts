@@ -521,8 +521,8 @@ function renderActivityCapsCard(siteState: SiteState | undefined): string {
 export function renderStatusSection(
   settings: ArtifactOptimizerSettings,
   siteState: SiteState | undefined,
-  slotLocks?: Partial<Record<1 | 2 | 3, boolean>>,
   options: {
+    slotLocks?: Partial<Record<1 | 2 | 3, boolean>>;
     showBattlePassClaimAll?: boolean;
     shouldSkipArpBoosts?: boolean;
   } = {},
@@ -533,7 +533,7 @@ export function renderStatusSection(
       shouldSkipArpBoosts: options.shouldSkipArpBoosts === true,
     }),
     renderCommunityEventBlock(siteState, { detailed: true }),
-    renderCooldownBlock(settings, slotLocks),
+    renderCooldownBlock(settings, options.slotLocks),
     renderActivityCapsCard(siteState),
     renderArpLogCard(siteState),
   ].filter(Boolean);
@@ -666,7 +666,10 @@ export function renderResultBody(
   });
 
   const swap = formatSwapMessage(result);
-  const status = renderStatusSection(settings, siteState, snapshot?.slotLocks, {
+  const status = renderStatusSection(settings, siteState, {
+    ...(snapshot?.slotLocks !== undefined && {
+      slotLocks: snapshot.slotLocks,
+    }),
     showBattlePassClaimAll:
       areActionsEnabled &&
       shouldShowBattlePassClaimAll(

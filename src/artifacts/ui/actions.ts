@@ -10,7 +10,7 @@ import {
   saveNotificationType,
 } from '../notifications';
 import {
-  artifactsHaveMarketDiscount,
+  hasMarketDiscountArtifacts,
   hasMarketDiscount,
   lockWindowArpLossLines,
   pickHighestWeeklyArpCombo,
@@ -137,7 +137,7 @@ Clear one-shot marketplace discount prioritization only after a qualifying
 ≥10% discount loadout is actually worn (partial swaps that do not yet hit
 the bar keep the switch on so remaining pieces stay prioritized).
 */
-export async function clearMarketplaceDiscountPriorityAfterEquip(
+export async function didClearMarketplaceDiscountPriorityAfterEquip(
   worn: ScoredCombo | OwnedArtifact[] | undefined,
 ): Promise<boolean> {
   const settings = await getArtifactSettings();
@@ -145,7 +145,7 @@ export async function clearMarketplaceDiscountPriorityAfterEquip(
     return false;
   }
   const artifacts = Array.isArray(worn) ? worn : worn?.artifacts;
-  if (!artifactsHaveMarketDiscount(artifacts)) {
+  if (!hasMarketDiscountArtifacts(artifacts)) {
     return false;
   }
   await saveArtifactSettings({ marketplaceDiscountPriorityPending: false });
@@ -225,13 +225,13 @@ export async function confirmAndApplyCombo(
     if (applied.length > 0) {
       await confirmShowroomLoadout(applied);
     }
-    await clearMarketplaceDiscountPriorityAfterEquip(worn);
+    await didClearMarketplaceDiscountPriorityAfterEquip(worn);
     notifyLoadoutResult(true, results, label);
     return;
   }
   if (applied.length > 0) {
     await confirmShowroomLoadout(applied);
-    await clearMarketplaceDiscountPriorityAfterEquip(worn);
+    await didClearMarketplaceDiscountPriorityAfterEquip(worn);
     notifyLoadoutResult(false, results, label);
     return;
   }
@@ -599,7 +599,7 @@ export function bindDynamicBody(
 ): void {
   const pendingClear = gatheredCache.current;
   if (pendingClear?.result.marketplaceDiscountPriority?.alreadyEquipped) {
-    void clearMarketplaceDiscountPriorityAfterEquip(
+    void didClearMarketplaceDiscountPriorityAfterEquip(
       pendingClear.result.current,
     ).then(() => reloadOptimizerFromCache());
   }

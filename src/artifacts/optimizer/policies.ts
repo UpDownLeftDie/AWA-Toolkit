@@ -195,11 +195,11 @@ export function selectBestUnderPolicy(
     // already chose something other than arpBest (discount or current), use
     // selectedBest; otherwise trust the vault helper's context-aware decision.
     const vaultGuarded = resolveVaultDiscountBest(arpBest, current, discountCombo, context, now);
-    const vaultChoseDiscount =
+    const isVaultChoseDiscount =
       vaultGuarded.best !== undefined &&
       arpBest !== undefined &&
       vaultGuarded.best !== arpBest;
-    const resolvedBest = vaultChoseDiscount ? selectedBest : vaultGuarded.best;
+    const resolvedBest = isVaultChoseDiscount ? selectedBest : vaultGuarded.best;
     const withSelected: VaultDiscountGuard = { ...vaultGuarded, best: resolvedBest };
     // Attach marketDiscountLoadout when vault logic did not.
     if (discountCombo && !withSelected.marketDiscountLoadout && hasMarketDiscount(discountCombo)) {

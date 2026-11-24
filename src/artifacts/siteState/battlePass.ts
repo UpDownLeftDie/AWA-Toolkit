@@ -555,10 +555,10 @@ function isSparseBattlePassScrape(
   ) {
     return false;
   }
-  const previousReady =
+  const isPreviousReady =
     previous.readyToClaim > 0 || (previous.readyClaims?.length ?? 0) > 0;
   return (
-    previousReady &&
+    isPreviousReady &&
     scraped.readyToClaim === 0 &&
     (scraped.readyClaims?.length ?? 0) === 0
   );
@@ -774,9 +774,12 @@ function pushUniqueClaimButton(
 }
 
 export function listBattlePassClaimButtons(
-  document_: Document = document,
-  options: { shouldSkipArpBoosts?: boolean } = {},
+  options: {
+    document?: Document;
+    shouldSkipArpBoosts?: boolean;
+  } = {},
 ): { button: HTMLElement; popup: HTMLElement }[] {
+  const document_ = options.document ?? document;
   const shouldSkipArpBoosts = options.shouldSkipArpBoosts === true;
   const popups = document_.querySelectorAll('.bp-popup[data-milestone-id]');
   const items: { button: HTMLElement; popup: HTMLElement }[] = [];
@@ -898,7 +901,8 @@ function firstClaimEndpoint(
 function endpointFromClaimMarkup(
   document_: Document,
 ): BattlePassClaimEndpoint | undefined {
-  for (const item of listBattlePassClaimButtons(document_)) {
+  const claimButtons = listBattlePassClaimButtons({ document: document_ });
+  for (const item of claimButtons) {
     const endpoint = firstClaimEndpoint([
       item.button.closest('form')?.getAttribute('action') ?? undefined,
       item.button.getAttribute('href') ?? undefined,
@@ -1236,7 +1240,12 @@ async function clickRemainingClaimButtons(
   let claimed = 0;
   let hasClicked = false;
   while (claimed < 40) {
-    const next = listBattlePassClaimButtons(document_, options).find(
+    const next = listBattlePassClaimButtons({
+      document: document_,
+      ...(options.shouldSkipArpBoosts !== undefined && {
+        shouldSkipArpBoosts: options.shouldSkipArpBoosts,
+      }),
+    }).find(
       (item) => {
         if (!item.button.isConnected || attempted.has(item.button)) {
           return false;
@@ -1278,13 +1287,23 @@ async function waitForBattlePassClaimButtons(
 ): Promise<number> {
   const startedAt = Date.now();
   while (Date.now() - startedAt < timeoutMs) {
-    const count = listBattlePassClaimButtons(document_, options).length;
+    const count = listBattlePassClaimButtons({
+      document: document_,
+      ...(options.shouldSkipArpBoosts !== undefined && {
+        shouldSkipArpBoosts: options.shouldSkipArpBoosts,
+      }),
+    }).length;
     if (count > 0) {
       return count;
     }
     await delay(250);
   }
-  return listBattlePassClaimButtons(document_, options).length;
+  return listBattlePassClaimButtons({
+    document: document_,
+    ...(options.shouldSkipArpBoosts !== undefined && {
+      shouldSkipArpBoosts: options.shouldSkipArpBoosts,
+    }),
+  }).length;
 }
 
 function startPostBody(target: BattlePassStartTarget): Record<string, unknown> {
@@ -1404,7 +1423,7 @@ export async function claimAllBattlePassRewards(
   let targets: BattlePassReadyClaim[];
   if (isOnBattlePassPage) {
     targets = claimsFromLiveButtons(
-      listBattlePassClaimButtons(document, { shouldSkipArpBoosts }),
+      listBattlePassClaimButtons({ document, shouldSkipArpBoosts }),
     );
   } else {
     const path = await discoverBattlePassPath({
@@ -1436,10 +1455,13 @@ export async function claimAllBattlePassRewards(
 
   if (isOnBattlePassPage) {
     await waitWhile(
-      () => listBattlePassClaimButtons(document, { shouldSkipArpBoosts }).length > 0,
+      () =>
+        listBattlePassClaimButtons({ document, shouldSkipArpBoosts }).length >
+        0,
       1500,
     );
-    let remaining = listBattlePassClaimButtons(document, {
+    let remaining = listBattlePassClaimButtons({
+      document,
       shouldSkipArpBoosts,
     }).length;
     if (remaining > 0) {
@@ -1449,11 +1471,12 @@ export async function claimAllBattlePassRewards(
       });
       await waitWhile(
         () =>
-          listBattlePassClaimButtons(document, { shouldSkipArpBoosts }).length >
-          0,
+          listBattlePassClaimButtons({ document, shouldSkipArpBoosts })
+            .length > 0,
         1500,
       );
-      remaining = listBattlePassClaimButtons(document, {
+      remaining = listBattlePassClaimButtons({
+        document,
         shouldSkipArpBoosts,
       }).length;
     }
