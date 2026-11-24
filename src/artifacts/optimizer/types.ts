@@ -1,3 +1,4 @@
+import type { PriorityPolicyId } from '../../planner/types';
 import type { ArtifactTier } from '../data';
 import type { ArtifactSnapshot, OwnedArtifact } from '../scraper';
 import type { ArtifactOptimizerSettings } from '../settings';
@@ -97,6 +98,11 @@ export interface OptimizerResult {
   best: ScoredCombo | undefined;
   current: ScoredCombo | undefined;
   alternatives: ScoredCombo[];
+  /**
+  Which priority policy was active when `best` was selected.
+  Visible in result for UI cautions and debugging.
+  */
+  activePolicyId: PriorityPolicyId;
   upgrades: UpgradeSuggestion[];
   /**
   Showroom lock icons — source of truth for slot lock state.

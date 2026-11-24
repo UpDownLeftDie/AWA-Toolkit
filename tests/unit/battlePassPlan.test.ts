@@ -70,7 +70,7 @@ describe('Battle Pass action-plan order', () => {
       },
     };
     const result = optimize(buildContext(snapshot, settings, state, nowMs));
-    const todos = buildActionPlan(result, settings, state);
+    const todos = buildActionPlan(result, settings, state, nowMs);
     const numbered = todos.filter((todo) => todo.kind !== 'caution');
     const start = numbered.find((todo) => todo.startBattlePass === true);
     expect(start?.text).toMatch(/start battle pass/i);
@@ -97,7 +97,7 @@ describe('Battle Pass action-plan order', () => {
     expect(result.hasAllArpOwned).toBe(true);
     expect(result.hasAllArpEquipped).toBe(false);
 
-    const todos = buildActionPlan(result, settings, state);
+    const todos = buildActionPlan(result, settings, state, nowMs);
     const numbered = todos.filter((todo) => todo.kind !== 'caution');
     const skipClaim = numbered.find(
       (todo) =>
@@ -156,7 +156,7 @@ describe('Battle Pass action-plan order', () => {
     );
     expect(result.deferBattlePassClaims).toBe(false);
 
-    const todos = buildActionPlan(result, settings, state);
+    const todos = buildActionPlan(result, settings, state, nowMs);
     const claim = todos.find(
       (todo) =>
         todo.claimBattlePass === true && todo.claimBattlePassSkipArp !== true,

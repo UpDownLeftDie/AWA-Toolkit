@@ -10,6 +10,7 @@ import {
   saveNotificationType,
 } from '../notifications';
 import {
+  artifactsHaveMarketDiscount,
   hasMarketDiscount,
   lockWindowArpLossLines,
   pickHighestWeeklyArpCombo,
@@ -20,7 +21,11 @@ import {
   confirmShowroomLoadout,
   resyncShowroomSnapshot,
 } from '../remoteScrape';
-import { applySnapshotUpgrade, isArtifactsShowroomPage } from '../scraper';
+import {
+  applySnapshotUpgrade,
+  isArtifactsShowroomPage,
+  type OwnedArtifact,
+} from '../scraper';
 import {
   clampUtcDailyEndBufferHours,
   getArtifactSettings,
@@ -38,6 +43,7 @@ import {
 } from './dialog';
 import { gatheredCache, isControlCenterPage } from './gather';
 import {
+  artifactsAfterImmediateEquip,
   artifactsForDisplay,
   formatLockedSlotParts,
   isSameLoadout,
@@ -127,22 +133,19 @@ export async function confirmAndApplyLoadout(
 }
 
 /**
-Clear one-shot marketplace discount prioritization after a qualifying
-≥10% discount loadout is worn (or was already worn when the switch flipped).
+Clear one-shot marketplace discount prioritization only after a qualifying
+≥10% discount loadout is actually worn (partial swaps that do not yet hit
+the bar keep the switch on so remaining pieces stay prioritized).
 */
 export async function clearMarketplaceDiscountPriorityAfterEquip(
-  combo: ScoredCombo | undefined,
-  result?: OptimizerResult,
+  worn: ScoredCombo | OwnedArtifact[] | undefined,
 ): Promise<boolean> {
   const settings = await getArtifactSettings();
   if (!settings.marketplaceDiscountPriorityPending) {
     return false;
   }
-  const target =
-    combo ??
-    result?.marketDiscountLoadout ??
-    (hasMarketDiscount(result?.best) ? result?.best : undefined);
-  if (!hasMarketDiscount(target)) {
+  const artifacts = Array.isArray(worn) ? worn : worn?.artifacts;
+  if (!artifactsHaveMarketDiscount(artifacts)) {
     return false;
   }
   await saveArtifactSettings({ marketplaceDiscountPriorityPending: false });
@@ -150,6 +153,31 @@ export async function clearMarketplaceDiscountPriorityAfterEquip(
     'Market-discount equipped — you have ~24h to shop. Back to ARP optimization.',
   );
   return true;
+}
+
+/**
+Worn pieces after the API applied some (or all) of a loadout plan.
+*/
+function wornAfterAppliedEquip(
+  current: ScoredCombo | undefined,
+  target: ScoredCombo,
+  plan: LoadoutChangePlan,
+  applied: { artifactId: number; position: ArtifactSlot }[],
+): OwnedArtifact[] {
+  if (applied.length === 0) {
+    return current?.artifacts ?? [];
+  }
+  const appliedPlan: LoadoutChangePlan = {
+    ...plan,
+    now: plan.now.filter((change) =>
+      applied.some(
+        (row) =>
+          row.artifactId === change.artifactId &&
+          row.position === change.position,
+      ),
+    ),
+  };
+  return artifactsAfterImmediateEquip(current, target, appliedPlan);
 }
 
 export async function confirmAndApplyCombo(
@@ -192,17 +220,18 @@ export async function confirmAndApplyCombo(
     resolved.now,
     currentlyEquipped,
   );
+  const worn = wornAfterAppliedEquip(current, combo, resolved, applied);
   if (allOk) {
     if (applied.length > 0) {
       await confirmShowroomLoadout(applied);
     }
-    await clearMarketplaceDiscountPriorityAfterEquip(combo, result);
+    await clearMarketplaceDiscountPriorityAfterEquip(worn);
     notifyLoadoutResult(true, results, label);
     return;
   }
   if (applied.length > 0) {
     await confirmShowroomLoadout(applied);
-    await clearMarketplaceDiscountPriorityAfterEquip(combo, result);
+    await clearMarketplaceDiscountPriorityAfterEquip(worn);
     notifyLoadoutResult(false, results, label);
     return;
   }
@@ -572,7 +601,6 @@ export function bindDynamicBody(
   if (pendingClear?.result.marketplaceDiscountPriority?.alreadyEquipped) {
     void clearMarketplaceDiscountPriorityAfterEquip(
       pendingClear.result.current,
-      pendingClear.result,
     ).then(() => reloadOptimizerFromCache());
   }
   root

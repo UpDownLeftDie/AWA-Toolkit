@@ -25,7 +25,7 @@ export const CREDIT_SOURCES: readonly CreditSource[] = [
   {
     id: "megumin-tools",
     label: "Megumin's Tools",
-    dateAccessed: "2026-08-10",
+    dateAccessed: "2026-11-23",
     url: "https://docs.google.com/spreadsheets/d/1VCzq6Trwc9T_wEsvTANpL7yy8FaJ6psSsKYn4O4riw8/edit?usp=sharing",
     links: [
       {
@@ -41,7 +41,7 @@ export const CREDIT_SOURCES: readonly CreditSource[] = [
   {
     id: "megumin-ucf-artifacts-info",
     label: "【Artifacts】Info",
-    dateAccessed: "2026-08-06",
+    dateAccessed: "2026-11-23",
     url: "https://www.alienwarearena.com/ucf/show/2167784",
   },
   {

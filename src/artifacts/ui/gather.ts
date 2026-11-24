@@ -160,6 +160,20 @@ async function gatherAchievements(options: {
   return loadAchievementSnapshot();
 }
 
+export interface GatheredData {
+  snapshot: ArtifactSnapshot | undefined;
+  settings: ArtifactOptimizerSettings;
+  siteState: SiteState;
+  result: OptimizerResult;
+  /**
+  Clock used for this optimize + action-plan pass.
+  */
+  nowMs: number;
+  achievements: AchievementSnapshot | undefined;
+  achievementSettings: AchievementSettings;
+  achievementCooldowns: AutomationCooldowns;
+}
+
 export async function gatherData(options?: {
   /**
   When true, fetch/open Showroom & site pages if cached data is missing/stale.
@@ -169,15 +183,7 @@ export async function gatherData(options?: {
   When true, re-fetch Control Center / Battle Pass / event pages even if fresh.
   */
   forceSite?: boolean;
-}): Promise<{
-  snapshot: ArtifactSnapshot | undefined;
-  settings: ArtifactOptimizerSettings;
-  siteState: SiteState;
-  result: OptimizerResult;
-  achievements: AchievementSnapshot | undefined;
-  achievementSettings: AchievementSettings;
-  achievementCooldowns: AutomationCooldowns;
-}> {
+}): Promise<GatheredData> {
   assertGmStorage();
   const isRemote = options?.remote ?? true;
   // Force Refresh always re-fetches; scrapes merge into cached state (ASCE
@@ -251,21 +257,21 @@ export async function gatherData(options?: {
     artifacts: [],
   };
 
+  const nowMs = Date.now();
   const result = optimize(
-    buildContext(snapshot ?? emptySnapshot, settings, siteState),
+    buildContext(snapshot ?? emptySnapshot, settings, siteState, nowMs),
   );
   return rememberGathered({
     snapshot,
     settings,
     siteState,
     result,
+    nowMs,
     achievements,
     achievementSettings,
     achievementCooldowns,
   });
 }
-
-export type GatheredData = Awaited<ReturnType<typeof gatherData>>;
 
 export const gatheredCache: { current?: GatheredData } = {};
 
@@ -376,10 +382,16 @@ async function hydrateAsceData(
     return;
   }
   await saveSiteState(data.siteState);
+  const nowMs = Date.now();
   const asceResult = optimize(
-    buildContext(snapshotForOptimize(data), data.settings, data.siteState),
+    buildContext(
+      snapshotForOptimize(data),
+      data.settings,
+      data.siteState,
+      nowMs,
+    ),
   );
-  return rememberGathered({ ...data, result: asceResult });
+  return rememberGathered({ ...data, result: asceResult, nowMs });
 }
 
 export async function hydrateGatheredData(

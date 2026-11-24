@@ -76,9 +76,49 @@ export default [
   {
     // Artifact effect tables and ARP math are inherently numeric game data;
     // naming every tier bonus / percent / slot index adds noise without clarity.
-    files: ['src/artifacts/**/*.ts', 'src/achievements/**/*.ts'],
+    files: ['src/artifacts/**/*.ts', 'src/achievements/**/*.ts', 'src/planner/**/*.ts'],
     rules: {
       'no-magic-numbers': 'off',
+    },
+  },
+  {
+    // Domain modules must not import UI.
+    files: [
+      'src/artifacts/optimizer/**/*.ts',
+      'src/artifacts/siteState/**/*.ts',
+      'src/artifacts/activities/**/*.ts',
+      'src/artifacts/plan/**/*.ts',
+      'src/artifacts/loadoutFormat.ts',
+      'src/artifacts/data.ts',
+      'src/artifacts/settings.ts',
+      'src/artifacts/scraper.ts',
+      'src/artifacts/steamApp.ts',
+      'src/artifacts/asce.ts',
+      'src/artifacts/api.ts',
+      'src/core/**/*.ts',
+      'src/planner/**/*.ts',
+    ],
+    rules: {
+      'no-restricted-imports': [
+        'error',
+        {
+          patterns: [
+            {
+              group: [
+                '**/artifacts/ui/**',
+                '../ui/*',
+                '../ui',
+                '../../ui/*',
+                '../../ui',
+                './ui/*',
+                './ui',
+              ],
+              message:
+                'Domain modules must not import UI. Put shared types in planner/, artifacts/plan/, or core/.',
+            },
+          ],
+        },
+      ],
     },
   },
   {

@@ -1,4 +1,4 @@
-import type { ActionTodo } from "../artifacts/ui/actionPlan";
+import type { ActionTodo } from "../artifacts/plan/types";
 import { ACHIEVEMENTS, type AchievementDefinition } from "./data";
 import type { AchievementSnapshot } from "./scraper";
 import {

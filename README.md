@@ -48,6 +48,10 @@ Choices are remembered across posts.
 * Steam Quests / Community Events need the game owned on the linked Steam account (not family sharing). Paid games are skipped; free / $0 titles stay listed. **Check Game** / **Visit Steam** / **Sync Games** means ownership has not shown up yet.
 * Battle Pass ready-to-claim counts are informational; season thresholds are not hardcoded. Claim buttons distinguish **Claim non-ARP** (hold Boosts) from **Claim all**.
 
+## Architecture / Contributing
+
+See [`docs/architecture.md`](docs/architecture.md) — goal, where to add activities / task providers / policies, how ranking works, and how to run tests.
+
 ## Credits
 
 ARP math and META guidance from [Megumin's Tools](https://docs.google.com/spreadsheets/d/1VCzq6Trwc9T_wEsvTANpL7yy8FaJ6psSsKYn4O4riw8/edit?usp=sharing) ([Upgrade C/P](https://docs.google.com/spreadsheets/d/1VCzq6Trwc9T_wEsvTANpL7yy8FaJ6psSsKYn4O4riw8/edit?gid=1046753957#gid=1046753957), [ARP Calculator](https://docs.google.com/spreadsheets/d/1VCzq6Trwc9T_wEsvTANpL7yy8FaJ6psSsKYn4O4riw8/edit?gid=1289162159#gid=1289162159)), the [【Artifacts】Info](https://www.alienwarearena.com/ucf/show/2167784) thread, and Megumin’s AWA Discord guides. Community-event hours from [ASCE](https://github.com/MarvashMagalli/ASCE).

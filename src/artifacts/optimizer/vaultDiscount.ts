@@ -234,8 +234,8 @@ export function resolveVaultDiscountBest(
 /**
 One-shot marketplace discount prioritization: while the user switch is pending,
 promote a ≥10% market-discount loadout as `best` (with ARP-loss warning) until
-equip succeeds and the UI clears the flag. Soft fragment notes stay in
-`collectNotes` and never force `best` on their own.
+the worn loadout itself hits ≥10% (partial swaps keep the flag on). Soft
+fragment notes stay in `collectNotes` and never force `best` on their own.
 */
 export function applyMarketplaceDiscountPriority(
   guarded: VaultDiscountGuard,

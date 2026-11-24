@@ -1,4 +1,3 @@
-import { BASE_ACTIVITY } from '../data';
 import type { OwnedArtifact } from '../scraper';
 import { COOLDOWN_MS } from '../settings';
 import {
@@ -8,35 +7,27 @@ import {
   canEarnCommunityEventArp,
   estimateCommunityUnlockAt,
   gameVaultCatalogPrice,
-  isActivityAvailable,
-  isActivityPending,
   isCommunityGateMet,
   isGameVaultCurrentlyOpen,
   isPersonalHoursMet,
-  scrapedRemainingSteamQuestRewards,
-  twitchWatchRemainingMs,
   vaultPayArp,
   type SiteState,
 } from '../siteState';
 import {
-  addDailyCategory,
   collectBonuses,
   setBreakdownParts,
   type BonusBuckets,
 } from './bonuses';
 import {
   activeSets,
-  canCompleteInWearWindow,
   comboEquipWaitMs,
-  completableUtcDayStarts,
   currentLoadout,
-  isResetInWearWindow,
-  msUntilNextSteamQuestWeek,
-  msUntilNextUtcMidnight,
   resolveNow,
   resolveOwnedList,
 } from './context';
-import { hasAllArpEffect, shouldDeferBattlePassForContext } from './search';
+import { hasAllArpEffect, shouldDeferBattlePassForContext } from './allArp';
+import { ACTIVITIES } from '../activities';
+import type { Opportunity } from '../activities';
 import type {
   ArpLossLine,
   BreakdownLine,
@@ -71,110 +62,6 @@ export function isAllArpLockWorthBattlePassBoost(
   return extraOnBoost > lockCost;
 }
 
-function scoreSteamQuestBases(
-  breakdown: Record<string, RawBreakdownParts>,
-  bonuses: BonusBuckets,
-  freq: number,
-  bases: number[],
-): number {
-  return bases.length === 0 ? 0 : setBreakdownParts(
-    breakdown,
-    'steamQuests',
-    bases.reduce((sum, base) => sum + base, 0) * freq,
-    bonuses.steamQuests * bases.length * freq,
-  );
-}
-
-function scoreDailyQuests(
-  breakdown: Record<string, RawBreakdownParts>,
-  freq: number,
-  dayStartsMs: number[],
-  now = Date.now(),
-): number {
-  if (dayStartsMs.length === 0) {
-    return 0;
-  }
-  const B = BASE_ACTIVITY;
-  let dailyBase = 0;
-  let weekendBase = 0;
-  for (const startMs of dayStartsMs) {
-    const onDay = new Date(now + startMs);
-    dailyBase += B.dailyQuestBase * freq;
-    if (onDay.getUTCDay() === 0 || onDay.getUTCDay() === 6) {
-      weekendBase += B.weekendQuestBase * freq;
-    }
-  }
-  let flatSum = setBreakdownParts(breakdown, 'dailyQuests', dailyBase);
-  if (weekendBase > 0) {
-    flatSum += setBreakdownParts(breakdown, 'weekendQuests', weekendBase);
-  }
-  return flatSum;
-}
-
-function scoreSecondaryActivities(
-  breakdown: Record<string, RawBreakdownParts>,
-  bonuses: BonusBuckets,
-  context: OptimizerContext,
-  isEnabled: (key: keyof OptimizerContext['settings']['activities']) => boolean,
-  freq: (key: keyof OptimizerContext['settings']['activities']) => number,
-  waitMs: number,
-  now: number,
-): number {
-  const { siteState } = context;
-  const caps = siteState.caps;
-  const B = BASE_ACTIVITY;
-  let flatSum = 0;
-
-  if (isEnabled('discordPoll') && isActivityPending(caps, 'discordPoll')) {
-    const polls = B.discordPollsWhenPending * freq('discordPoll');
-    flatSum += setBreakdownParts(
-      breakdown,
-      'discordPoll',
-      B.discordPollBase * polls,
-      bonuses.discordPoll * polls,
-    );
-  }
-
-  if (isEnabled('dailyQuests')) {
-    const questDays = completableUtcDayStarts(waitMs, 0, {
-      todayAvailable: isActivityPending(caps, 'dailyQuests'),
-      now,
-    });
-    flatSum += scoreDailyQuests(
-      breakdown,
-      freq('dailyQuests'),
-      questDays,
-      now,
-    );
-  }
-
-  if (isEnabled('steamCommunityEvent')) {
-    const eventArp = communityEventArpInSwapWindow(siteState, waitMs);
-    if (eventArp > 0) {
-      flatSum += setBreakdownParts(
-        breakdown,
-        'steamCommunityEvent',
-        eventArp * freq('steamCommunityEvent'),
-      );
-    }
-  }
-
-  const readyClaims = battlePassClaimableArp(siteState.battlePass);
-  if (readyClaims > 0 && !shouldDeferBattlePassForContext(context)) {
-    const owned = resolveOwnedList(context);
-    const hasAllArpOn = hasAllArpEffect(currentLoadout(owned));
-    if (!hasAllArpOn || bonuses.allArpPct > 0) {
-      flatSum += setBreakdownParts(
-        breakdown,
-        'battlePassClaims',
-        readyClaims * BATTLE_PASS_BOOST_ARP,
-      );
-    }
-  }
-
-  return flatSum;
-}
-
 /**
 Community Event ARP that this 24h lock will still be wearing when it grants.
 
@@ -185,6 +72,8 @@ with a 12h lock is a miss; 75k after a 16h wait still counts. The award
 fires on whatever is equipped; All-ARP% is the only boost (Megumin FAQ).
 Watch Twitch repeats daily — it must not beat this one-shot. Unknown ETA
 stays unscored. Both-gates-met is scrape lag — ignore.
+
+Delegates to the steamCommunityEvent activity module.
 */
 export function communityEventArpInSwapWindow(
   siteState: SiteState,
@@ -221,69 +110,32 @@ export function communityEventArpInSwapWindow(
   return arp;
 }
 
-const TWITCH_MS_PER_ARP = 60_000;
-const TIME_ON_SITE_DURATION_MS = BASE_ACTIVITY.timeOnSiteBasePerDay * 60_000;
-
-function twitchArpInWearWindow(
-  siteState: SiteState,
-  twitchFlat: number,
-  waitMs: number,
-  now: number,
+/**
+Accumulate opportunities from a single activity into the breakdown map.
+Returns the flat (pre-multiplier) sum contributed.
+*/
+function scoreActivityOpportunities(
+  breakdown: Record<string, RawBreakdownParts>,
+  opps: Opportunity[],
 ): number {
-  const midnight = msUntilNextUtcMidnight(now);
-  const todayRemaining = twitchWatchRemainingMs(siteState, twitchFlat) / 60_000;
-  const fullDay =
-    (siteState.watchTwitch?.capArp ?? BASE_ACTIVITY.watchTwitchBasePerDay) +
-    twitchFlat;
-  let twitchArp = 0;
-  if (
-    todayRemaining > 0 &&
-    canCompleteInWearWindow(
-      0,
-      midnight,
-      waitMs,
-      todayRemaining * TWITCH_MS_PER_ARP,
-    )
-  ) {
-    twitchArp += todayRemaining;
-  }
-  const laterDays = completableUtcDayStarts(
-    waitMs,
-    fullDay * TWITCH_MS_PER_ARP,
-    { todayAvailable: false, now },
-  );
-  for (const dayStart of laterDays) {
-    if (dayStart > 0) {
-      twitchArp += fullDay;
+  const byKey = new Map<string, { base: number; categoryBonus: number }>();
+  for (const opp of opps) {
+    const existing = byKey.get(opp.breakdownKey);
+    if (existing) {
+      existing.base += opp.baseArp;
+      existing.categoryBonus += opp.categoryBonus ?? 0;
+    } else {
+      byKey.set(opp.breakdownKey, {
+        base: opp.baseArp,
+        categoryBonus: opp.categoryBonus ?? 0,
+      });
     }
   }
-  return twitchArp;
-}
-
-function steamBasesInWearWindow(
-  siteState: SiteState,
-  waitMs: number,
-  now: number,
-): number[] {
-  const mondayResetMs = msUntilNextSteamQuestWeek(now);
-  const steamBases: number[] = [];
-  const remaining = scrapedRemainingSteamQuestRewards(siteState);
-  // Steam is weekly; Time on Site / Calendar / Twitch reset every day, so a
-  // 24h lock has to spend one of those days. Credit remaining quests whenever
-  // they are pending — waiting for last-chance Monday just pushes Steam off
-  // forever. Today's Twitch sit still finishes on current gear before the swap.
-  if (
-    remaining &&
-    remaining.length > 0 &&
-    isActivityPending(siteState.caps, 'steamQuests')
-  ) {
-    steamBases.push(...remaining);
+  let flatSum = 0;
+  for (const [key, parts] of byKey) {
+    flatSum += setBreakdownParts(breakdown, key, parts.base, parts.categoryBonus);
   }
-  // Next week's 15+25+25 only if Monday 00:00 UTC actually lands while worn.
-  if (isResetInWearWindow(mondayResetMs, waitMs)) {
-    steamBases.push(...BASE_ACTIVITY.steamQuestBases);
-  }
-  return steamBases;
+  return flatSum;
 }
 
 function scoreWindowActivities(
@@ -294,8 +146,6 @@ function scoreWindowActivities(
   const { settings, siteState } = context;
   const now = resolveNow(context);
   const acts = settings.activities;
-  const caps = siteState.caps;
-  const B = BASE_ACTIVITY;
   const breakdown: Record<string, RawBreakdownParts> = {};
   let flatSum = 0;
 
@@ -304,74 +154,48 @@ function scoreWindowActivities(
   const freq = (key: keyof typeof acts): number =>
     isEnabled(key) ? acts[key].frequency : 0;
 
-  if (isEnabled('timeOnSite')) {
-    const tosDays = completableUtcDayStarts(waitMs, TIME_ON_SITE_DURATION_MS, {
-      todayAvailable: isActivityAvailable(caps, 'timeOnSite'),
-      now,
-    });
-    if (tosDays.length > 0) {
-      flatSum += addDailyCategory(
-        breakdown,
-        'timeOnSite',
-        B.timeOnSiteBasePerDay,
-        bonuses.timeOnSite,
-        tosDays.length,
-        freq('timeOnSite'),
-      );
-    }
-  }
+  // Score activities via the registry
+  const activityKeys = [
+    'timeOnSite',
+    'watchTwitch',
+    'steamQuests',
+    'dailyCalendar',
+    'discordPoll',
+    'dailyQuests',
+    'steamCommunityEvent',
+  ] as const;
 
-  if (isEnabled('watchTwitch')) {
-    const twitchArp = twitchArpInWearWindow(
-      siteState,
-      bonuses.watchTwitch,
+  for (const key of activityKeys) {
+    if (!isEnabled(key)) {
+      continue;
+    }
+    const module = ACTIVITIES[key];
+    const opps = module.opportunities({
+      state: siteState,
+      bonuses,
+      nowMs: now,
       waitMs,
-      now,
-    );
-    if (twitchArp > 0) {
-      flatSum += setBreakdownParts(breakdown, 'watchTwitch', twitchArp);
-    }
-  }
-
-  if (isEnabled('steamQuests')) {
-    const steamBases = steamBasesInWearWindow(siteState, waitMs, now);
-    if (steamBases.length > 0) {
-      flatSum += scoreSteamQuestBases(
-        breakdown,
-        bonuses,
-        freq('steamQuests'),
-        steamBases,
-      );
-    }
-  }
-
-  // Auto-claims on visit; ARP log marks today capped. Count midnights in wear.
-  if (isEnabled('dailyCalendar')) {
-    const calendarDays = completableUtcDayStarts(waitMs, 0, {
-      todayAvailable: false,
-      now,
+      steamRewardMode: 'scrapedOnly',
+      frequency: freq(key),
     });
-    if (calendarDays.length > 0) {
-      flatSum += addDailyCategory(
-        breakdown,
-        'dailyCalendar',
-        B.dailyCalendarBasePerDay,
-        bonuses.dailyCalendar,
-        calendarDays.length,
-        freq('dailyCalendar'),
-      );
+    if (opps.length > 0) {
+      flatSum += scoreActivityOpportunities(breakdown, opps);
     }
   }
 
-  flatSum += scoreSecondaryActivities(
-    breakdown,
-    bonuses,
-    context,
-    isEnabled,
-    freq,
-    waitMs,
-    now,
-  );
+  // Battle pass claims scoring — NOT an ActivityKey, stays as a special case
+  const readyClaims = battlePassClaimableArp(siteState.battlePass);
+  if (readyClaims > 0 && !shouldDeferBattlePassForContext(context)) {
+    const owned = resolveOwnedList(context);
+    const hasAllArpOn = hasAllArpEffect(currentLoadout(owned));
+    if (!hasAllArpOn || bonuses.allArpPct > 0) {
+      flatSum += setBreakdownParts(
+        breakdown,
+        'battlePassClaims',
+        readyClaims * BATTLE_PASS_BOOST_ARP,
+      );
+    }
+  }
 
   return { flatSum, breakdown };
 }

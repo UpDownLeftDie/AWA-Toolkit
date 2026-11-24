@@ -18,6 +18,7 @@ import {
   showAoAlert,
   showAoToast,
 } from './dialog';
+import { reloadOptimizerFromCache } from './panels';
 
 const BP_CLAIM_ALL_PENDING_KEY = 'ao-bp-claim-all';
 const BP_CLAIM_SKIP_ARP_VALUE = 'skip-arp';
@@ -237,7 +238,6 @@ export async function handleStartBattlePass(): Promise<void> {
   }
   await saveSiteState(next);
   showAoToast('Battle Pass started.');
-  const { reloadOptimizerFromCache } = await import('./panels');
   await reloadOptimizerFromCache();
 }
 

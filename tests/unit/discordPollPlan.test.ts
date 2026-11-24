@@ -70,28 +70,32 @@ describe('Discord Poll action-plan order', () => {
       best,
       current,
       alternatives: [],
+      activePolicyId: 'lifetimeArp',
       upgrades: [],
       slotLocks: { 2: true },
       dailySwap: undefined,
       notes: [],
     };
 
-    const todos = buildActionPlan(result, settings, siteState);
+    const todos = buildActionPlan(result, settings, siteState, nowMs);
     const numbered = todos.filter((todo) => todo.kind !== 'caution');
-    const texts = numbered.map((todo) => todo.text);
+    const equip = numbered[0];
+    const vote = numbered[1];
 
-    expect(texts[0]).toMatch(/^Equip (now|in )/);
-    expect(numbered[0]?.loadout).toMatch(/5th Dimensional Data/);
-    expect(texts[1]).toBe('Vote Discord Poll');
-    expect(numbered[1]?.reasons?.map((reason) => reason.text)).toEqual([
+    // Slot 2 still has ~2h left — schedule the Discord piece, then vote after it.
+    expect(equip?.text).toMatch(/^Equip in /);
+    expect(equip?.loadout).toMatch(/5th Dimensional Data/);
+    expect(equip?.urgency?.kind).toBe('schedule');
+    expect(equip?.equipCombo).toBeUndefined();
+    expect(vote?.text).toBe('Vote Discord Poll');
+    expect(vote?.reasons?.map((reason) => reason.text)).toEqual([
       'After equipping',
     ]);
-    expect(texts[1]).not.toMatch(/after unlock/i);
-    expect(texts[1]).not.toMatch(/next post/i);
-    expect(numbered[0]?.equipCombo).toBe('best');
+    expect(vote?.text).not.toMatch(/after unlock/i);
+    expect(vote?.text).not.toMatch(/next post/i);
     expect(
       renderActionPlan(todos, { allowAccountActions: true }),
-    ).toContain('data-equip="best"');
+    ).not.toContain('data-equip="best"');
   });
 
   it('still recommends the Discord equip after the GM timer hits 0 while Showroom is locked', () => {
@@ -127,7 +131,7 @@ describe('Discord Poll action-plan order', () => {
     const result = optimize(
       buildContext(snapshot, settings, siteState, nowMs),
     );
-    const todos = buildActionPlan(result, settings, siteState);
+    const todos = buildActionPlan(result, settings, siteState, nowMs);
     const numbered = todos.filter((todo) => todo.kind !== 'caution');
     const texts = numbered.map((todo) => todo.text);
     const equipIndex = numbered.findIndex(

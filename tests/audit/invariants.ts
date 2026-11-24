@@ -77,7 +77,7 @@ export function runOptimizerAudit(
   const siteState = scenario(dayOffsetAt(nowMs), nowMs);
   const context = buildContext(persona.snapshot, settings, siteState, nowMs);
   const result = optimize(context);
-  const todos = buildActionPlan(result, settings, siteState);
+  const todos = buildActionPlan(result, settings, siteState, nowMs);
   const auditCtx: AuditContext = { persona, scenarioId, nowMs };
   const violations = collectInvariantViolations(result, todos, auditCtx, context);
   return { result, todos, violations };

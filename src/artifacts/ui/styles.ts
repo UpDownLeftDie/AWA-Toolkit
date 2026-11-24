@@ -465,6 +465,21 @@ function buildPanelShadowCss(variant: PanelShadowVariant): string {
       color: #aaa !important;
       font-size: 0.92em;
     }
+    .ao-rank-trace .ao-trace-list {
+      margin-top: 6px;
+    }
+    .ao-trace-item {
+      display: flex;
+      gap: 6px;
+      margin: 4px 0;
+      line-height: 1.4;
+      color: #ccc !important;
+      align-items: flex-start;
+    }
+    .ao-trace-item .ao-todo-headline {
+      font-weight: 500;
+      color: #ddd !important;
+    }
     .ao-todo-muted {
       color: #aaa !important;
     }

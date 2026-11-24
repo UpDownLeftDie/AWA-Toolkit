@@ -28,9 +28,9 @@ import {
 } from './scoring';
 import type { OptimizerContext, OptimizerResult, ScoredCombo } from './types';
 import {
-  applyMarketplaceDiscountPriority,
-  resolveVaultDiscountBest,
-} from './vaultDiscount';
+  resolveActivePolicy,
+  selectBestUnderPolicy,
+} from './policies';
 
 function withPreloadNextUtcDay(
   result: OptimizerResult,
@@ -63,6 +63,7 @@ export function optimize(context: OptimizerContext): OptimizerResult {
       best: undefined,
       current: undefined,
       alternatives: [],
+      activePolicyId: 'lifetimeArp',
       upgrades: [],
       dailySwap: undefined,
       notes: [
@@ -84,16 +85,10 @@ export function optimize(context: OptimizerContext): OptimizerResult {
   const allArpLoadout = findBestAllArpCombo(owned, context);
   const discountCombo = findBestMarketDiscountCombo(owned, context);
   const now = resolveNow(context);
-  const vaultGuarded = resolveVaultDiscountBest(
+  const policy = resolveActivePolicy(context.settings, context.siteState, now);
+  const guarded = selectBestUnderPolicy(
+    policy,
     preloaded ?? arpBest,
-    current,
-    discountCombo,
-    context,
-    now,
-  );
-  const guarded = applyMarketplaceDiscountPriority(
-    vaultGuarded,
-    arpBest,
     current,
     discountCombo,
     context,
@@ -141,6 +136,7 @@ export function optimize(context: OptimizerContext): OptimizerResult {
     best,
     current,
     alternatives,
+    activePolicyId: policy.id,
     upgrades,
     dailySwap: best ? suggestDailySwap(best, current) : undefined,
     notes,
@@ -178,6 +174,8 @@ export function optimize(context: OptimizerContext): OptimizerResult {
   return withPreloadNextUtcDay(result, preloaded);
 }
 
+export type { ArtifactPriorityPolicy } from './policies';
+export { resolveActivePolicy } from './policies';
 export type { ActivityLoadoutStats } from './bonuses';
 export { activityStatsForArtifacts } from './bonuses';
 export {
@@ -191,7 +189,11 @@ export {
   UTC_DAILY_END_BUFFER_MS,
 } from './context';
 export { describeArtifact } from './notes';
-export { hasMarketDiscount, VAULT_PRIORITY_DISCOUNT_PCT } from './search';
+export {
+  artifactsHaveMarketDiscount,
+  hasMarketDiscount,
+  VAULT_PRIORITY_DISCOUNT_PCT,
+} from './search';
 export {
   lockWindowArpLossLines,
   pickHighestWeeklyArpCombo,

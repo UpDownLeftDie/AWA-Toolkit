@@ -88,7 +88,7 @@ describe('Steam lock vs daily Twitch', () => {
     );
     const result = optimize(context);
     const bestIds = result.best?.artifacts.map((artifact) => artifact.familyId) ?? [];
-    const todos = buildActionPlan(result, defaultArtifactSettings, siteState);
+    const todos = buildActionPlan(result, defaultArtifactSettings, siteState, nowMs);
     const texts = todos.map((todo) => todo.text);
 
     expect(bestIds).toContain('pn295-unstable-battery');
@@ -148,7 +148,7 @@ describe('Steam lock vs daily Twitch', () => {
     );
     const result = optimize(context);
     const bestIds = result.best?.artifacts.map((artifact) => artifact.familyId) ?? [];
-    const todos = buildActionPlan(result, defaultArtifactSettings, siteState);
+    const todos = buildActionPlan(result, defaultArtifactSettings, siteState, nowMs);
     const reasonText = todos
       .flatMap((todo) => [
         todo.text,

@@ -20,10 +20,11 @@ import {
   shouldSkipArpInBattlePassClaimAll,
 } from "../siteState/battlePass";
 import {
-  buildActionPlan,
+  buildActionPlanDetailed,
   isKeepingCurrentLoadout,
   renderActionPlan,
 } from "./actionPlan";
+import type { RankDecision } from "../../planner";
 import {
   bindDynamicBody,
   bindEquipTodoButtons,
@@ -585,16 +586,32 @@ function isPanelGenerationCurrent(
 }
 
 function compactLoadoutSummary(data: GatheredData): {
-  todos: ReturnType<typeof buildActionPlan>;
+  todos: ReturnType<typeof buildActionPlanDetailed>["todos"];
+  trace: RankDecision[];
   combo: OptimizerResult["best"];
   label: "Currently equipped" | "Recommended";
   hideRecommendedEquip: boolean;
 } {
-  const todos = buildActionPlan(data.result, data.settings, data.siteState);
+  const achievementData =
+    data.achievements === undefined
+      ? undefined
+      : {
+          snapshot: data.achievements,
+          settings: data.achievementSettings,
+          cooldowns: data.achievementCooldowns,
+        };
+  const { todos, trace } = buildActionPlanDetailed(
+    data.result,
+    data.settings,
+    data.siteState,
+    data.nowMs,
+    achievementData,
+  );
   const isHideRecommendedEquip =
     isKeepingCurrentLoadout(todos) && Boolean(data.result.current);
   return {
     todos,
+    trace,
     combo: isHideRecommendedEquip ? data.result.current : data.result.best,
     label: isHideRecommendedEquip ? "Currently equipped" : "Recommended",
     hideRecommendedEquip: isHideRecommendedEquip,
@@ -662,18 +679,16 @@ function renderControlCenterPanelBody(
   const actionsOffNote = areActionsEnabled
     ? ""
     : '<div class="ao-muted">Account actions are off — enable in Open Full Panel.</div>';
+  // Achievement tasks are now merged into the unified action plan via
+  // provideAchievements when achievements are enabled. The separate panel is
+  // suppressed here to prevent double-rendering the same items.
+  const achievementsPanelHtml = "";
   return `
     <div class="ao-heading">Artifact Optimizer</div>
     ${renderCredits({ compact: true })}
     ${hydrateBanner}
-    ${renderActionPlan(summary.todos, { allowAccountActions: areActionsEnabled })}
-    ${renderAchievementsPanel({
-      snapshot: data.achievements,
-      settings: data.achievementSettings,
-      isEnabled: areAchievementsEnabled(data.settings),
-      compact: true,
-      cooldowns: data.achievementCooldowns,
-    })}
+    ${renderActionPlan(summary.todos, { allowAccountActions: areActionsEnabled, trace: summary.trace })}
+    ${achievementsPanelHtml}
     ${renderSectionDivider()}
     <div class="ao-row"><strong>${summary.label}:</strong> ${wrapArtifactNames(comboLabel(summary.combo))}</div>
     ${renderBreakdown(summary.combo)}

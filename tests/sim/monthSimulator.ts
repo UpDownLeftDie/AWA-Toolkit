@@ -537,7 +537,7 @@ function runLifetimeSim(
         nowMs,
       );
       result = optimize(context);
-      todos = buildActionPlan(result, state.settings, siteState);
+      todos = buildActionPlan(result, state.settings, siteState, nowMs);
     }
 
     const context = buildContext(

@@ -1,4 +1,5 @@
 import { BASE_ACTIVITY, lastDiscordPollPostAt } from '../data';
+import { TWITCH_MS_PER_ARP } from '../../core/time';
 import type { ArpLogState } from './arpLog';
 import { scrapeLiveCommunityEventBanner } from './communityEvent';
 import {
@@ -132,7 +133,6 @@ function readWatchTwitchCap(body: string): CapStatus | undefined {
 AWA credits 1 Watch Twitch ARP per minute (extension `/twitch/extensions/track`
 poll, same cadence as Time on Site `/tos/track`).
 */
-const TWITCH_MS_PER_ARP = 60_000;
 
 interface DailyArpTwitchData {
   totalPoints: number;

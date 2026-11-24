@@ -5,6 +5,8 @@ import { buildContext } from '../../src/artifacts/optimizer/context';
 import { optimize } from '../../src/artifacts/optimizer/index';
 import { appendMarketplaceFragmentNotes } from '../../src/artifacts/optimizer/notes';
 import { lockWindowArpLossLines } from '../../src/artifacts/optimizer/scoring';
+import { artifactsHaveMarketDiscount } from '../../src/artifacts/optimizer/search';
+import { artifactsAfterImmediateEquip } from '../../src/artifacts/optimizer/swapPlan';
 import { defaultArtifactSettings } from '../../src/artifacts/settings';
 import type { ScoredCombo } from '../../src/artifacts/optimizer/types';
 import {
@@ -326,6 +328,75 @@ describe('one-shot marketplace discount prioritization', () => {
     );
     expect(result.marketplaceDiscountPriority?.alreadyEquipped).toBe(true);
     expect(result.best?.marketDiscountPct).toBeGreaterThanOrEqual(0.1);
+  });
+
+  it('does not treat a single Stanley piece as qualifying discount yet', () => {
+    resetArtifactIds(7250);
+    const chai = makeArtifact('chai-stones', ArtifactTier.Interstellar);
+    const robes = makeArtifact('herkow-fertility-robes', ArtifactTier.Gold);
+    const battery = makeArtifact(
+      'pn295-unstable-battery',
+      ArtifactTier.Interstellar,
+    );
+    expect(artifactsHaveMarketDiscount([chai])).toBe(false);
+    expect(artifactsHaveMarketDiscount([chai, robes, battery])).toBe(true);
+  });
+
+  it('keeps prioritization armed after only the unlocked discount piece equips', () => {
+    resetArtifactIds(7260);
+    const current = {
+      artifacts: [
+        makeArtifact('pn295', ArtifactTier.Interstellar, {
+          equippedPosition: 1,
+        }),
+        makeArtifact('bali-arches', ArtifactTier.Platinum, {
+          equippedPosition: 2,
+        }),
+        makeArtifact('zorathian-cosmotheque', ArtifactTier.Gold, {
+          equippedPosition: 3,
+        }),
+      ],
+    };
+    const target = {
+      artifacts: [
+        makeArtifact('chai-stones', ArtifactTier.Interstellar, {
+          instanceId: 9001,
+        }),
+        makeArtifact('herkow-fertility-robes', ArtifactTier.Gold, {
+          instanceId: 9002,
+        }),
+        makeArtifact('pn295-unstable-battery', ArtifactTier.Interstellar, {
+          instanceId: 9003,
+        }),
+      ],
+    };
+    const worn = artifactsAfterImmediateEquip(current, target, {
+      now: [
+        {
+          artifactId: 9001,
+          position: 1,
+          displayName: 'Chai Stones',
+        },
+      ],
+      later: [
+        {
+          artifactId: 9002,
+          position: 2,
+          displayName: 'Robes',
+        },
+        {
+          artifactId: 9003,
+          position: 3,
+          displayName: 'Battery',
+        },
+      ],
+      laterNames: ['Robes', 'Battery'],
+      lockedSlots: [2, 3],
+      waitMs: 60_000,
+    });
+    // One Stanley piece is not ≥10% — prioritization must stay on.
+    expect(artifactsHaveMarketDiscount(worn)).toBe(false);
+    expect(artifactsHaveMarketDiscount(target.artifacts)).toBe(true);
   });
 
   it('keeps pending and flags slotsLocked when nothing can equip yet', () => {

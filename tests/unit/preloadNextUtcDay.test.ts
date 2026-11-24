@@ -61,7 +61,7 @@ describe('preload next UTC day loadout', () => {
       'pn295-unstable-battery',
     );
 
-    const todos = buildActionPlan(result, defaultArtifactSettings, siteState);
+    const todos = buildActionPlan(result, defaultArtifactSettings, siteState, SAT_23);
     const equip = todos.find((todo) => todo.urgency?.chain === 'equip');
     expect(equip).toBeDefined();
     expect(equip?.loadout).toMatch(/Recycler/i);

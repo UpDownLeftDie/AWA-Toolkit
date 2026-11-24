@@ -5,6 +5,7 @@ import {
   fragmentCostToUpgradeFrom,
   getArtifactById,
 } from '../data';
+import { MS_PER_DAY, MS_PER_HOUR } from '../../core/time';
 import { type ArtifactSnapshot, type OwnedArtifact } from '../scraper';
 import {
   COOLDOWN_MS,
@@ -80,8 +81,6 @@ export function isResetInWearWindow(
   return delayMs > waitMs && delayMs <= waitMs + horizonMs;
 }
 
-const MS_PER_DAY = 86_400_000;
-const MS_PER_HOUR = 60 * 60 * 1000;
 
 /**
 Default practical end of a UTC daily sit (`utcDailyEndBufferHours` = 1 →
