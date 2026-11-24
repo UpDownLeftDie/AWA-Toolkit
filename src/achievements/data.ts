@@ -20,7 +20,10 @@ export type AchievementCategory =
   | 'artifacts'
   | 'spendArp'
   | 'fragments'
-  | 'verified';
+  | 'verified'
+  | 'connections'
+  | 'marketplace'
+  | 'timeOnSite';
 
 /**
 Background GETs that can count toward visit/read/enter achievements.
@@ -87,13 +90,29 @@ export interface AchievementDefinition {
 }
 
 export const FAQ_PATH = '/faq-contact';
-export const HIVE_PATH = '/information';
-export const NEWS_PATH = '/news';
-export const VIDEOS_PATH = '/videos';
-export const RELAY_PATH = '/ucf';
+/*
+Community → Hive nav target
+*/
+export const HIVE_PATH = '/page/hive-influencers';
+/*
+Discover → Blogs / Pulse listing
+*/
+export const NEWS_PATH = '/ucf/News';
+/*
+Discover → Videos listing
+*/
+export const VIDEOS_PATH = '/ucf/Video';
+/*
+Community → Relay feed
+*/
+export const RELAY_PATH = '/relay/my-feed';
 export const GAME_VAULT_PATH = '/marketplace/game-vault';
-// Member profile pages live at `/member/{username}` (not `/account/profile`).
-export const PROFILE_PATH = '/member/{username}';
+/*
+Border / about-me edits live on personalization; public profile is
+`/member/{username}` for viewing.
+*/
+export const PROFILE_PATH = '/account/personalization';
+export const MEMBER_PROFILE_PATH = '/member/{username}';
 
 function slug(title: string): string {
   return title
@@ -156,7 +175,20 @@ export const ACHIEVEMENTS: readonly AchievementDefinition[] = [
     aliases: ['Add about me'],
     automation: 'profileCosmetics',
   }),
+  define('Add a background (Header Image)', 'profile', {
+    hint: 'Upload a header/background image on your profile.',
+    href: PROFILE_PATH,
+    hrefLabel: 'Open profile',
+  }),
 
+  define('Add your first border', 'avatar', {
+    group: 'border-first',
+    rank: 1,
+    hint: 'Equip any profile border once.',
+    href: PROFILE_PATH,
+    hrefLabel: 'Open profile',
+    automation: 'profileCosmetics',
+  }),
   define('Try it on', 'avatar', {
     group: 'border-use',
     rank: 1,
@@ -245,10 +277,34 @@ export const ACHIEVEMENTS: readonly AchievementDefinition[] = [
     automation: 'visitPages',
   }),
   define('Visit the Hive page', 'visitPages', {
-    hint: 'Open the Hive / information page once.',
+    hint: 'Open the Hive influencers page once (Community → Hive).',
     href: HIVE_PATH,
     hrefLabel: 'Visit Hive',
     automation: 'visitPages',
+  }),
+
+  define('Spend 1 hour on AWA', 'timeOnSite', {
+    hint: 'Stay signed in on Alienware Arena for a cumulative hour.',
+    coveredByActionPlan: true,
+    kind: 'inform',
+  }),
+
+  define('Connect Discord', 'connections', {
+    hint: 'Link Discord in account settings / Arena Connect.',
+    kind: 'inform',
+  }),
+  define('Connect your Twitch account', 'connections', {
+    hint: 'Link Twitch under account connections.',
+    kind: 'inform',
+  }),
+  define('Connect your Steam account', 'connections', {
+    hint: 'Link Steam under account connections.',
+    kind: 'inform',
+  }),
+
+  define('Make your first purchase in the Marketplace', 'marketplace', {
+    hint: 'Buy anything once in the ARP Marketplace (fragments, cosmetics, etc.).',
+    kind: 'inform',
   }),
 
   define('Watch 10 Videos', 'watchVideos', {
@@ -755,6 +811,13 @@ export const ACHIEVEMENTS: readonly AchievementDefinition[] = [
     kind: 'inform',
   }),
 
+  define('Enter A Comm Event', 'communityEvents', {
+    group: 'community-events-onboard',
+    rank: 1,
+    hint: 'Join any live Community Event once (onboarding).',
+    coveredByActionPlan: true,
+    aliases: ['Enter a Comm Event', 'Enter a Community Event'],
+  }),
   define('Participate in a Community Event', 'communityEvents', {
     group: 'community-events',
     rank: 1,

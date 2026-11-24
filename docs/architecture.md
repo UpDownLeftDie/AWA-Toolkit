@@ -18,9 +18,11 @@ One file per activity (e.g. `watchTwitch.ts`). An activity exports a scorer that
 
 `src/artifacts/plan/providers/`
 
-A provider is a pure function `(context: PlanContext) => TaskCandidate[]`. It reads from `PlanContext` (optimizer result, site state, achievements data, etc.) and returns ranked-ready task candidates. Add the new file, export it from `providers/index.ts`, then add it to the `PLAN_PROVIDERS` array in `src/artifacts/plan/buildActionPlan.ts`.
+A provider is a pure function `(context: PlanContext) => TaskCandidate[]`. It reads from `PlanContext` (optimizer result, site state, etc.) and returns ranked-ready task candidates. Add the new file, export it from `providers/index.ts`, then add it to the `PLAN_PROVIDERS` array in `src/artifacts/plan/buildActionPlan.ts`.
 
-Task IDs must be unique within a provider run (e.g. `achievement:slug:0`). Set `value.arp` for ARP-bearing tasks; omit or set to `0` for non-ARP tasks. Use `constraints.chain` (`'before'` / `'equip'` / `'after'`) to position relative to the loadout swap step — `buildActionPlan` turns those into hard `before`/`after` edges against equip task ids.
+Task IDs must be unique within a provider run (e.g. `bp:claim:0`). Set `value.arp` for ARP-bearing tasks; omit or set to `0` for non-ARP tasks. Use `constraints.chain` (`'before'` / `'equip'` / `'after'`) to position relative to the loadout swap step — `buildActionPlan` turns those into hard `before`/`after` edges against equip task ids.
+
+Achievements are **not** ARP plan providers. They render in their own Control Center / Full Panel box via `buildAchievementTodos` when Achievements helper is on.
 
 ### Add or change a priority policy
 

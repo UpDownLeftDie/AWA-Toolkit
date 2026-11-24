@@ -567,13 +567,10 @@ export function areAccountActionsEnabled(
 }
 
 /**
-Hard kill-switch for Achievements helper while it is unfinished.
-User setting is ignored until this is flipped back on.
+Achievements helper feature flag. User still needs `achievementsEnabled`.
 */
-// `false` is the kill switch. The annotation keeps this a boolean so the
-// helper branches stay type-checked until it is turned back on.
 // eslint-disable-next-line @typescript-eslint/no-inferrable-types
-export const isAchievementsHelperFeatureEnabled: boolean = false;
+export const isAchievementsHelperFeatureEnabled: boolean = true;
 
 export function areAchievementsEnabled(
   settings: ArtifactOptimizerSettings,

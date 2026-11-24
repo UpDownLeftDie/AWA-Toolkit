@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         AWA Toolkit
 // @namespace    https://github.com/UpDownLeftDie/AWA-Toolkit
-// @version      2.5.2
+// @version      2.6.0
 // @author       jaredcat
 // @description  Artifact Optimizer, Control Center tasks, giveaway/vault filters, and UCF reading mode
 // @license      AGPL-3.0-or-later
@@ -137,6 +137,12 @@
 	}
 	function giveawayKeyStatus(giveawayId) {
 		return readPageGiveawayKeys().find((entry) => entry.giveawayId === giveawayId);
+	}
+	function readPageUsername() {
+		try {
+			const value = pageWindow().user_username;
+			if (typeof value === "string" && value.trim() !== "") return value.trim();
+		} catch {}
 	}
 	var STEAM_FREE_CACHE_KEY = "steamAppFreeCache";
 	var STEAM_FREE_TTL_PERMANENT_MS = 6048e5;
@@ -2561,7 +2567,7 @@
 		return settings.allowAccountActions;
 	}
 	function areAchievementsEnabled(settings) {
-		return false;
+		return settings.achievementsEnabled;
 	}
 	var SNAPSHOT_KEY$1 = "artifactSnapshot";
 	function isArtifactSnapshot(value) {
@@ -4411,8 +4417,9 @@
 	function expiringFragmentOffers(state, now = Date.now()) {
 		return (state.marketplaceFragments ?? []).filter((offer) => isExpiringFragmentOffer(offer, now));
 	}
-	function primaryExpiringFragmentOffer(state, discountPct = 0, availableArp = state.arpLog?.redeemableArp, now = Date.now()) {
-		return expiringFragmentOffers(state, now).filter((offer) => isAffordableFragmentOffer(offer, state, discountPct, availableArp)).toSorted((left, right) => {
+	function primaryExpiringFragmentOffer(state, discountPct = 0, availableArp = state.arpLog?.redeemableArp, now = Date.now(), options = {}) {
+		const shouldSkip = options.shouldSkip;
+		return expiringFragmentOffers(state, now).filter((offer) => isAffordableFragmentOffer(offer, state, discountPct, availableArp)).filter((offer) => !shouldSkip?.(offer)).toSorted((left, right) => {
 			const leftEnd = fragmentOfferEndsAtMs(left) ?? Number.POSITIVE_INFINITY;
 			const rightEnd = fragmentOfferEndsAtMs(right) ?? Number.POSITIVE_INFINITY;
 			if (leftEnd !== rightEnd) return leftEnd - rightEnd;
@@ -6187,11 +6194,16 @@
 		if (nextLocked) return describeWaitingCommunityArpLine(event, nextLocked.arpReward);
 		return breakdown.imminentArp > 0 ? `${formatCommunityEventArp(breakdown.imminentArp)} unlocked — not awarded yet` : `${formatCommunityEventArp(event.pendingArp)} still open`;
 	}
-	function appendMarketplaceFragmentNotes(notes, equipped, best, discountCombo, context) {
+	function isOwnedArtifactOffer(offer, ownedFamilyIds) {
+		const resolved = resolveArtifactByDisplayName(offer.name);
+		return resolved !== void 0 && ownedFamilyIds.has(resolved.definition.id);
+	}
+	function appendMarketplaceFragmentNotes(notes, owned, equipped, best, discountCombo, context) {
 		const now = resolveNow(context);
 		const discountPct = Math.max(comboMarketDiscountPct(discountCombo), comboMarketDiscountPct(best), collectBonuses(equipped).marketDiscountPct);
 		const availableArp = projectedRedeemableArp(context, best, discountCombo);
-		const offer = primaryExpiringFragmentOffer(context.siteState, discountPct, availableArp, now);
+		const ownedFamilyIds = new Set(owned.map((artifact) => artifact.familyId));
+		const offer = primaryExpiringFragmentOffer(context.siteState, discountPct, availableArp, now, { shouldSkip: (candidate) => isOwnedArtifactOffer(candidate, ownedFamilyIds) });
 		if (!offer) return;
 		const endsAt = fragmentOfferEndsAtMs(offer);
 		if (endsAt === void 0) return;
@@ -6224,7 +6236,7 @@
 		const notes = [];
 		appendBattlePassNotes(notes, owned, equipped, context);
 		appendCommunityEventNotes(notes, owned, equipped, context);
-		appendMarketplaceFragmentNotes(notes, equipped, best, discountCombo, context);
+		appendMarketplaceFragmentNotes(notes, owned, equipped, best, discountCombo, context);
 		if (isActivityPending(context.siteState.caps, "steamQuests") && equipped.length > 0) {
 			const currentSteam = collectBonuses(equipped).steamQuests;
 			const ownedSteam = Math.max(currentSteam, best?.steamQuestsFlat ?? 0, ...owned.map((artifact) => collectBonuses([artifact]).steamQuests));
@@ -7817,1000 +7829,6 @@
 			todo
 		};
 	}
-	var ACHIEVEMENT_AUTOMATION_KEYS = [
-		"visitPages",
-		"profileCosmetics",
-		"watchVideos",
-		"readArticles",
-		"gameVault"
-	];
-	var FAQ_PATH = "/faq-contact";
-	var HIVE_PATH = "/information";
-	var NEWS_PATH = "/news";
-	var VIDEOS_PATH = "/videos";
-	var RELAY_PATH = "/ucf";
-	var GAME_VAULT_PATH$1 = "/marketplace/game-vault";
-	var PROFILE_PATH = "/member/{username}";
-	function slug(title) {
-		return title.toLowerCase().replaceAll(/[^a-z0-9]+/g, "-").replaceAll(/^-|-$/g, "");
-	}
-	function define(title, category, options) {
-		const definition = {
-			id: slug(title),
-			title,
-			category,
-			group: options.group ?? slug(title),
-			rank: options.rank ?? 1,
-			hint: options.hint,
-			kind: options.kind ?? "action"
-		};
-		if (options.aliases) definition.aliases = options.aliases;
-		if (options.href) definition.href = options.href;
-		if (options.hrefLabel) definition.hrefLabel = options.hrefLabel;
-		if (options.automation) definition.automation = options.automation;
-		if (options.coveredByActionPlan === true) definition.coveredByActionPlan = true;
-		return definition;
-	}
-	var ACHIEVEMENTS = [
-		define("Verified Member", "verified", {
-			hint: "Finish email / account verification if AWA still asks for it.",
-			kind: "inform"
-		}),
-		define("Add about me", "profile", {
-			hint: "Add a short About Me on your profile.",
-			href: PROFILE_PATH,
-			hrefLabel: "Open profile",
-			aliases: ["Add about me"],
-			automation: "profileCosmetics"
-		}),
-		define("Try it on", "avatar", {
-			group: "border-use",
-			rank: 1,
-			hint: "Change your profile border once.",
-			href: PROFILE_PATH,
-			hrefLabel: "Open profile",
-			automation: "profileCosmetics"
-		}),
-		define("Use 5 different borders", "avatar", {
-			group: "border-use",
-			rank: 2,
-			hint: "Equip 5 different borders over time.",
-			href: PROFILE_PATH,
-			hrefLabel: "Open profile",
-			automation: "profileCosmetics"
-		}),
-		define("Use 10 different borders", "avatar", {
-			group: "border-use",
-			rank: 3,
-			hint: "Keep rotating borders you have not used yet.",
-			href: PROFILE_PATH,
-			hrefLabel: "Open profile",
-			automation: "profileCosmetics"
-		}),
-		define("Use 25 different borders", "avatar", {
-			group: "border-use",
-			rank: 4,
-			hint: "Calendar and marketplace borders count toward this.",
-			href: PROFILE_PATH,
-			hrefLabel: "Open profile",
-			automation: "profileCosmetics"
-		}),
-		define("Change your border once a day for a week", "avatar", {
-			group: "border-daily",
-			rank: 1,
-			hint: "Change your border each UTC day for 7 days.",
-			href: PROFILE_PATH,
-			hrefLabel: "Open profile",
-			automation: "profileCosmetics"
-		}),
-		define("Change your border once a month for a year", "avatar", {
-			group: "border-monthly",
-			rank: 1,
-			hint: "Change your border at least once each calendar month for 12 months.",
-			href: PROFILE_PATH,
-			hrefLabel: "Open profile",
-			automation: "profileCosmetics"
-		}),
-		define("Change your avatar items every day for a week", "avatar", {
-			group: "avatar-daily",
-			rank: 1,
-			hint: "Change an avatar item each day for 7 days.",
-			href: PROFILE_PATH,
-			hrefLabel: "Open profile",
-			automation: "profileCosmetics"
-		}),
-		define("Change your avatar once a month for 3 months", "avatar", {
-			group: "avatar-monthly",
-			rank: 1,
-			hint: "Change your avatar at least once a month for 3 months.",
-			href: PROFILE_PATH,
-			hrefLabel: "Open profile",
-			automation: "profileCosmetics"
-		}),
-		define("Change your avatar once a month for 6 months", "avatar", {
-			group: "avatar-monthly",
-			rank: 2,
-			hint: "Keep a monthly avatar change going for 6 months.",
-			href: PROFILE_PATH,
-			hrefLabel: "Open profile",
-			automation: "profileCosmetics"
-		}),
-		define("Change your avatar once a month for 1 year", "avatar", {
-			group: "avatar-monthly",
-			rank: 3,
-			hint: "Keep a monthly avatar change going for 12 months.",
-			href: PROFILE_PATH,
-			hrefLabel: "Open profile",
-			automation: "profileCosmetics"
-		}),
-		define("Visit the FAQ page", "visitPages", {
-			hint: "Open the FAQ / support page once.",
-			href: FAQ_PATH,
-			hrefLabel: "Visit FAQ",
-			automation: "visitPages"
-		}),
-		define("Visit the Hive page", "visitPages", {
-			hint: "Open the Hive / information page once.",
-			href: HIVE_PATH,
-			hrefLabel: "Visit Hive",
-			automation: "visitPages"
-		}),
-		define("Watch 10 Videos", "watchVideos", {
-			group: "watch-videos",
-			rank: 1,
-			hint: "Watch 10 videos on Alienware Arena.",
-			href: VIDEOS_PATH,
-			hrefLabel: "Open videos",
-			automation: "watchVideos"
-		}),
-		define("Watch 100 Videos", "watchVideos", {
-			group: "watch-videos",
-			rank: 2,
-			hint: "Keep watching Arena videos toward 100.",
-			href: VIDEOS_PATH,
-			hrefLabel: "Open videos",
-			automation: "watchVideos"
-		}),
-		define("Watch 1000 Videos", "watchVideos", {
-			group: "watch-videos",
-			rank: 3,
-			hint: "Long-run video-watch achievement.",
-			href: VIDEOS_PATH,
-			hrefLabel: "Open videos",
-			kind: "inform"
-		}),
-		define("Read 10 News Articles", "readArticles", {
-			group: "read-articles",
-			rank: 1,
-			hint: "Open 10 Pulse / news articles.",
-			href: NEWS_PATH,
-			hrefLabel: "Open news",
-			automation: "readArticles"
-		}),
-		define("Read 100 News Articles", "readArticles", {
-			group: "read-articles",
-			rank: 2,
-			hint: "Keep reading Arena news toward 100.",
-			href: NEWS_PATH,
-			hrefLabel: "Open news",
-			automation: "readArticles"
-		}),
-		define("Read 1000 News Articles", "readArticles", {
-			group: "read-articles",
-			rank: 3,
-			hint: "Long-run article-read achievement.",
-			href: NEWS_PATH,
-			hrefLabel: "Open news",
-			kind: "inform"
-		}),
-		define("Enter Game-Vault", "gameVault", {
-			group: "vault-enter",
-			rank: 1,
-			hint: "Open the Game Vault page once.",
-			href: GAME_VAULT_PATH$1,
-			hrefLabel: "Open vault",
-			automation: "gameVault"
-		}),
-		define("Enter Game-Vault 5 times", "gameVault", {
-			group: "vault-enter",
-			rank: 2,
-			hint: "Visit Game Vault on 5 different days / entries.",
-			href: GAME_VAULT_PATH$1,
-			hrefLabel: "Open vault",
-			automation: "gameVault"
-		}),
-		define("Enter Game-Vault 12 times", "gameVault", {
-			group: "vault-enter",
-			rank: 3,
-			hint: "Keep entering Game Vault toward 12 visits.",
-			href: GAME_VAULT_PATH$1,
-			hrefLabel: "Open vault",
-			automation: "gameVault"
-		}),
-		define("Enter Game-Vault 24 times", "gameVault", {
-			group: "vault-enter",
-			rank: 4,
-			hint: "Keep entering Game Vault toward 24 visits.",
-			href: GAME_VAULT_PATH$1,
-			hrefLabel: "Open vault",
-			automation: "gameVault"
-		}),
-		define("Get 1 game from game vault", "gameVault", {
-			group: "vault-claim",
-			rank: 1,
-			hint: "Claim one Game Vault title when you have enough ARP.",
-			href: GAME_VAULT_PATH$1,
-			hrefLabel: "Open vault",
-			kind: "inform"
-		}),
-		define("Get 5 games from game vault", "gameVault", {
-			group: "vault-claim",
-			rank: 2,
-			hint: "Claim 5 Game Vault titles over time.",
-			href: GAME_VAULT_PATH$1,
-			hrefLabel: "Open vault",
-			kind: "inform"
-		}),
-		define("Get 10 games from game vault", "gameVault", {
-			group: "vault-claim",
-			rank: 3,
-			hint: "Claim 10 Game Vault titles over time.",
-			href: GAME_VAULT_PATH$1,
-			hrefLabel: "Open vault",
-			kind: "inform"
-		}),
-		define("Post a relay", "relay", {
-			group: "relay-post",
-			rank: 1,
-			hint: "Post one Relay (community post).",
-			href: RELAY_PATH,
-			hrefLabel: "Open Relay",
-			aliases: ["Post a Relay"]
-		}),
-		define("Post 10 Relays", "relay", {
-			group: "relay-post",
-			rank: 2,
-			hint: "Post 10 Relays.",
-			href: RELAY_PATH,
-			hrefLabel: "Open Relay"
-		}),
-		define("Post 50 relays", "relay", {
-			group: "relay-post",
-			rank: 3,
-			hint: "Post 50 Relays.",
-			href: RELAY_PATH,
-			hrefLabel: "Open Relay"
-		}),
-		define("Comment on a relay", "relay", {
-			group: "relay-comment",
-			rank: 1,
-			hint: "Leave a comment on someone else's Relay.",
-			href: RELAY_PATH,
-			hrefLabel: "Open Relay"
-		}),
-		define("React to a relay", "relay", {
-			group: "relay-react",
-			rank: 1,
-			hint: "React to one Relay.",
-			href: RELAY_PATH,
-			hrefLabel: "Open Relay"
-		}),
-		define("React to 10 relays", "relay", {
-			group: "relay-react",
-			rank: 2,
-			hint: "React to 10 Relays.",
-			href: RELAY_PATH,
-			hrefLabel: "Open Relay"
-		}),
-		define("React to 50 relays", "relay", {
-			group: "relay-react",
-			rank: 3,
-			hint: "React to 50 Relays.",
-			href: RELAY_PATH,
-			hrefLabel: "Open Relay"
-		}),
-		define("React to 100 relays", "relay", {
-			group: "relay-react",
-			rank: 4,
-			hint: "React to 100 Relays.",
-			href: RELAY_PATH,
-			hrefLabel: "Open Relay"
-		}),
-		define("Vote on your first Arena Connect Poll", "discord", {
-			group: "discord-poll",
-			rank: 1,
-			hint: "Vote on the current Discord / Arena Connect poll (also in What to do).",
-			coveredByActionPlan: true
-		}),
-		define("Vote on 10 Arena Connect polls", "discord", {
-			group: "discord-poll",
-			rank: 2,
-			hint: "Keep voting on weekday Discord polls.",
-			coveredByActionPlan: true
-		}),
-		define("Vote on 50 Arena Connect polls", "discord", {
-			group: "discord-poll",
-			rank: 3,
-			hint: "Long-run Discord poll votes.",
-			coveredByActionPlan: true,
-			kind: "inform"
-		}),
-		define("Vote on 100 Arena Connect polls", "discord", {
-			group: "discord-poll",
-			rank: 4,
-			hint: "Long-run Discord poll votes.",
-			coveredByActionPlan: true,
-			kind: "inform"
-		}),
-		define("Vote on 500 Arena Connect polls", "discord", {
-			group: "discord-poll",
-			rank: 5,
-			hint: "Long-run Discord poll votes.",
-			coveredByActionPlan: true,
-			kind: "inform"
-		}),
-		define("Play all 3 Steam quests", "steamQuests", {
-			group: "steam-all-three",
-			rank: 1,
-			hint: "Finish all three weekly Steam quests (also in What to do).",
-			coveredByActionPlan: true
-		}),
-		define("Play all 3 Steam quests 5 times", "steamQuests", {
-			group: "steam-all-three",
-			rank: 2,
-			hint: "Clear all three Steam quests for 5 weeks.",
-			coveredByActionPlan: true,
-			kind: "inform"
-		}),
-		define("Play all 3 Steam quests 10 times", "steamQuests", {
-			group: "steam-all-three",
-			rank: 3,
-			hint: "Clear all three Steam quests for 10 weeks.",
-			coveredByActionPlan: true,
-			kind: "inform"
-		}),
-		define("Play all 3 Steam quests 20 times", "steamQuests", {
-			group: "steam-all-three",
-			rank: 4,
-			hint: "Clear all three Steam quests for 20 weeks.",
-			coveredByActionPlan: true,
-			kind: "inform"
-		}),
-		define("Play all 3 Steam quests 50 times", "steamQuests", {
-			group: "steam-all-three",
-			rank: 5,
-			hint: "Clear all three Steam quests for 50 weeks.",
-			coveredByActionPlan: true,
-			kind: "inform"
-		}),
-		define("Steam: Play 10 Steam Quests", "steamQuests", {
-			group: "steam-quest-count",
-			rank: 1,
-			hint: "Complete 10 Steam quests over time.",
-			coveredByActionPlan: true
-		}),
-		define("Steam: Play 25 Steam Quests", "steamQuests", {
-			group: "steam-quest-count",
-			rank: 2,
-			hint: "Complete 25 Steam quests over time.",
-			coveredByActionPlan: true,
-			kind: "inform"
-		}),
-		define("Steam: Play 50 Steam Quests", "steamQuests", {
-			group: "steam-quest-count",
-			rank: 3,
-			hint: "Complete 50 Steam quests over time.",
-			coveredByActionPlan: true,
-			kind: "inform"
-		}),
-		define("Steam: Play 100 Steam Quests", "steamQuests", {
-			group: "steam-quest-count",
-			rank: 4,
-			hint: "Complete 100 Steam quests over time.",
-			coveredByActionPlan: true,
-			kind: "inform"
-		}),
-		define("Steam: Play 365 Steam Quests", "steamQuests", {
-			group: "steam-quest-count",
-			rank: 5,
-			hint: "Complete 365 Steam quests over time.",
-			coveredByActionPlan: true,
-			kind: "inform"
-		}),
-		define("Steam: Play 10 hours", "steamHours", {
-			group: "steam-hours",
-			rank: 1,
-			hint: "Play tracked Steam hours through Arena quests.",
-			coveredByActionPlan: true
-		}),
-		define("Steam: Play 50 hours", "steamHours", {
-			group: "steam-hours",
-			rank: 2,
-			hint: "Keep playing Steam quests toward 50 hours.",
-			coveredByActionPlan: true,
-			kind: "inform"
-		}),
-		define("Steam: Play 125 hours", "steamHours", {
-			group: "steam-hours",
-			rank: 3,
-			hint: "Keep playing Steam quests toward 125 hours.",
-			coveredByActionPlan: true,
-			kind: "inform"
-		}),
-		define("Steam: Play 500 hours", "steamHours", {
-			group: "steam-hours",
-			rank: 4,
-			hint: "Long-run Steam hours.",
-			coveredByActionPlan: true,
-			kind: "inform"
-		}),
-		define("Steam: Play 1000 hours", "steamHours", {
-			group: "steam-hours",
-			rank: 5,
-			hint: "Long-run Steam hours.",
-			coveredByActionPlan: true,
-			kind: "inform"
-		}),
-		define("Steam: Play 2500 hours", "steamHours", {
-			group: "steam-hours",
-			rank: 6,
-			hint: "Long-run Steam hours.",
-			coveredByActionPlan: true,
-			kind: "inform"
-		}),
-		define("Steam: Play 10000 hours", "steamHours", {
-			group: "steam-hours",
-			rank: 7,
-			hint: "Long-run Steam hours.",
-			coveredByActionPlan: true,
-			kind: "inform"
-		}),
-		define("Watch 10 hours of Twitch on Nexus channels", "twitchNexus", {
-			group: "twitch-nexus",
-			rank: 1,
-			hint: "Watch Twitch via Arena on Nexus channels (also in What to do).",
-			coveredByActionPlan: true
-		}),
-		define("Watch 100 hours of Twitch on Nexus channels", "twitchNexus", {
-			group: "twitch-nexus",
-			rank: 2,
-			hint: "Long-run Nexus Twitch hours.",
-			coveredByActionPlan: true,
-			kind: "inform"
-		}),
-		define("Watch 1000 Hours of Twitch.tv on Nexus channels", "twitchNexus", {
-			group: "twitch-nexus",
-			rank: 3,
-			hint: "Long-run Nexus Twitch hours.",
-			coveredByActionPlan: true,
-			kind: "inform"
-		}),
-		define("Watch 10 hours of Twitch.tv on Hive channels", "twitchHive", {
-			group: "twitch-hive",
-			rank: 1,
-			hint: "Watch Twitch via Arena on Hive channels.",
-			coveredByActionPlan: true
-		}),
-		define("Watch 100 Hours of Twitch.tv on Hive channels", "twitchHive", {
-			group: "twitch-hive",
-			rank: 2,
-			hint: "Long-run Hive Twitch hours.",
-			coveredByActionPlan: true,
-			kind: "inform"
-		}),
-		define("Watch 1000 Hours of Twitch.tv on Hive channels", "twitchHive", {
-			group: "twitch-hive",
-			rank: 3,
-			hint: "Long-run Hive Twitch hours.",
-			coveredByActionPlan: true,
-			kind: "inform"
-		}),
-		define("Get your first border from Calendar rewards", "calendarBorders", {
-			group: "calendar-borders",
-			rank: 1,
-			hint: "Claim Daily Calendar until a border drops (also in What to do).",
-			coveredByActionPlan: true
-		}),
-		define("Get all the borders from a monthly calendar", "calendarBorders", {
-			group: "calendar-borders",
-			rank: 2,
-			hint: "Do not miss Daily Calendar days this month.",
-			coveredByActionPlan: true
-		}),
-		define("Get all borders from calendar for 3 months", "calendarBorders", {
-			group: "calendar-borders",
-			rank: 3,
-			hint: "Perfect calendar months stack.",
-			coveredByActionPlan: true,
-			kind: "inform"
-		}),
-		define("Get all borders from calendar for 6 months", "calendarBorders", {
-			group: "calendar-borders",
-			rank: 4,
-			hint: "Perfect calendar months stack.",
-			coveredByActionPlan: true,
-			kind: "inform"
-		}),
-		define("Get all borders from calendar for 1 year", "calendarBorders", {
-			group: "calendar-borders",
-			rank: 5,
-			hint: "Perfect calendar months stack.",
-			coveredByActionPlan: true,
-			kind: "inform"
-		}),
-		define("Receive all 28-day rewards in a single month", "streaks", {
-			group: "streaks-28",
-			rank: 1,
-			hint: "Claim every Daily Calendar day in the 28-day track.",
-			coveredByActionPlan: true
-		}),
-		define("Receive all 28-day rewards for 3 months", "streaks", {
-			group: "streaks-28",
-			rank: 2,
-			hint: "Keep a perfect 28-day calendar streak for 3 months.",
-			coveredByActionPlan: true,
-			kind: "inform"
-		}),
-		define("Receive all 28-day rewards for 6 months", "streaks", {
-			group: "streaks-28",
-			rank: 3,
-			hint: "Keep a perfect 28-day calendar streak for 6 months.",
-			coveredByActionPlan: true,
-			kind: "inform"
-		}),
-		define("Receive all 28-day rewards for 1 year", "streaks", {
-			group: "streaks-28",
-			rank: 4,
-			hint: "Keep a perfect 28-day calendar streak for 12 months.",
-			coveredByActionPlan: true,
-			kind: "inform"
-		}),
-		define("Be a member for 1 year", "years", {
-			group: "years",
-			rank: 1,
-			hint: "Passive — wait for the anniversary.",
-			kind: "inform"
-		}),
-		define("Be a member for 2 years", "years", {
-			group: "years",
-			rank: 2,
-			hint: "Passive — wait for the anniversary.",
-			kind: "inform"
-		}),
-		define("Be a member for 3 years", "years", {
-			group: "years",
-			rank: 3,
-			hint: "Passive — wait for the anniversary.",
-			kind: "inform"
-		}),
-		define("Be a member for 4 years", "years", {
-			group: "years",
-			rank: 4,
-			hint: "Passive — wait for the anniversary.",
-			kind: "inform"
-		}),
-		define("Be a member for 5 years", "years", {
-			group: "years",
-			rank: 5,
-			hint: "Passive — wait for the anniversary.",
-			kind: "inform"
-		}),
-		define("Be a member for 6 years", "years", {
-			group: "years",
-			rank: 6,
-			hint: "Passive — wait for the anniversary.",
-			kind: "inform"
-		}),
-		define("Be a member for 7 years", "years", {
-			group: "years",
-			rank: 7,
-			hint: "Passive — wait for the anniversary.",
-			kind: "inform"
-		}),
-		define("Be a member for 8 years", "years", {
-			group: "years",
-			rank: 8,
-			hint: "Passive — wait for the anniversary.",
-			kind: "inform"
-		}),
-		define("Be a member for 9 years", "years", {
-			group: "years",
-			rank: 9,
-			hint: "Passive — wait for the anniversary.",
-			kind: "inform"
-		}),
-		define("Be a member for 10 years", "years", {
-			group: "years",
-			rank: 10,
-			hint: "Passive — wait for the anniversary.",
-			kind: "inform"
-		}),
-		define("Reach Tier 2", "tiers", {
-			group: "tiers",
-			rank: 1,
-			hint: "Earn lifetime ARP to raise your Arena tier.",
-			kind: "inform"
-		}),
-		define("Reach Tier 3", "tiers", {
-			group: "tiers",
-			rank: 2,
-			hint: "Earn lifetime ARP to raise your Arena tier.",
-			kind: "inform"
-		}),
-		define("Reach Tier 4", "tiers", {
-			group: "tiers",
-			rank: 3,
-			hint: "Earn lifetime ARP to raise your Arena tier.",
-			kind: "inform"
-		}),
-		define("Reach Tier 5", "tiers", {
-			group: "tiers",
-			rank: 4,
-			hint: "Earn lifetime ARP to raise your Arena tier.",
-			kind: "inform"
-		}),
-		define("Participate in a Community Event", "communityEvents", {
-			group: "community-events",
-			rank: 1,
-			hint: "Play required hours in a live Community Event (also in What to do).",
-			coveredByActionPlan: true
-		}),
-		define("Participate in 2 Community Events", "communityEvents", {
-			group: "community-events",
-			rank: 2,
-			hint: "Join the next live Community Event.",
-			coveredByActionPlan: true,
-			kind: "inform"
-		}),
-		define("Participate in 5 Community Events", "communityEvents", {
-			group: "community-events",
-			rank: 3,
-			hint: "Join live Community Events as they appear.",
-			coveredByActionPlan: true,
-			kind: "inform"
-		}),
-		define("Participate in 10 Community Events", "communityEvents", {
-			group: "community-events",
-			rank: 4,
-			hint: "Join live Community Events as they appear.",
-			coveredByActionPlan: true,
-			kind: "inform"
-		}),
-		define("Participate in 20 Community Events", "communityEvents", {
-			group: "community-events",
-			rank: 5,
-			hint: "Join live Community Events as they appear.",
-			coveredByActionPlan: true,
-			kind: "inform"
-		}),
-		define("Finish all required personal hours for a community event", "communityHours", {
-			group: "community-hours",
-			rank: 1,
-			hint: "Finish the personal-hours track on a live event.",
-			coveredByActionPlan: true
-		}),
-		define("Finish 20 personal hours for community events", "communityHours", {
-			group: "community-hours",
-			rank: 2,
-			hint: "Keep playing Community Event hours.",
-			coveredByActionPlan: true,
-			kind: "inform"
-		}),
-		define("Finish 50 personal hours for community events", "communityHours", {
-			group: "community-hours",
-			rank: 3,
-			hint: "Keep playing Community Event hours.",
-			coveredByActionPlan: true,
-			kind: "inform"
-		}),
-		define("Finish 100 personal hours for community events", "communityHours", {
-			group: "community-hours",
-			rank: 4,
-			hint: "Keep playing Community Event hours.",
-			coveredByActionPlan: true,
-			kind: "inform"
-		}),
-		define("Equip an artifact", "artifacts", {
-			group: "artifact-equip",
-			rank: 1,
-			hint: "Equip any artifact in the Showroom (also in What to do).",
-			coveredByActionPlan: true
-		}),
-		define("Equip 5 artifacts", "artifacts", {
-			group: "artifact-equip",
-			rank: 2,
-			hint: "Equip 5 different artifacts over time.",
-			coveredByActionPlan: true
-		}),
-		define("Equip 15 artifacts", "artifacts", {
-			group: "artifact-equip",
-			rank: 3,
-			hint: "Equip 15 different artifacts over time.",
-			coveredByActionPlan: true,
-			kind: "inform"
-		}),
-		define("Upgrade an artifact", "artifacts", {
-			group: "artifact-upgrade",
-			rank: 1,
-			hint: "Spend fragments to upgrade any artifact.",
-			coveredByActionPlan: true
-		}),
-		define("Upgrade 3 artifacts", "artifacts", {
-			group: "artifact-upgrade",
-			rank: 2,
-			hint: "Upgrade 3 different artifacts.",
-			coveredByActionPlan: true
-		}),
-		define("Upgrade 7 Artifacts", "artifacts", {
-			group: "artifact-upgrade",
-			rank: 3,
-			hint: "Upgrade 7 different artifacts.",
-			coveredByActionPlan: true,
-			kind: "inform"
-		}),
-		define("Fully Upgrade an artifact", "artifacts", {
-			group: "artifact-max",
-			rank: 1,
-			hint: "Take one artifact to max tier.",
-			coveredByActionPlan: true
-		}),
-		define("Fully Upgrade 3 artifacts", "artifacts", {
-			group: "artifact-max",
-			rank: 2,
-			hint: "Max 3 artifacts.",
-			coveredByActionPlan: true,
-			kind: "inform"
-		}),
-		define("Fully Upgrade 5 artifacts", "artifacts", {
-			group: "artifact-max",
-			rank: 3,
-			hint: "Max 5 artifacts.",
-			coveredByActionPlan: true,
-			kind: "inform"
-		}),
-		define("Spend 100 ARP", "spendArp", {
-			group: "spend-arp",
-			rank: 1,
-			hint: "Spend ARP in Game Vault or the marketplace.",
-			href: GAME_VAULT_PATH$1,
-			hrefLabel: "Open vault",
-			kind: "inform"
-		}),
-		define("Spend 1000 ARP", "spendArp", {
-			group: "spend-arp",
-			rank: 2,
-			hint: "Keep claiming vault / marketplace spends.",
-			href: GAME_VAULT_PATH$1,
-			hrefLabel: "Open vault",
-			kind: "inform"
-		}),
-		define("Spend 5000 ARP", "spendArp", {
-			group: "spend-arp",
-			rank: 3,
-			hint: "Keep claiming vault / marketplace spends.",
-			href: GAME_VAULT_PATH$1,
-			hrefLabel: "Open vault",
-			kind: "inform"
-		}),
-		define("Spend 10000 ARP", "spendArp", {
-			group: "spend-arp",
-			rank: 4,
-			hint: "Keep claiming vault / marketplace spends.",
-			href: GAME_VAULT_PATH$1,
-			hrefLabel: "Open vault",
-			kind: "inform"
-		}),
-		define("Earn 5 fragments", "fragments", {
-			group: "fragments",
-			rank: 1,
-			hint: "Fragments drop from daily play and Battle Pass — already covered by daily ARP work.",
-			coveredByActionPlan: true,
-			kind: "inform"
-		}),
-		define("Earn 15 fragments", "fragments", {
-			group: "fragments",
-			rank: 2,
-			hint: "Keep doing daily ARP sources.",
-			coveredByActionPlan: true,
-			kind: "inform"
-		}),
-		define("Earn 30 fragments", "fragments", {
-			group: "fragments",
-			rank: 3,
-			hint: "Keep doing daily ARP sources.",
-			coveredByActionPlan: true,
-			kind: "inform"
-		}),
-		define("Earn 50 fragments", "fragments", {
-			group: "fragments",
-			rank: 4,
-			hint: "Keep doing daily ARP sources.",
-			coveredByActionPlan: true,
-			kind: "inform"
-		})
-	];
-	function normalizeAchievementTitle(value) {
-		return value.replaceAll(/\s+/g, " ").trim().toLowerCase();
-	}
-	new Map(ACHIEVEMENTS.map((achievement) => [achievement.id, achievement]));
-	var ACHIEVEMENT_BY_TITLE = new Map();
-	for (const achievement of ACHIEVEMENTS) {
-		ACHIEVEMENT_BY_TITLE.set(normalizeAchievementTitle(achievement.title), achievement);
-		const aliases = achievement.aliases ?? [];
-		for (const alias of aliases) ACHIEVEMENT_BY_TITLE.set(normalizeAchievementTitle(alias), achievement);
-	}
-	var SETTINGS_KEY = "achievementSettings";
-	var COOLDOWNS_KEY = "achievementCooldowns";
-	function utcDateString(now = new Date()) {
-		return now.toISOString().slice(0, 10);
-	}
-	async function loadAutomationCooldowns() {
-		try {
-			const raw = await _GM.getValue(COOLDOWNS_KEY);
-			if (!raw) return {};
-			const parsed = JSON.parse(raw);
-			if (typeof parsed !== "object" || !parsed) return {};
-			const p = parsed;
-			const result = {};
-			if (typeof p.borderRotatedDate === "string") result.borderRotatedDate = p.borderRotatedDate;
-			if (typeof p.avatarRotatedDate === "string") result.avatarRotatedDate = p.avatarRotatedDate;
-			if (typeof p.aboutMeSubmittedMonth === "string") result.aboutMeSubmittedMonth = p.aboutMeSubmittedMonth;
-			if (typeof p.visitPagesDate === "string") result.visitPagesDate = p.visitPagesDate;
-			if (typeof p.watchVideosDate === "string") result.watchVideosDate = p.watchVideosDate;
-			if (typeof p.readArticlesDate === "string") result.readArticlesDate = p.readArticlesDate;
-			if (typeof p.gameVaultDate === "string") result.gameVaultDate = p.gameVaultDate;
-			return result;
-		} catch {
-			return {};
-		}
-	}
-	var DEFAULT_AUTOMATIONS = {
-		visitPages: false,
-		profileCosmetics: false,
-		watchVideos: false,
-		readArticles: false,
-		gameVault: false
-	};
-	var defaultAchievementSettings = {
-		runAutomatically: false,
-		automations: { ...DEFAULT_AUTOMATIONS }
-	};
-	function isPartialSettings(value) {
-		return typeof value === "object" && !!value;
-	}
-	function mergeAutomations(base, incoming) {
-		if (!incoming) return base;
-		const next = { ...base };
-		for (const key of ACHIEVEMENT_AUTOMATION_KEYS) if (typeof incoming[key] === "boolean") next[key] = incoming[key];
-		return next;
-	}
-	async function getAchievementSettings() {
-		const raw = await _GM.getValue(SETTINGS_KEY);
-		const settings = {
-			runAutomatically: false,
-			automations: { ...DEFAULT_AUTOMATIONS }
-		};
-		if (!raw) return settings;
-		try {
-			const parsedUnknown = typeof raw === "string" ? JSON.parse(raw) : raw;
-			if (!isPartialSettings(parsedUnknown)) return settings;
-			if (typeof parsedUnknown.runAutomatically === "boolean") settings.runAutomatically = parsedUnknown.runAutomatically;
-			settings.automations = mergeAutomations(settings.automations, parsedUnknown.automations);
-		} catch (error) {
-			console.error("[Achievements] Error parsing settings:", error);
-		}
-		return settings;
-	}
-	async function saveAchievementSettings(patch) {
-		const previous = await getAchievementSettings();
-		const next = {
-			runAutomatically: patch.runAutomatically ?? previous.runAutomatically,
-			automations: patch.automations ? {
-				...previous.automations,
-				...patch.automations
-			} : previous.automations
-		};
-		await _GM.setValue(SETTINGS_KEY, JSON.stringify(next));
-		return next;
-	}
-	function isAchievementAutomationEnabled(settings, key) {
-		return settings.runAutomatically && settings.automations[key];
-	}
-	var MAX_ACTION_TODOS = 8;
-	var MAX_INFORM_TODOS = 3;
-	var BORDER_GROUPS = new Set([
-		"border-use",
-		"border-daily",
-		"border-monthly"
-	]);
-	var AVATAR_GROUPS = new Set(["avatar-daily", "avatar-monthly"]);
-	function isAchievementEarned(snapshot, id) {
-		return snapshot?.items[id]?.isEarned === true;
-	}
-	function nextUnearnedInGroup(snapshot, group) {
-		return ACHIEVEMENTS.filter((achievement) => achievement.group === group).toSorted((left, right) => left.rank - right.rank).find((achievement) => !isAchievementEarned(snapshot, achievement.id));
-	}
-	function collectNextUnearned(snapshot) {
-		const seenGroups = new Set();
-		const nexts = [];
-		for (const achievement of ACHIEVEMENTS) {
-			if (seenGroups.has(achievement.group)) continue;
-			seenGroups.add(achievement.group);
-			const next = nextUnearnedInGroup(snapshot, achievement.group);
-			if (next && next.coveredByActionPlan !== true) nexts.push(next);
-		}
-		return nexts;
-	}
-	function isSatisfiedForCurrentInterval(achievement, settings, cooldowns, today) {
-		const key = achievement.automation;
-		if (key === void 0 || !isAchievementAutomationEnabled(settings, key)) return false;
-		if (key === "profileCosmetics") {
-			if (BORDER_GROUPS.has(achievement.group)) return cooldowns.borderRotatedDate === today;
-			return AVATAR_GROUPS.has(achievement.group) ? cooldowns.avatarRotatedDate === today : achievement.id === "add-about-me" && cooldowns.aboutMeSubmittedMonth !== void 0;
-		}
-		if (key === "visitPages") return cooldowns.visitPagesDate === today;
-		if (key === "watchVideos") return cooldowns.watchVideosDate === today;
-		return (key === "readArticles" ? cooldowns.readArticlesDate : cooldowns.gameVaultDate) === today;
-	}
-	function buildTodo(achievement, settings, username) {
-		const canAutomate = achievement.automation !== void 0 && isAchievementAutomationEnabled(settings, achievement.automation);
-		const canVisitInBackground = canAutomate && achievement.automation !== "profileCosmetics";
-		const todo = {
-			text: achievement.title,
-			reasons: [{ text: achievement.hint }],
-			tone: achievement.kind === "inform" ? "muted" : "default",
-			urgency: {
-				kind: achievement.kind === "inform" ? "info" : "action",
-				readyAtMs: 0,
-				durationMs: 0
-			}
-		};
-		if (achievement.href) {
-			const href = achievement.href;
-			todo.openHref = username && href.includes("{username}") ? href.split("{username}").join(encodeURIComponent(username)) : href;
-			todo.openHrefLabel = canAutomate ? `${achievement.hrefLabel ?? "Open"} now` : achievement.hrefLabel ?? "Open";
-			if (canVisitInBackground) todo.visitInBackground = true;
-		}
-		return todo;
-	}
-	function emptyTodos(snapshot) {
-		if (!snapshot || Object.keys(snapshot.items).length === 0) return [{
-			tone: "muted",
-			text: "Achievements page not scraped yet — Refresh to load progress",
-			urgency: {
-				kind: "info",
-				readyAtMs: 0,
-				durationMs: 0
-			}
-		}];
-		return [{
-			tone: "muted",
-			text: "No extra achievement steps — daily ARP work already covers the rest",
-			urgency: {
-				kind: "info",
-				readyAtMs: 0,
-				durationMs: 0
-			}
-		}];
-	}
-	function buildAchievementTodos(snapshot, settings, cooldowns = {}) {
-		const actions = [];
-		const infos = [];
-		const today = utcDateString();
-		const collected = collectNextUnearned(snapshot).filter((next) => !isSatisfiedForCurrentInterval(next, settings, cooldowns, today));
-		for (const next of collected) {
-			const todo = buildTodo(next, settings, snapshot?.username);
-			if (next.kind === "inform") {
-				if (infos.length < MAX_INFORM_TODOS) infos.push(todo);
-				continue;
-			}
-			if (actions.length < MAX_ACTION_TODOS) actions.push(todo);
-		}
-		return actions.length === 0 && infos.length === 0 ? emptyTodos(snapshot) : [...actions, ...infos];
-	}
-	function achievementProgressLabel(snapshot) {
-		return !snapshot || snapshot.totalCount <= 0 ? "progress unknown" : `${snapshot.earnedCount}/${snapshot.totalCount} earned`;
-	}
 	function actionTodoToTask(todo, id) {
 		const isCaution = todo.kind === "caution";
 		const urgency = todo.urgency;
@@ -8916,16 +7934,6 @@
 				if (action.label !== void 0) todo.openHrefLabel = action.label;
 				if (action.visitInBackground === true) todo.visitInBackground = true;
 		}
-	}
-	function provideAchievements(context) {
-		const ach = context.achievementData;
-		if (!ach) return [];
-		return buildAchievementTodos(ach.snapshot, ach.settings, ach.cooldowns).map((todo, index) => {
-			const candidate = actionTodoToTask(todo, `achievement:${todo.text.toLowerCase().replaceAll(/[^a-z0-9]+/g, "-").slice(0, 40)}:${String(index)}`);
-			candidate.value.arp = 0;
-			if (candidate.constraints.pinFirst !== true) candidate.constraints.chain = "after";
-			return candidate;
-		});
 	}
 	function provideActivities(context) {
 		const { sequenced } = context;
@@ -9051,10 +8059,9 @@
 		provideBattlePass,
 		provideActivities,
 		provideDiscordPoll,
-		provideEquip,
-		provideAchievements
+		provideEquip
 	];
-	function computePlanContext(result, settings, siteState, nowMs, achievementData) {
+	function computePlanContext(result, settings, siteState, nowMs) {
 		const best = result.best;
 		const current = result.current;
 		const isMatchingLoadout = isSameLoadout(best?.artifacts, current?.artifacts);
@@ -9108,8 +8115,7 @@
 			allArpSchedule,
 			sequenced,
 			discord,
-			beforeSwapCount: sequenced.beforeSwap.length + (discord?.slot === "before" ? 1 : 0),
-			achievementData: achievementData !== void 0 && areAchievementsEnabled(settings) ? achievementData : void 0
+			beforeSwapCount: sequenced.beforeSwap.length + (discord?.slot === "before" ? 1 : 0)
 		};
 	}
 	var EMPTY_TODO = {
@@ -9142,8 +8148,8 @@
 			return task;
 		});
 	}
-	function buildPlanInternal(result, settings, siteState, nowMs, achievementData) {
-		const context = computePlanContext(result, settings, siteState, nowMs, achievementData);
+	function buildPlanInternal(result, settings, siteState, nowMs) {
+		const context = computePlanContext(result, settings, siteState, nowMs);
 		const { ordered, trace } = rank(wireEquipConstraints(PLAN_PROVIDERS.flatMap((provider) => provider(context))), lifetimeArpPolicy);
 		if (globalThis.__AWA_PLAN_TRACE__ === true) debugRankTrace({
 			ordered,
@@ -9159,8 +8165,8 @@
 			trace
 		};
 	}
-	function buildActionPlanDetailed(result, settings, siteState, nowMs = Date.now(), achievementData) {
-		return buildPlanInternal(result, settings, siteState, nowMs, achievementData);
+	function buildActionPlanDetailed(result, settings, siteState, nowMs = Date.now()) {
+		return buildPlanInternal(result, settings, siteState, nowMs);
 	}
 	function isKeepingCurrentLoadout(todos) {
 		return todos.find((todo) => !isCautionTodo(todo))?.urgency?.chain !== "equip";
@@ -9586,6 +8592,14 @@
       display: block;
       margin: 12px 0 4px;
       width: 100%;
+    }
+    .ao-achievements-block {
+      display: block;
+      margin: 0 0 4px;
+      width: 100%;
+    }
+    .ao-achievements-block .ao-notify {
+      margin-bottom: 8px;
     }
     .ao-notify > .ao-switch + .ao-switch {
       margin-top: 10px;
@@ -10215,52 +9229,77 @@
     ${listHtml}
   `;
 	}
+	function truncateHeadline(text, max = 72) {
+		const trimmed = text.trim();
+		return trimmed.length <= max ? trimmed : `${trimmed.slice(0, max - 1)}…`;
+	}
+	var DECIDED_BY_PHRASE = {
+		kind: "Ordered ahead of later/scheduled work",
+		readyAt: "Sooner unlock than the next step",
+		chain: "Swap sequencing",
+		duration: "Shorter step first",
+		slack: "Tighter deadline",
+		arp: "Higher ARP than the next step"
+	};
+	function readyAtMsFromReasons(reasons, todo) {
+		const readyToken = reasons.find((reason) => reason.startsWith("readyAt:"));
+		return readyToken ? Number(readyToken.slice(8)) : todo?.urgency?.readyAtMs;
+	}
+	function explainSchedule(readyAtMs) {
+		return readyAtMs !== void 0 && readyAtMs > 0 ? `Waiting — ready in ${formatMs(readyAtMs)}` : "Scheduled for later";
+	}
+	function explainTiming(reasons, todo) {
+		const readyAtMs = readyAtMsFromReasons(reasons, todo);
+		if (reasons.includes("kind:schedule") || readyAtMs !== void 0 && readyAtMs > 0) return explainSchedule(readyAtMs);
+		if (readyAtMs === 0 || reasons.includes("kind:action")) return "Ready now";
+		if (reasons.includes("kind:info")) return "Informational";
+	}
+	function explainChainPosition(reasons) {
+		if (reasons.includes("chain:before")) return "Before the loadout swap";
+		if (reasons.includes("chain:equip")) return "Loadout swap step";
+		if (reasons.includes("chain:after")) return "After the loadout swap";
+	}
+	function explainPredecessors(reasons, headlinesByTaskId) {
+		const parts = [];
+		for (const reason of reasons) {
+			if (!reason.startsWith("after:")) continue;
+			const predecessor = headlinesByTaskId.get(reason.slice(6));
+			parts.push(predecessor ? `After “${truncateHeadline(predecessor, 40)}”` : "After an earlier step");
+		}
+		return parts;
+	}
+	function explainArpStake(reasons) {
+		const arpToken = reasons.find((reason) => reason.startsWith("arp:"));
+		if (!arpToken) return;
+		const arp = Number(arpToken.slice(4));
+		return Number.isFinite(arp) && arp > 0 ? `~${String(Math.round(arp))} ARP at stake` : void 0;
+	}
+	function explainDecidedBy(reasons) {
+		const decidedBy = reasons.find((reason) => reason.startsWith("decidedBy:"))?.slice(10);
+		return decidedBy ? DECIDED_BY_PHRASE[decidedBy] : void 0;
+	}
+	function pushPhrase(parts, phrase) {
+		if (phrase) parts.push(phrase);
+	}
 	function explainRankDecision(decision, todo, headlinesByTaskId) {
 		const reasons = decision.reasons;
 		if (todo?.kind === "caution" || reasons.includes("kind:caution")) return "Warning — shown above the numbered steps";
 		const parts = [];
 		if (reasons.includes("pinFirst")) parts.push("First — do this before anything else");
-		const readyToken = reasons.find((reason) => reason.startsWith("readyAt:"));
-		const readyAtMs = readyToken ? Number(readyToken.slice(8)) : todo?.urgency?.readyAtMs;
-		if (reasons.includes("kind:schedule") || readyAtMs !== void 0 && readyAtMs > 0) parts.push(readyAtMs !== void 0 && readyAtMs > 0 ? `Waiting — ready in ${formatMs(readyAtMs)}` : "Scheduled for later");
-		else if (reasons.includes("kind:action") || readyAtMs === 0) parts.push("Ready now");
-		else if (reasons.includes("kind:info")) parts.push("Informational");
-		if (reasons.includes("chain:before")) parts.push("Before the loadout swap");
-		else if (reasons.includes("chain:equip")) parts.push("Loadout swap step");
-		else if (reasons.includes("chain:after")) parts.push("After the loadout swap");
-		for (const reason of reasons) {
-			if (!reason.startsWith("after:")) continue;
-			const predecessorId = reason.slice(6);
-			const predecessor = headlinesByTaskId.get(predecessorId);
-			parts.push(predecessor ? `After “${truncateHeadline(predecessor, 40)}”` : "After an earlier step");
-		}
-		const arpToken = reasons.find((reason) => reason.startsWith("arp:"));
-		if (arpToken) {
-			const arp = Number(arpToken.slice(4));
-			if (Number.isFinite(arp) && arp > 0) parts.push(`~${String(Math.round(arp))} ARP at stake`);
-		}
-		const decidedBy = reasons.find((reason) => reason.startsWith("decidedBy:"))?.slice(10);
-		if (decidedBy === "kind") parts.push("Ordered ahead of later/scheduled work");
-		else if (decidedBy === "readyAt") parts.push("Sooner unlock than the next step");
-		else if (decidedBy === "chain") parts.push("Swap sequencing");
-		else if (decidedBy === "duration") parts.push("Shorter step first");
-		else if (decidedBy === "slack") parts.push("Tighter deadline");
-		else if (decidedBy === "arp") parts.push("Higher ARP than the next step");
+		pushPhrase(parts, explainTiming(reasons, todo));
+		pushPhrase(parts, explainChainPosition(reasons));
+		parts.push(...explainPredecessors(reasons, headlinesByTaskId));
+		pushPhrase(parts, explainArpStake(reasons));
+		pushPhrase(parts, explainDecidedBy(reasons));
 		if (reasons.includes("constraintCycle")) parts.push("Dependency loop broken by ARP rules");
 		const unique = [...new Set(parts.filter((part) => part.length > 0))];
 		return unique.length > 0 ? unique.join(" · ") : "Ranked by lifetime ARP rules";
 	}
-	function truncateHeadline(text, max = 72) {
-		const trimmed = text.trim();
-		return trimmed.length <= max ? trimmed : `${trimmed.slice(0, max - 1)}…`;
-	}
 	function renderRankTrace(trace, todos) {
 		if (trace.length === 0) return "";
 		const headlinesByTaskId = new Map();
-		for (let i = 0; i < trace.length; i += 1) {
-			const decision = trace[i];
-			if (decision === void 0) continue;
-			const todo = todos[i];
+		for (const [index, decision] of trace.entries()) {
+			const todo = todos[index];
 			headlinesByTaskId.set(decision.taskId, todo?.text ?? decision.taskId);
 		}
 		return `
@@ -10389,13 +9428,1876 @@
 		await showAoAlert(ACCOUNT_ACTIONS_OFF_MESSAGE, "Account actions off");
 		return false;
 	}
+	var ACHIEVEMENT_AUTOMATION_KEYS = [
+		"visitPages",
+		"profileCosmetics",
+		"watchVideos",
+		"readArticles",
+		"gameVault"
+	];
+	var ACHIEVEMENT_AUTOMATION_COPY = {
+		visitPages: {
+			title: "Visit FAQ & Hive",
+			hint: "Loads the FAQ and Hive pages in the background when those visits are still unearned."
+		},
+		profileCosmetics: {
+			title: "Profile & border changes",
+			hint: "Once per UTC day: save About Me if needed, rotate border and avatar via the avatar save API."
+		},
+		readArticles: {
+			title: "Read news articles",
+			hint: "Opens a few Pulse/news posts in the background toward Read Articles."
+		},
+		watchVideos: {
+			title: "Watch videos",
+			hint: "Opens several Arena video pages in the background toward Watch Videos."
+		},
+		gameVault: {
+			title: "Enter Game Vault",
+			hint: "Loads the Game Vault page in the background when Enter Game-Vault is still unearned."
+		}
+	};
+	var FAQ_PATH = "/faq-contact";
+	var HIVE_PATH = "/page/hive-influencers";
+	var NEWS_PATH = "/ucf/News";
+	var VIDEOS_PATH = "/ucf/Video";
+	var RELAY_PATH = "/relay/my-feed";
+	var GAME_VAULT_PATH$1 = "/marketplace/game-vault";
+	var PROFILE_PATH = "/account/personalization";
+	function slug(title) {
+		return title.toLowerCase().replaceAll(/[^a-z0-9]+/g, "-").replaceAll(/^-|-$/g, "");
+	}
+	function define(title, category, options) {
+		const definition = {
+			id: slug(title),
+			title,
+			category,
+			group: options.group ?? slug(title),
+			rank: options.rank ?? 1,
+			hint: options.hint,
+			kind: options.kind ?? "action"
+		};
+		if (options.aliases) definition.aliases = options.aliases;
+		if (options.href) definition.href = options.href;
+		if (options.hrefLabel) definition.hrefLabel = options.hrefLabel;
+		if (options.automation) definition.automation = options.automation;
+		if (options.coveredByActionPlan === true) definition.coveredByActionPlan = true;
+		return definition;
+	}
+	var ACHIEVEMENTS = [
+		define("Verified Member", "verified", {
+			hint: "Finish email / account verification if AWA still asks for it.",
+			kind: "inform"
+		}),
+		define("Add about me", "profile", {
+			hint: "Add a short About Me on your profile.",
+			href: PROFILE_PATH,
+			hrefLabel: "Open profile",
+			aliases: ["Add about me"],
+			automation: "profileCosmetics"
+		}),
+		define("Add a background (Header Image)", "profile", {
+			hint: "Upload a header/background image on your profile.",
+			href: PROFILE_PATH,
+			hrefLabel: "Open profile"
+		}),
+		define("Add your first border", "avatar", {
+			group: "border-first",
+			rank: 1,
+			hint: "Equip any profile border once.",
+			href: PROFILE_PATH,
+			hrefLabel: "Open profile",
+			automation: "profileCosmetics"
+		}),
+		define("Try it on", "avatar", {
+			group: "border-use",
+			rank: 1,
+			hint: "Change your profile border once.",
+			href: PROFILE_PATH,
+			hrefLabel: "Open profile",
+			automation: "profileCosmetics"
+		}),
+		define("Use 5 different borders", "avatar", {
+			group: "border-use",
+			rank: 2,
+			hint: "Equip 5 different borders over time.",
+			href: PROFILE_PATH,
+			hrefLabel: "Open profile",
+			automation: "profileCosmetics"
+		}),
+		define("Use 10 different borders", "avatar", {
+			group: "border-use",
+			rank: 3,
+			hint: "Keep rotating borders you have not used yet.",
+			href: PROFILE_PATH,
+			hrefLabel: "Open profile",
+			automation: "profileCosmetics"
+		}),
+		define("Use 25 different borders", "avatar", {
+			group: "border-use",
+			rank: 4,
+			hint: "Calendar and marketplace borders count toward this.",
+			href: PROFILE_PATH,
+			hrefLabel: "Open profile",
+			automation: "profileCosmetics"
+		}),
+		define("Change your border once a day for a week", "avatar", {
+			group: "border-daily",
+			rank: 1,
+			hint: "Change your border each UTC day for 7 days.",
+			href: PROFILE_PATH,
+			hrefLabel: "Open profile",
+			automation: "profileCosmetics"
+		}),
+		define("Change your border once a month for a year", "avatar", {
+			group: "border-monthly",
+			rank: 1,
+			hint: "Change your border at least once each calendar month for 12 months.",
+			href: PROFILE_PATH,
+			hrefLabel: "Open profile",
+			automation: "profileCosmetics"
+		}),
+		define("Change your avatar items every day for a week", "avatar", {
+			group: "avatar-daily",
+			rank: 1,
+			hint: "Change an avatar item each day for 7 days.",
+			href: PROFILE_PATH,
+			hrefLabel: "Open profile",
+			automation: "profileCosmetics"
+		}),
+		define("Change your avatar once a month for 3 months", "avatar", {
+			group: "avatar-monthly",
+			rank: 1,
+			hint: "Change your avatar at least once a month for 3 months.",
+			href: PROFILE_PATH,
+			hrefLabel: "Open profile",
+			automation: "profileCosmetics"
+		}),
+		define("Change your avatar once a month for 6 months", "avatar", {
+			group: "avatar-monthly",
+			rank: 2,
+			hint: "Keep a monthly avatar change going for 6 months.",
+			href: PROFILE_PATH,
+			hrefLabel: "Open profile",
+			automation: "profileCosmetics"
+		}),
+		define("Change your avatar once a month for 1 year", "avatar", {
+			group: "avatar-monthly",
+			rank: 3,
+			hint: "Keep a monthly avatar change going for 12 months.",
+			href: PROFILE_PATH,
+			hrefLabel: "Open profile",
+			automation: "profileCosmetics"
+		}),
+		define("Visit the FAQ page", "visitPages", {
+			hint: "Open the FAQ / support page once.",
+			href: FAQ_PATH,
+			hrefLabel: "Visit FAQ",
+			automation: "visitPages"
+		}),
+		define("Visit the Hive page", "visitPages", {
+			hint: "Open the Hive influencers page once (Community → Hive).",
+			href: HIVE_PATH,
+			hrefLabel: "Visit Hive",
+			automation: "visitPages"
+		}),
+		define("Spend 1 hour on AWA", "timeOnSite", {
+			hint: "Stay signed in on Alienware Arena for a cumulative hour.",
+			coveredByActionPlan: true,
+			kind: "inform"
+		}),
+		define("Connect Discord", "connections", {
+			hint: "Link Discord in account settings / Arena Connect.",
+			kind: "inform"
+		}),
+		define("Connect your Twitch account", "connections", {
+			hint: "Link Twitch under account connections.",
+			kind: "inform"
+		}),
+		define("Connect your Steam account", "connections", {
+			hint: "Link Steam under account connections.",
+			kind: "inform"
+		}),
+		define("Make your first purchase in the Marketplace", "marketplace", {
+			hint: "Buy anything once in the ARP Marketplace (fragments, cosmetics, etc.).",
+			kind: "inform"
+		}),
+		define("Watch 10 Videos", "watchVideos", {
+			group: "watch-videos",
+			rank: 1,
+			hint: "Watch 10 videos on Alienware Arena.",
+			href: VIDEOS_PATH,
+			hrefLabel: "Open videos",
+			automation: "watchVideos"
+		}),
+		define("Watch 100 Videos", "watchVideos", {
+			group: "watch-videos",
+			rank: 2,
+			hint: "Keep watching Arena videos toward 100.",
+			href: VIDEOS_PATH,
+			hrefLabel: "Open videos",
+			automation: "watchVideos"
+		}),
+		define("Watch 1000 Videos", "watchVideos", {
+			group: "watch-videos",
+			rank: 3,
+			hint: "Long-run video-watch achievement.",
+			href: VIDEOS_PATH,
+			hrefLabel: "Open videos",
+			kind: "inform"
+		}),
+		define("Read 10 News Articles", "readArticles", {
+			group: "read-articles",
+			rank: 1,
+			hint: "Open 10 Pulse / news articles.",
+			href: NEWS_PATH,
+			hrefLabel: "Open news",
+			automation: "readArticles"
+		}),
+		define("Read 100 News Articles", "readArticles", {
+			group: "read-articles",
+			rank: 2,
+			hint: "Keep reading Arena news toward 100.",
+			href: NEWS_PATH,
+			hrefLabel: "Open news",
+			automation: "readArticles"
+		}),
+		define("Read 1000 News Articles", "readArticles", {
+			group: "read-articles",
+			rank: 3,
+			hint: "Long-run article-read achievement.",
+			href: NEWS_PATH,
+			hrefLabel: "Open news",
+			kind: "inform"
+		}),
+		define("Enter Game-Vault", "gameVault", {
+			group: "vault-enter",
+			rank: 1,
+			hint: "Open the Game Vault page once.",
+			href: GAME_VAULT_PATH$1,
+			hrefLabel: "Open vault",
+			automation: "gameVault"
+		}),
+		define("Enter Game-Vault 5 times", "gameVault", {
+			group: "vault-enter",
+			rank: 2,
+			hint: "Visit Game Vault on 5 different days / entries.",
+			href: GAME_VAULT_PATH$1,
+			hrefLabel: "Open vault",
+			automation: "gameVault"
+		}),
+		define("Enter Game-Vault 12 times", "gameVault", {
+			group: "vault-enter",
+			rank: 3,
+			hint: "Keep entering Game Vault toward 12 visits.",
+			href: GAME_VAULT_PATH$1,
+			hrefLabel: "Open vault",
+			automation: "gameVault"
+		}),
+		define("Enter Game-Vault 24 times", "gameVault", {
+			group: "vault-enter",
+			rank: 4,
+			hint: "Keep entering Game Vault toward 24 visits.",
+			href: GAME_VAULT_PATH$1,
+			hrefLabel: "Open vault",
+			automation: "gameVault"
+		}),
+		define("Get 1 game from game vault", "gameVault", {
+			group: "vault-claim",
+			rank: 1,
+			hint: "Claim one Game Vault title when you have enough ARP.",
+			href: GAME_VAULT_PATH$1,
+			hrefLabel: "Open vault",
+			kind: "inform"
+		}),
+		define("Get 5 games from game vault", "gameVault", {
+			group: "vault-claim",
+			rank: 2,
+			hint: "Claim 5 Game Vault titles over time.",
+			href: GAME_VAULT_PATH$1,
+			hrefLabel: "Open vault",
+			kind: "inform"
+		}),
+		define("Get 10 games from game vault", "gameVault", {
+			group: "vault-claim",
+			rank: 3,
+			hint: "Claim 10 Game Vault titles over time.",
+			href: GAME_VAULT_PATH$1,
+			hrefLabel: "Open vault",
+			kind: "inform"
+		}),
+		define("Post a relay", "relay", {
+			group: "relay-post",
+			rank: 1,
+			hint: "Post one Relay (community post).",
+			href: RELAY_PATH,
+			hrefLabel: "Open Relay",
+			aliases: ["Post a Relay"]
+		}),
+		define("Post 10 Relays", "relay", {
+			group: "relay-post",
+			rank: 2,
+			hint: "Post 10 Relays.",
+			href: RELAY_PATH,
+			hrefLabel: "Open Relay"
+		}),
+		define("Post 50 relays", "relay", {
+			group: "relay-post",
+			rank: 3,
+			hint: "Post 50 Relays.",
+			href: RELAY_PATH,
+			hrefLabel: "Open Relay"
+		}),
+		define("Comment on a relay", "relay", {
+			group: "relay-comment",
+			rank: 1,
+			hint: "Leave a comment on someone else's Relay.",
+			href: RELAY_PATH,
+			hrefLabel: "Open Relay"
+		}),
+		define("React to a relay", "relay", {
+			group: "relay-react",
+			rank: 1,
+			hint: "React to one Relay.",
+			href: RELAY_PATH,
+			hrefLabel: "Open Relay"
+		}),
+		define("React to 10 relays", "relay", {
+			group: "relay-react",
+			rank: 2,
+			hint: "React to 10 Relays.",
+			href: RELAY_PATH,
+			hrefLabel: "Open Relay"
+		}),
+		define("React to 50 relays", "relay", {
+			group: "relay-react",
+			rank: 3,
+			hint: "React to 50 Relays.",
+			href: RELAY_PATH,
+			hrefLabel: "Open Relay"
+		}),
+		define("React to 100 relays", "relay", {
+			group: "relay-react",
+			rank: 4,
+			hint: "React to 100 Relays.",
+			href: RELAY_PATH,
+			hrefLabel: "Open Relay"
+		}),
+		define("Vote on your first Arena Connect Poll", "discord", {
+			group: "discord-poll",
+			rank: 1,
+			hint: "Vote on the current Discord / Arena Connect poll (also in What to do).",
+			coveredByActionPlan: true
+		}),
+		define("Vote on 10 Arena Connect polls", "discord", {
+			group: "discord-poll",
+			rank: 2,
+			hint: "Keep voting on weekday Discord polls.",
+			coveredByActionPlan: true
+		}),
+		define("Vote on 50 Arena Connect polls", "discord", {
+			group: "discord-poll",
+			rank: 3,
+			hint: "Long-run Discord poll votes.",
+			coveredByActionPlan: true,
+			kind: "inform"
+		}),
+		define("Vote on 100 Arena Connect polls", "discord", {
+			group: "discord-poll",
+			rank: 4,
+			hint: "Long-run Discord poll votes.",
+			coveredByActionPlan: true,
+			kind: "inform"
+		}),
+		define("Vote on 500 Arena Connect polls", "discord", {
+			group: "discord-poll",
+			rank: 5,
+			hint: "Long-run Discord poll votes.",
+			coveredByActionPlan: true,
+			kind: "inform"
+		}),
+		define("Play all 3 Steam quests", "steamQuests", {
+			group: "steam-all-three",
+			rank: 1,
+			hint: "Finish all three weekly Steam quests (also in What to do).",
+			coveredByActionPlan: true
+		}),
+		define("Play all 3 Steam quests 5 times", "steamQuests", {
+			group: "steam-all-three",
+			rank: 2,
+			hint: "Clear all three Steam quests for 5 weeks.",
+			coveredByActionPlan: true,
+			kind: "inform"
+		}),
+		define("Play all 3 Steam quests 10 times", "steamQuests", {
+			group: "steam-all-three",
+			rank: 3,
+			hint: "Clear all three Steam quests for 10 weeks.",
+			coveredByActionPlan: true,
+			kind: "inform"
+		}),
+		define("Play all 3 Steam quests 20 times", "steamQuests", {
+			group: "steam-all-three",
+			rank: 4,
+			hint: "Clear all three Steam quests for 20 weeks.",
+			coveredByActionPlan: true,
+			kind: "inform"
+		}),
+		define("Play all 3 Steam quests 50 times", "steamQuests", {
+			group: "steam-all-three",
+			rank: 5,
+			hint: "Clear all three Steam quests for 50 weeks.",
+			coveredByActionPlan: true,
+			kind: "inform"
+		}),
+		define("Steam: Play 10 Steam Quests", "steamQuests", {
+			group: "steam-quest-count",
+			rank: 1,
+			hint: "Complete 10 Steam quests over time.",
+			coveredByActionPlan: true
+		}),
+		define("Steam: Play 25 Steam Quests", "steamQuests", {
+			group: "steam-quest-count",
+			rank: 2,
+			hint: "Complete 25 Steam quests over time.",
+			coveredByActionPlan: true,
+			kind: "inform"
+		}),
+		define("Steam: Play 50 Steam Quests", "steamQuests", {
+			group: "steam-quest-count",
+			rank: 3,
+			hint: "Complete 50 Steam quests over time.",
+			coveredByActionPlan: true,
+			kind: "inform"
+		}),
+		define("Steam: Play 100 Steam Quests", "steamQuests", {
+			group: "steam-quest-count",
+			rank: 4,
+			hint: "Complete 100 Steam quests over time.",
+			coveredByActionPlan: true,
+			kind: "inform"
+		}),
+		define("Steam: Play 365 Steam Quests", "steamQuests", {
+			group: "steam-quest-count",
+			rank: 5,
+			hint: "Complete 365 Steam quests over time.",
+			coveredByActionPlan: true,
+			kind: "inform"
+		}),
+		define("Steam: Play 10 hours", "steamHours", {
+			group: "steam-hours",
+			rank: 1,
+			hint: "Play tracked Steam hours through Arena quests.",
+			coveredByActionPlan: true
+		}),
+		define("Steam: Play 50 hours", "steamHours", {
+			group: "steam-hours",
+			rank: 2,
+			hint: "Keep playing Steam quests toward 50 hours.",
+			coveredByActionPlan: true,
+			kind: "inform"
+		}),
+		define("Steam: Play 125 hours", "steamHours", {
+			group: "steam-hours",
+			rank: 3,
+			hint: "Keep playing Steam quests toward 125 hours.",
+			coveredByActionPlan: true,
+			kind: "inform"
+		}),
+		define("Steam: Play 500 hours", "steamHours", {
+			group: "steam-hours",
+			rank: 4,
+			hint: "Long-run Steam hours.",
+			coveredByActionPlan: true,
+			kind: "inform"
+		}),
+		define("Steam: Play 1000 hours", "steamHours", {
+			group: "steam-hours",
+			rank: 5,
+			hint: "Long-run Steam hours.",
+			coveredByActionPlan: true,
+			kind: "inform"
+		}),
+		define("Steam: Play 2500 hours", "steamHours", {
+			group: "steam-hours",
+			rank: 6,
+			hint: "Long-run Steam hours.",
+			coveredByActionPlan: true,
+			kind: "inform"
+		}),
+		define("Steam: Play 10000 hours", "steamHours", {
+			group: "steam-hours",
+			rank: 7,
+			hint: "Long-run Steam hours.",
+			coveredByActionPlan: true,
+			kind: "inform"
+		}),
+		define("Watch 10 hours of Twitch on Nexus channels", "twitchNexus", {
+			group: "twitch-nexus",
+			rank: 1,
+			hint: "Watch Twitch via Arena on Nexus channels (also in What to do).",
+			coveredByActionPlan: true
+		}),
+		define("Watch 100 hours of Twitch on Nexus channels", "twitchNexus", {
+			group: "twitch-nexus",
+			rank: 2,
+			hint: "Long-run Nexus Twitch hours.",
+			coveredByActionPlan: true,
+			kind: "inform"
+		}),
+		define("Watch 1000 Hours of Twitch.tv on Nexus channels", "twitchNexus", {
+			group: "twitch-nexus",
+			rank: 3,
+			hint: "Long-run Nexus Twitch hours.",
+			coveredByActionPlan: true,
+			kind: "inform"
+		}),
+		define("Watch 10 hours of Twitch.tv on Hive channels", "twitchHive", {
+			group: "twitch-hive",
+			rank: 1,
+			hint: "Watch Twitch via Arena on Hive channels.",
+			coveredByActionPlan: true
+		}),
+		define("Watch 100 Hours of Twitch.tv on Hive channels", "twitchHive", {
+			group: "twitch-hive",
+			rank: 2,
+			hint: "Long-run Hive Twitch hours.",
+			coveredByActionPlan: true,
+			kind: "inform"
+		}),
+		define("Watch 1000 Hours of Twitch.tv on Hive channels", "twitchHive", {
+			group: "twitch-hive",
+			rank: 3,
+			hint: "Long-run Hive Twitch hours.",
+			coveredByActionPlan: true,
+			kind: "inform"
+		}),
+		define("Get your first border from Calendar rewards", "calendarBorders", {
+			group: "calendar-borders",
+			rank: 1,
+			hint: "Claim Daily Calendar until a border drops (also in What to do).",
+			coveredByActionPlan: true
+		}),
+		define("Get all the borders from a monthly calendar", "calendarBorders", {
+			group: "calendar-borders",
+			rank: 2,
+			hint: "Do not miss Daily Calendar days this month.",
+			coveredByActionPlan: true
+		}),
+		define("Get all borders from calendar for 3 months", "calendarBorders", {
+			group: "calendar-borders",
+			rank: 3,
+			hint: "Perfect calendar months stack.",
+			coveredByActionPlan: true,
+			kind: "inform"
+		}),
+		define("Get all borders from calendar for 6 months", "calendarBorders", {
+			group: "calendar-borders",
+			rank: 4,
+			hint: "Perfect calendar months stack.",
+			coveredByActionPlan: true,
+			kind: "inform"
+		}),
+		define("Get all borders from calendar for 1 year", "calendarBorders", {
+			group: "calendar-borders",
+			rank: 5,
+			hint: "Perfect calendar months stack.",
+			coveredByActionPlan: true,
+			kind: "inform"
+		}),
+		define("Receive all 28-day rewards in a single month", "streaks", {
+			group: "streaks-28",
+			rank: 1,
+			hint: "Claim every Daily Calendar day in the 28-day track.",
+			coveredByActionPlan: true
+		}),
+		define("Receive all 28-day rewards for 3 months", "streaks", {
+			group: "streaks-28",
+			rank: 2,
+			hint: "Keep a perfect 28-day calendar streak for 3 months.",
+			coveredByActionPlan: true,
+			kind: "inform"
+		}),
+		define("Receive all 28-day rewards for 6 months", "streaks", {
+			group: "streaks-28",
+			rank: 3,
+			hint: "Keep a perfect 28-day calendar streak for 6 months.",
+			coveredByActionPlan: true,
+			kind: "inform"
+		}),
+		define("Receive all 28-day rewards for 1 year", "streaks", {
+			group: "streaks-28",
+			rank: 4,
+			hint: "Keep a perfect 28-day calendar streak for 12 months.",
+			coveredByActionPlan: true,
+			kind: "inform"
+		}),
+		define("Be a member for 1 year", "years", {
+			group: "years",
+			rank: 1,
+			hint: "Passive — wait for the anniversary.",
+			kind: "inform"
+		}),
+		define("Be a member for 2 years", "years", {
+			group: "years",
+			rank: 2,
+			hint: "Passive — wait for the anniversary.",
+			kind: "inform"
+		}),
+		define("Be a member for 3 years", "years", {
+			group: "years",
+			rank: 3,
+			hint: "Passive — wait for the anniversary.",
+			kind: "inform"
+		}),
+		define("Be a member for 4 years", "years", {
+			group: "years",
+			rank: 4,
+			hint: "Passive — wait for the anniversary.",
+			kind: "inform"
+		}),
+		define("Be a member for 5 years", "years", {
+			group: "years",
+			rank: 5,
+			hint: "Passive — wait for the anniversary.",
+			kind: "inform"
+		}),
+		define("Be a member for 6 years", "years", {
+			group: "years",
+			rank: 6,
+			hint: "Passive — wait for the anniversary.",
+			kind: "inform"
+		}),
+		define("Be a member for 7 years", "years", {
+			group: "years",
+			rank: 7,
+			hint: "Passive — wait for the anniversary.",
+			kind: "inform"
+		}),
+		define("Be a member for 8 years", "years", {
+			group: "years",
+			rank: 8,
+			hint: "Passive — wait for the anniversary.",
+			kind: "inform"
+		}),
+		define("Be a member for 9 years", "years", {
+			group: "years",
+			rank: 9,
+			hint: "Passive — wait for the anniversary.",
+			kind: "inform"
+		}),
+		define("Be a member for 10 years", "years", {
+			group: "years",
+			rank: 10,
+			hint: "Passive — wait for the anniversary.",
+			kind: "inform"
+		}),
+		define("Reach Tier 2", "tiers", {
+			group: "tiers",
+			rank: 1,
+			hint: "Earn lifetime ARP to raise your Arena tier.",
+			kind: "inform"
+		}),
+		define("Reach Tier 3", "tiers", {
+			group: "tiers",
+			rank: 2,
+			hint: "Earn lifetime ARP to raise your Arena tier.",
+			kind: "inform"
+		}),
+		define("Reach Tier 4", "tiers", {
+			group: "tiers",
+			rank: 3,
+			hint: "Earn lifetime ARP to raise your Arena tier.",
+			kind: "inform"
+		}),
+		define("Reach Tier 5", "tiers", {
+			group: "tiers",
+			rank: 4,
+			hint: "Earn lifetime ARP to raise your Arena tier.",
+			kind: "inform"
+		}),
+		define("Enter A Comm Event", "communityEvents", {
+			group: "community-events-onboard",
+			rank: 1,
+			hint: "Join any live Community Event once (onboarding).",
+			coveredByActionPlan: true,
+			aliases: ["Enter a Comm Event", "Enter a Community Event"]
+		}),
+		define("Participate in a Community Event", "communityEvents", {
+			group: "community-events",
+			rank: 1,
+			hint: "Play required hours in a live Community Event (also in What to do).",
+			coveredByActionPlan: true
+		}),
+		define("Participate in 2 Community Events", "communityEvents", {
+			group: "community-events",
+			rank: 2,
+			hint: "Join the next live Community Event.",
+			coveredByActionPlan: true,
+			kind: "inform"
+		}),
+		define("Participate in 5 Community Events", "communityEvents", {
+			group: "community-events",
+			rank: 3,
+			hint: "Join live Community Events as they appear.",
+			coveredByActionPlan: true,
+			kind: "inform"
+		}),
+		define("Participate in 10 Community Events", "communityEvents", {
+			group: "community-events",
+			rank: 4,
+			hint: "Join live Community Events as they appear.",
+			coveredByActionPlan: true,
+			kind: "inform"
+		}),
+		define("Participate in 20 Community Events", "communityEvents", {
+			group: "community-events",
+			rank: 5,
+			hint: "Join live Community Events as they appear.",
+			coveredByActionPlan: true,
+			kind: "inform"
+		}),
+		define("Finish all required personal hours for a community event", "communityHours", {
+			group: "community-hours",
+			rank: 1,
+			hint: "Finish the personal-hours track on a live event.",
+			coveredByActionPlan: true
+		}),
+		define("Finish 20 personal hours for community events", "communityHours", {
+			group: "community-hours",
+			rank: 2,
+			hint: "Keep playing Community Event hours.",
+			coveredByActionPlan: true,
+			kind: "inform"
+		}),
+		define("Finish 50 personal hours for community events", "communityHours", {
+			group: "community-hours",
+			rank: 3,
+			hint: "Keep playing Community Event hours.",
+			coveredByActionPlan: true,
+			kind: "inform"
+		}),
+		define("Finish 100 personal hours for community events", "communityHours", {
+			group: "community-hours",
+			rank: 4,
+			hint: "Keep playing Community Event hours.",
+			coveredByActionPlan: true,
+			kind: "inform"
+		}),
+		define("Equip an artifact", "artifacts", {
+			group: "artifact-equip",
+			rank: 1,
+			hint: "Equip any artifact in the Showroom (also in What to do).",
+			coveredByActionPlan: true
+		}),
+		define("Equip 5 artifacts", "artifacts", {
+			group: "artifact-equip",
+			rank: 2,
+			hint: "Equip 5 different artifacts over time.",
+			coveredByActionPlan: true
+		}),
+		define("Equip 15 artifacts", "artifacts", {
+			group: "artifact-equip",
+			rank: 3,
+			hint: "Equip 15 different artifacts over time.",
+			coveredByActionPlan: true,
+			kind: "inform"
+		}),
+		define("Upgrade an artifact", "artifacts", {
+			group: "artifact-upgrade",
+			rank: 1,
+			hint: "Spend fragments to upgrade any artifact.",
+			coveredByActionPlan: true
+		}),
+		define("Upgrade 3 artifacts", "artifacts", {
+			group: "artifact-upgrade",
+			rank: 2,
+			hint: "Upgrade 3 different artifacts.",
+			coveredByActionPlan: true
+		}),
+		define("Upgrade 7 Artifacts", "artifacts", {
+			group: "artifact-upgrade",
+			rank: 3,
+			hint: "Upgrade 7 different artifacts.",
+			coveredByActionPlan: true,
+			kind: "inform"
+		}),
+		define("Fully Upgrade an artifact", "artifacts", {
+			group: "artifact-max",
+			rank: 1,
+			hint: "Take one artifact to max tier.",
+			coveredByActionPlan: true
+		}),
+		define("Fully Upgrade 3 artifacts", "artifacts", {
+			group: "artifact-max",
+			rank: 2,
+			hint: "Max 3 artifacts.",
+			coveredByActionPlan: true,
+			kind: "inform"
+		}),
+		define("Fully Upgrade 5 artifacts", "artifacts", {
+			group: "artifact-max",
+			rank: 3,
+			hint: "Max 5 artifacts.",
+			coveredByActionPlan: true,
+			kind: "inform"
+		}),
+		define("Spend 100 ARP", "spendArp", {
+			group: "spend-arp",
+			rank: 1,
+			hint: "Spend ARP in Game Vault or the marketplace.",
+			href: GAME_VAULT_PATH$1,
+			hrefLabel: "Open vault",
+			kind: "inform"
+		}),
+		define("Spend 1000 ARP", "spendArp", {
+			group: "spend-arp",
+			rank: 2,
+			hint: "Keep claiming vault / marketplace spends.",
+			href: GAME_VAULT_PATH$1,
+			hrefLabel: "Open vault",
+			kind: "inform"
+		}),
+		define("Spend 5000 ARP", "spendArp", {
+			group: "spend-arp",
+			rank: 3,
+			hint: "Keep claiming vault / marketplace spends.",
+			href: GAME_VAULT_PATH$1,
+			hrefLabel: "Open vault",
+			kind: "inform"
+		}),
+		define("Spend 10000 ARP", "spendArp", {
+			group: "spend-arp",
+			rank: 4,
+			hint: "Keep claiming vault / marketplace spends.",
+			href: GAME_VAULT_PATH$1,
+			hrefLabel: "Open vault",
+			kind: "inform"
+		}),
+		define("Earn 5 fragments", "fragments", {
+			group: "fragments",
+			rank: 1,
+			hint: "Fragments drop from daily play and Battle Pass — already covered by daily ARP work.",
+			coveredByActionPlan: true,
+			kind: "inform"
+		}),
+		define("Earn 15 fragments", "fragments", {
+			group: "fragments",
+			rank: 2,
+			hint: "Keep doing daily ARP sources.",
+			coveredByActionPlan: true,
+			kind: "inform"
+		}),
+		define("Earn 30 fragments", "fragments", {
+			group: "fragments",
+			rank: 3,
+			hint: "Keep doing daily ARP sources.",
+			coveredByActionPlan: true,
+			kind: "inform"
+		}),
+		define("Earn 50 fragments", "fragments", {
+			group: "fragments",
+			rank: 4,
+			hint: "Keep doing daily ARP sources.",
+			coveredByActionPlan: true,
+			kind: "inform"
+		})
+	];
+	function normalizeAchievementTitle(value) {
+		return value.replaceAll(/\s+/g, " ").trim().toLowerCase();
+	}
+	new Map(ACHIEVEMENTS.map((achievement) => [achievement.id, achievement]));
+	var ACHIEVEMENT_BY_TITLE = new Map();
+	for (const achievement of ACHIEVEMENTS) {
+		ACHIEVEMENT_BY_TITLE.set(normalizeAchievementTitle(achievement.title), achievement);
+		const aliases = achievement.aliases ?? [];
+		for (const alias of aliases) ACHIEVEMENT_BY_TITLE.set(normalizeAchievementTitle(alias), achievement);
+	}
+	function matchAchievementInText(text) {
+		const haystack = normalizeAchievementTitle(text);
+		let best;
+		let bestLength = 0;
+		for (const achievement of ACHIEVEMENTS) {
+			const names = [achievement.title, ...achievement.aliases ?? []];
+			for (const name of names) {
+				const needle = normalizeAchievementTitle(name);
+				if (!(needle.length > bestLength && haystack.includes(needle))) continue;
+				best = achievement;
+				bestLength = needle.length;
+			}
+		}
+		return best;
+	}
+	var SETTINGS_KEY = "achievementSettings";
+	var COOLDOWNS_KEY = "achievementCooldowns";
+	function utcDateString(now = new Date()) {
+		return now.toISOString().slice(0, 10);
+	}
+	function utcMonthString(now = new Date()) {
+		return now.toISOString().slice(0, 7);
+	}
+	async function loadAutomationCooldowns() {
+		try {
+			const raw = await _GM.getValue(COOLDOWNS_KEY);
+			if (!raw) return {};
+			const parsed = JSON.parse(raw);
+			if (typeof parsed !== "object" || !parsed) return {};
+			const p = parsed;
+			const result = {};
+			if (typeof p.borderRotatedDate === "string") result.borderRotatedDate = p.borderRotatedDate;
+			if (typeof p.avatarRotatedDate === "string") result.avatarRotatedDate = p.avatarRotatedDate;
+			if (typeof p.aboutMeSubmittedMonth === "string") result.aboutMeSubmittedMonth = p.aboutMeSubmittedMonth;
+			if (typeof p.visitPagesDate === "string") result.visitPagesDate = p.visitPagesDate;
+			if (typeof p.watchVideosDate === "string") result.watchVideosDate = p.watchVideosDate;
+			if (typeof p.readArticlesDate === "string") result.readArticlesDate = p.readArticlesDate;
+			if (typeof p.gameVaultDate === "string") result.gameVaultDate = p.gameVaultDate;
+			return result;
+		} catch {
+			return {};
+		}
+	}
+	async function saveAutomationCooldowns(patch) {
+		const existing = await loadAutomationCooldowns();
+		await _GM.setValue(COOLDOWNS_KEY, JSON.stringify({
+			...existing,
+			...patch
+		}));
+	}
+	var DEFAULT_AUTOMATIONS = {
+		visitPages: false,
+		profileCosmetics: false,
+		watchVideos: false,
+		readArticles: false,
+		gameVault: false
+	};
+	var defaultAchievementSettings = {
+		runAutomatically: false,
+		automations: { ...DEFAULT_AUTOMATIONS }
+	};
+	function isPartialSettings(value) {
+		return typeof value === "object" && !!value;
+	}
+	function mergeAutomations(base, incoming) {
+		if (!incoming) return base;
+		const next = { ...base };
+		for (const key of ACHIEVEMENT_AUTOMATION_KEYS) if (typeof incoming[key] === "boolean") next[key] = incoming[key];
+		return next;
+	}
+	async function getAchievementSettings() {
+		const raw = await _GM.getValue(SETTINGS_KEY);
+		const settings = {
+			runAutomatically: false,
+			automations: { ...DEFAULT_AUTOMATIONS }
+		};
+		if (!raw) return settings;
+		try {
+			const parsedUnknown = typeof raw === "string" ? JSON.parse(raw) : raw;
+			if (!isPartialSettings(parsedUnknown)) return settings;
+			if (typeof parsedUnknown.runAutomatically === "boolean") settings.runAutomatically = parsedUnknown.runAutomatically;
+			settings.automations = mergeAutomations(settings.automations, parsedUnknown.automations);
+		} catch (error) {
+			console.error("[Achievements] Error parsing settings:", error);
+		}
+		return settings;
+	}
+	async function saveAchievementSettings(patch) {
+		const previous = await getAchievementSettings();
+		const next = {
+			runAutomatically: patch.runAutomatically ?? previous.runAutomatically,
+			automations: patch.automations ? {
+				...previous.automations,
+				...patch.automations
+			} : previous.automations
+		};
+		await _GM.setValue(SETTINGS_KEY, JSON.stringify(next));
+		return next;
+	}
+	function areAchievementAutomationsEnabled(settings) {
+		return settings.runAutomatically;
+	}
+	function isAchievementAutomationEnabled(settings, key) {
+		return settings.runAutomatically && settings.automations[key];
+	}
+	var SNAPSHOT_KEY = "achievementSnapshot";
+	var FORCE_REFRESH_COOLDOWN_MS$1 = 5e3;
+	var IFRAME_TIMEOUT_MS = 8e3;
+	var IFRAME_SETTLE_MS$1 = 400;
+	var PERSONALIZATION_PATH = "/account/personalization";
+	var AUTOMATION_ARTICLE_LIMIT = 10;
+	var AUTOMATION_VIDEO_LIMIT = 10;
+	var AUTOMATION_VISIT_TIMEOUT_MS = 5e3;
+	var AUTOMATION_BATCH_BUDGET_MS = 2e4;
+	var NOT_EARNED_PATTERN = /not earned yet/i;
+	var COUNT_MARKER = " achievements";
+	var CARD_SELECTOR = [
+		".achievement-card",
+		".achievement",
+		".achievements-item",
+		".member-achievement",
+		".achievement-item"
+	].join(", ");
+	function delay$2(ms) {
+		return new Promise((resolve) => {
+			setTimeout(resolve, ms);
+		});
+	}
+	function isAchievementsPage(path = location.pathname) {
+		return /\/member\/[^/]+\/achievements\/?$/i.test(path);
+	}
+	function readUsernameFromDocument(document_, pathHint) {
+		const fromPage = document_ === document ? readPageUsername() : void 0;
+		if (fromPage) return fromPage;
+		const pathMatch = /\/member\/([^/]+)\//i.exec(pathHint ?? location.pathname);
+		if (pathMatch?.[1]) return decodeURIComponent(pathMatch[1]);
+		const link = document_.querySelector("a[href*=\"/member/\"][href$=\"/artifacts\"], a[href*=\"/member/\"][href$=\"/achievements\"]");
+		const hrefMatch = /\/member\/([^/]+)\//i.exec(link?.getAttribute("href") ?? "");
+		return hrefMatch?.[1] ? decodeURIComponent(hrefMatch[1]) : void 0;
+	}
+	function resolveAchievementsUrl(username) {
+		const name = username ?? readUsernameFromDocument(document);
+		return name ? `/member/${encodeURIComponent(name)}/achievements` : void 0;
+	}
+	function emptySnapshot(username) {
+		return {
+			scrapedAt: new Date(0).toISOString(),
+			username,
+			earnedCount: 0,
+			totalCount: 0,
+			items: {}
+		};
+	}
+	function trailingNumber(value) {
+		let index = value.length - 1;
+		while (index >= 0 && value.charAt(index) === " ") index -= 1;
+		const end = index;
+		while (index >= 0) {
+			const char = value.charAt(index);
+			if (char < "0" || char > "9") break;
+			index -= 1;
+		}
+		if (end === index) return;
+		const parsed = Number(value.slice(index + 1, end + 1));
+		return Number.isFinite(parsed) ? parsed : void 0;
+	}
+	function leadingNumber(value) {
+		let index = 0;
+		while (index < value.length && value.charAt(index) === " ") index += 1;
+		const start = index;
+		while (index < value.length) {
+			const char = value.charAt(index);
+			if (char < "0" || char > "9") break;
+			index += 1;
+		}
+		if (start === index) return;
+		const parsed = Number(value.slice(start, index));
+		return Number.isFinite(parsed) ? parsed : void 0;
+	}
+	function parseCountFromText(text) {
+		const collapsed = text.replaceAll(/\s+/g, " ").toLowerCase();
+		let searchFrom = 0;
+		while (searchFrom < collapsed.length) {
+			const markerIndex = collapsed.indexOf(COUNT_MARKER, searchFrom);
+			if (markerIndex === -1) return;
+			const window = collapsed.slice(Math.max(0, markerIndex - 24), markerIndex);
+			const slashIndex = window.lastIndexOf("/");
+			if (slashIndex !== -1) {
+				const earned = trailingNumber(window.slice(0, slashIndex));
+				const total = leadingNumber(window.slice(slashIndex + 1));
+				if (earned !== void 0 && total !== void 0) return {
+					earned,
+					total
+				};
+			}
+			searchFrom = markerIndex + 13;
+		}
+	}
+	function parseCount(document_) {
+		const fromBody = parseCountFromText(documentBody(document_)?.textContent ?? "");
+		if (fromBody) return fromBody;
+		for (const element of document_.querySelectorAll("h1, h2, h3, h4, h5, strong, span, div, p")) {
+			const text = element.textContent;
+			const lowered = text.replaceAll(/\s+/g, " ").toLowerCase();
+			if (!lowered.includes("achievements") || !lowered.includes("/")) continue;
+			const parsed = parseCountFromText(text);
+			if (parsed) return parsed;
+		}
+	}
+	function isAchievementsDocumentReady(document_ = document) {
+		return parseCount(document_) !== void 0;
+	}
+	async function waitForAchievementsDocument(timeoutMs = 12e3) {
+		if (isAchievementsDocumentReady(document)) return;
+		await new Promise((resolve) => {
+			let isSettled = false;
+			const observer = new MutationObserver(() => {
+				if (isAchievementsDocumentReady(document)) finish();
+			});
+			const timer = setTimeout(finish, timeoutMs);
+			function finish() {
+				if (isSettled) return;
+				isSettled = true;
+				observer.disconnect();
+				clearTimeout(timer);
+				resolve();
+			}
+			observer.observe(document.documentElement, {
+				childList: true,
+				subtree: true
+			});
+		});
+	}
+	function isEarnedCardText(text) {
+		return !NOT_EARNED_PATTERN.test(text);
+	}
+	function achievementNames(definition) {
+		return [definition.title, ...definition.aliases ?? []];
+	}
+	function segmentForAchievement(collapsed, achievement) {
+		const haystack = collapsed.toLowerCase();
+		let start = -1;
+		let matchedLength = 0;
+		for (const name of achievementNames(achievement)) {
+			const index = haystack.indexOf(name.toLowerCase());
+			if (index === -1) continue;
+			if (!(start === -1 || index < start)) continue;
+			start = index;
+			matchedLength = name.length;
+		}
+		if (start === -1) return;
+		let end = collapsed.length;
+		for (const other of ACHIEVEMENTS) {
+			if (other.id === achievement.id) continue;
+			for (const name of achievementNames(other)) {
+				const index = haystack.indexOf(name.toLowerCase(), start + matchedLength);
+				if (index !== -1 && index < end) end = index;
+			}
+		}
+		return collapsed.slice(start, end);
+	}
+	function recordProgress(items, definition, isEarned) {
+		if (items[definition.id]?.isEarned === true) return;
+		items[definition.id] = {
+			id: definition.id,
+			title: definition.title,
+			isEarned
+		};
+	}
+	function isCardUnearned(card) {
+		return card.classList.contains("unachieved") || !card.classList.contains("achieved") && !isEarnedCardText(card.textContent);
+	}
+	function scrapeFromCards(document_, items) {
+		const preferred = document_.querySelectorAll(".achievement-card");
+		const nodes = preferred.length > 0 ? preferred : document_.querySelectorAll(CARD_SELECTOR);
+		for (const card of nodes) {
+			if (card.querySelectorAll(".achievement-card").length > 1) continue;
+			const text = card.textContent;
+			const definition = matchAchievementInText(text);
+			if (!definition) continue;
+			recordProgress(items, definition, !isCardUnearned(card));
+		}
+		return nodes.length;
+	}
+	function scrapeFromAchievementSegments(document_, items) {
+		const collapsed = (documentBody(document_)?.textContent ?? "").replaceAll(/\s+/g, " ");
+		for (const achievement of ACHIEVEMENTS) {
+			if (items[achievement.id] !== void 0) continue;
+			const segment = segmentForAchievement(collapsed, achievement);
+			if (segment === void 0) continue;
+			recordProgress(items, achievement, isEarnedCardText(segment));
+		}
+	}
+	function isEarnedFromCollapsedText(collapsed, achievement) {
+		const segment = segmentForAchievement(collapsed, achievement);
+		return segment === void 0 ? void 0 : isEarnedCardText(segment);
+	}
+	function scrapeFromBodyText(document_, items) {
+		const collapsed = (documentBody(document_)?.textContent ?? "").replaceAll(/\s+/g, " ");
+		for (const achievement of ACHIEVEMENTS) {
+			if (items[achievement.id] !== void 0) continue;
+			const isEarned = isEarnedFromCollapsedText(collapsed, achievement);
+			if (isEarned === void 0) continue;
+			recordProgress(items, achievement, isEarned);
+		}
+	}
+	function scrapeOptions(options) {
+		const result = {};
+		if (options.username !== void 0) result.username = options.username;
+		if (options.pathHint !== void 0) result.pathHint = options.pathHint;
+		return result;
+	}
+	function scrapeAchievementsFromDocument(document_, options = {}) {
+		const username = options.username ?? readUsernameFromDocument(document_, options.pathHint);
+		const items = {};
+		const cardCount = scrapeFromCards(document_, items);
+		scrapeFromAchievementSegments(document_, items);
+		if (cardCount === 0 || Object.keys(items).length < ACHIEVEMENTS.length / 4) scrapeFromBodyText(document_, items);
+		const parsedCount = parseCount(document_);
+		const earnedKnown = Object.values(items).filter((item) => item.isEarned).length;
+		return {
+			scrapedAt: new Date().toISOString(),
+			username,
+			earnedCount: parsedCount?.earned ?? earnedKnown,
+			totalCount: parsedCount?.total ?? Math.max(ACHIEVEMENTS.length, Object.keys(items).length),
+			items
+		};
+	}
+	var MIN_FRESH_ITEM_COUNT = 15;
+	function isSnapshotFresh$1(snapshot) {
+		if (!snapshot) return false;
+		if (Object.keys(snapshot.items).length < MIN_FRESH_ITEM_COUNT) return false;
+		const now = Date.now();
+		const scrapedAt = Date.parse(snapshot.scrapedAt);
+		return !Number.isNaN(scrapedAt) && now - scrapedAt < 216e5;
+	}
+	async function loadAchievementSnapshot() {
+		const raw = await _GM.getValue(SNAPSHOT_KEY);
+		if (!raw) return;
+		try {
+			const parsed = typeof raw === "string" ? JSON.parse(raw) : raw;
+			if (typeof parsed !== "object" || !parsed) return;
+			const snapshot = parsed;
+			return typeof snapshot.scrapedAt === "string" && typeof snapshot.items === "object" ? snapshot : void 0;
+		} catch {
+			return;
+		}
+	}
+	async function saveAchievementSnapshot(snapshot) {
+		await _GM.setValue(SNAPSHOT_KEY, JSON.stringify(snapshot));
+	}
+	async function fetchDocument$1(path) {
+		try {
+			const response = await fetch(path, { headers: { Accept: "text/html" } });
+			if (!response.ok) {
+				console.warn("[Achievements] Failed to fetch", path, response.status);
+				return;
+			}
+			return new DOMParser().parseFromString(await response.text(), "text/html");
+		} catch (error) {
+			console.warn("[Achievements] Fetch error for", path, error);
+			return;
+		}
+	}
+	async function openPageDocument$1(path) {
+		return new Promise((resolve) => {
+			const iframe = document.createElement("iframe");
+			iframe.setAttribute("aria-hidden", "true");
+			iframe.style.cssText = "position:fixed;width:1px;height:1px;left:-9999px;top:0;opacity:0;pointer-events:none;border:0";
+			const cleanup = () => {
+				iframe.remove();
+			};
+			const timer = setTimeout(() => {
+				cleanup();
+				resolve(void 0);
+			}, IFRAME_TIMEOUT_MS);
+			iframe.addEventListener("load", () => {
+				clearTimeout(timer);
+				delay$2(IFRAME_SETTLE_MS$1).then(() => {
+					const document_ = iframe.contentDocument ?? void 0;
+					cleanup();
+					resolve(document_);
+				});
+			});
+			iframe.addEventListener("error", () => {
+				clearTimeout(timer);
+				cleanup();
+				resolve(void 0);
+			});
+			document.body.append(iframe);
+			iframe.src = path;
+		});
+	}
+	async function loadAchievementsDocument(path) {
+		const fetched = await fetchDocument$1(path);
+		if (fetched && parseCount(fetched)) return fetched;
+		return fetched && matchAchievementInText(documentBody(fetched)?.textContent ?? "") ? fetched : openPageDocument$1(path);
+	}
+	function unearthedWithAutomation(snapshot, key) {
+		return ACHIEVEMENTS.filter((achievement) => {
+			return achievement.automation === key && snapshot.items[achievement.id]?.isEarned !== true;
+		});
+	}
+	function articlePathsFromNews(document_) {
+		const paths = [];
+		const seen = new Set();
+		for (const link of document_.querySelectorAll("a[href*=\"/ucf/show/\"], a[href*=\"/ucf/News\"], a[href*=\"/blogs/\"]")) {
+			const path = link.pathname;
+			if (path === "/ucf/News" || path === "/ucf/News" || !path || seen.has(path)) continue;
+			seen.add(path);
+			paths.push(path);
+			if (paths.length >= AUTOMATION_ARTICLE_LIMIT) break;
+		}
+		return paths;
+	}
+	function videoPathsFromVideos(document_) {
+		const paths = [];
+		const seen = new Set();
+		for (const link of document_.querySelectorAll("a[href*=\"/ucf/show/\"], a[href*=\"/ucf/Video\"], a[href*=\"/video/\"]")) {
+			const path = link.pathname;
+			if (path === "/ucf/Video" || path === "/ucf/Video" || !path || seen.has(path)) continue;
+			seen.add(path);
+			paths.push(path);
+			if (paths.length >= AUTOMATION_VIDEO_LIMIT) break;
+		}
+		return paths;
+	}
+	async function raceWithTimeout(promise, timeoutMs) {
+		if (timeoutMs <= 0) return;
+		let timer;
+		try {
+			return await Promise.race([promise, new Promise((resolve) => {
+				timer = setTimeout(() => {
+					resolve(void 0);
+				}, timeoutMs);
+			})]);
+		} finally {
+			if (timer !== void 0) clearTimeout(timer);
+		}
+	}
+	async function visitPath(path) {
+		if (await fetchDocument$1(path)) return;
+		await openPageDocument$1(path);
+	}
+	async function visitPathsWithBudget(paths) {
+		const deadline = Date.now() + AUTOMATION_BATCH_BUDGET_MS;
+		for (const path of paths) {
+			const remaining = deadline - Date.now();
+			if (remaining <= 0) {
+				console.warn("[Achievements] automation budget exceeded; skipping remaining visits");
+				return;
+			}
+			const timeoutMs = Math.min(AUTOMATION_VISIT_TIMEOUT_MS, remaining);
+			await raceWithTimeout(visitPath(path), timeoutMs);
+		}
+	}
+	function parseSelectedBorderId(document_) {
+		const source = document_.documentElement.textContent;
+		const fromSaved = /saved\s*=\s*\{[^}]*\bborder\s*:\s*(\d+)/i.exec(source);
+		if (fromSaved?.[1]) {
+			const parsed = Number(fromSaved[1]);
+			if (Number.isFinite(parsed)) return parsed;
+		}
+		const match = /(?:let|var|const)\s*selectedBorderId\s*=\s*(\d+)\s*;/i.exec(source) ?? /(?:let|var|const)\s*selectedBorder\s*=\s*(\d+)\s*;/i.exec(source);
+		if (!match?.[1]) return;
+		const parsed = Number(match[1]);
+		return Number.isFinite(parsed) ? parsed : void 0;
+	}
+	function parsePersonalizationItemIds(document_, type) {
+		const ids = new Set();
+		for (const element of document_.querySelectorAll(`.account-personalization__personalization-item[data-type="${CSS.escape(type)}"][data-id]`)) {
+			const value = element.dataset.id;
+			if (!value) continue;
+			const parsed = Number(value);
+			if (Number.isFinite(parsed)) ids.add(parsed);
+		}
+		return [...ids];
+	}
+	function parseOptionalId(raw) {
+		if (!raw || raw === "null") return;
+		const parsed = Number(raw);
+		return Number.isFinite(parsed) ? parsed : void 0;
+	}
+	function parseAvatarSelection(document_) {
+		const source = document_.documentElement.textContent;
+		const match = /saved\s*=\s*\{\s*avatar:\s*(\d+|null)\s*,\s*background:\s*(\d+|null)\s*,\s*border:\s*(\d+|null)/i.exec(source);
+		if (match) return {
+			avatar: parseOptionalId(match[1]),
+			background: parseOptionalId(match[2]),
+			border: parseOptionalId(match[3])
+		};
+		return {
+			avatar: void 0,
+			background: void 0,
+			border: parseSelectedBorderId(document_)
+		};
+	}
+	function parseUserId(document_) {
+		const source = document_.documentElement.textContent;
+		const fromSaveUrl = /\/ajax\/user\/avatar\/save\/(\d+)/i.exec(source);
+		if (fromSaveUrl?.[1]) {
+			const parsed = Number(fromSaveUrl[1]);
+			if (Number.isFinite(parsed)) return parsed;
+		}
+		const fromVariable = /(?:let|var|const)\s*user_id\s*=\s*(\d+)\s*;/i.exec(source);
+		if (!fromVariable?.[1]) return;
+		const parsed = Number(fromVariable[1]);
+		return Number.isFinite(parsed) ? parsed : void 0;
+	}
+	function pickNextItemId(availableIds, selectedId) {
+		if (availableIds.length === 0) return;
+		const sorted = availableIds.toSorted((a, b) => a - b);
+		if (selectedId === void 0) return sorted[0];
+		const currentIndex = sorted.indexOf(selectedId);
+		if (currentIndex === -1) return sorted[0];
+		return sorted.length === 1 ? void 0 : sorted[(currentIndex + 1) % sorted.length];
+	}
+	function stripHtmlTags(html) {
+		const container = document.createElement("div");
+		container.innerHTML = html;
+		return container.textContent.replaceAll(/\s+/g, " ").trim();
+	}
+	function readPersonalizationFormState(document_) {
+		const form = document_.querySelector("form[action$=\"/account/update-personalization\"]");
+		const token = form?.querySelector("input[name=\"user_account_personalization[_token]\"]")?.value;
+		const customTitle = form?.querySelector("input[name=\"user_account_personalization[customTitle]\"]")?.value ?? "";
+		const aboutHtml = form?.querySelector("textarea[name=\"user_account_personalization[about]\"]")?.value ?? "";
+		if (!token || !form.action) return;
+		return {
+			aboutAction: form.action,
+			aboutToken: token,
+			customTitle,
+			aboutHtml,
+			userId: parseUserId(document_),
+			selection: parseAvatarSelection(document_),
+			availableBorderIds: parsePersonalizationItemIds(document_, "border"),
+			availableAvatarIds: parsePersonalizationItemIds(document_, "avatar")
+		};
+	}
+	async function submitPersonalizationUpdate(state, values) {
+		const body = new URLSearchParams({
+			"user_account_personalization[customTitle]": values.customTitle,
+			"user_account_personalization[about]": values.aboutHtml,
+			"user_account_personalization[_token]": state.aboutToken
+		});
+		const response = await fetch(state.aboutAction, {
+			method: "POST",
+			headers: {
+				Accept: "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+				"Content-Type": "application/x-www-form-urlencoded;charset=UTF-8"
+			},
+			body
+		});
+		if (!response.ok) throw new Error(`POST ${state.aboutAction} failed: ${response.status}`);
+	}
+	function encodeAvatarSlot(value) {
+		return value === void 0 ? "null" : String(value);
+	}
+	async function saveAvatarSelection(userId, selection) {
+		const response = await fetch(`/ajax/user/avatar/save/${userId}`, {
+			method: "POST",
+			headers: {
+				Accept: "application/json, text/plain, */*",
+				"Content-Type": "application/json"
+			},
+			body: `{"avatar":${encodeAvatarSlot(selection.avatar)},"background":${encodeAvatarSlot(selection.background)},"border":${encodeAvatarSlot(selection.border)}}`
+		});
+		if (!response.ok) throw new Error(`POST /ajax/user/avatar/save/${userId} failed: ${response.status}`);
+	}
+	async function didSubmitAboutMeAutomation(snapshot, state) {
+		if (snapshot.items["add-about-me"]?.isEarned === true) return false;
+		const cooldowns = await loadAutomationCooldowns();
+		const thisMonth = utcMonthString();
+		if (cooldowns.aboutMeSubmittedMonth === thisMonth) return false;
+		const aboutHtml = stripHtmlTags(state.aboutHtml).length > 0 ? state.aboutHtml : "<p>Hi</p>";
+		const customTitle = state.customTitle.trim().length > 0 ? state.customTitle : "About me";
+		console.log("[Achievements] profileCosmetics: submitting about-me", {
+			customTitle,
+			aboutHtml
+		});
+		await submitPersonalizationUpdate(state, {
+			customTitle,
+			aboutHtml
+		});
+		await saveAutomationCooldowns({ aboutMeSubmittedMonth: thisMonth });
+		return true;
+	}
+	function requiresBorderRotationRetry(snapshot) {
+		return ACHIEVEMENTS.some((achievement) => achievement.group === "border-use" && achievement.automation === "profileCosmetics" && snapshot.items[achievement.id]?.isEarned !== true);
+	}
+	function planDailyAvatarSelection(snapshot, state, cooldowns, today) {
+		const nextSelection = { ...state.selection };
+		let shouldSave = false;
+		const nextBorderId = pickNextItemId(state.availableBorderIds, state.selection.border);
+		if ((cooldowns.borderRotatedDate !== today || requiresBorderRotationRetry(snapshot)) && nextBorderId !== void 0 && nextBorderId !== state.selection.border) {
+			nextSelection.border = nextBorderId;
+			shouldSave = true;
+		}
+		const nextAvatarId = pickNextItemId(state.availableAvatarIds, state.selection.avatar);
+		if (nextAvatarId !== void 0 && cooldowns.avatarRotatedDate !== today && nextAvatarId !== state.selection.avatar) {
+			nextSelection.avatar = nextAvatarId;
+			shouldSave = true;
+		}
+		return {
+			selection: nextSelection,
+			shouldSave
+		};
+	}
+	async function didSaveDailyAvatarRotation(snapshot, state, cooldowns, today) {
+		if (state.userId === void 0) {
+			console.warn("[Achievements] profileCosmetics: no userId for avatar save");
+			return false;
+		}
+		const plan = planDailyAvatarSelection(snapshot, state, cooldowns, today);
+		console.log("[Achievements] profileCosmetics: avatar save plan", {
+			from: state.selection,
+			to: plan.selection,
+			shouldSave: plan.shouldSave,
+			lastBorderDate: cooldowns.borderRotatedDate,
+			lastAvatarDate: cooldowns.avatarRotatedDate,
+			today
+		});
+		if (!plan.shouldSave) return false;
+		await saveAvatarSelection(state.userId, plan.selection);
+		const cooldownPatch = {};
+		if (plan.selection.border !== state.selection.border) cooldownPatch.borderRotatedDate = today;
+		if (plan.selection.avatar !== state.selection.avatar) cooldownPatch.avatarRotatedDate = today;
+		await saveAutomationCooldowns(cooldownPatch);
+		return true;
+	}
+	async function didApplyVisitPagesAutomation(snapshot, settings) {
+		if (!isAchievementAutomationEnabled(settings, "visitPages") || unearthedWithAutomation(snapshot, "visitPages").length === 0) return false;
+		const cooldowns = await loadAutomationCooldowns();
+		const today = utcDateString();
+		if (cooldowns.visitPagesDate === today) return false;
+		await visitPathsWithBudget([FAQ_PATH, HIVE_PATH]);
+		await saveAutomationCooldowns({ visitPagesDate: today });
+		return true;
+	}
+	async function didApplyProfileCosmeticsAutomation(snapshot, settings) {
+		if (!isAchievementAutomationEnabled(settings, "profileCosmetics")) return false;
+		const personalization = await fetchDocument$1(PERSONALIZATION_PATH);
+		if (!personalization) {
+			console.warn("[Achievements] profileCosmetics: failed to fetch personalization page");
+			return false;
+		}
+		const state = readPersonalizationFormState(personalization);
+		if (!state) {
+			console.warn("[Achievements] profileCosmetics: could not read form state — update-personalization form or token not found");
+			return false;
+		}
+		console.log("[Achievements] profileCosmetics: state", {
+			userId: state.userId,
+			selection: state.selection,
+			borderCount: state.availableBorderIds.length,
+			avatarCount: state.availableAvatarIds.length
+		});
+		const cooldowns = await loadAutomationCooldowns();
+		const today = utcDateString();
+		const didAboutMe = await didSubmitAboutMeAutomation(snapshot, state);
+		const didAvatar = await didSaveDailyAvatarRotation(snapshot, state, cooldowns, today);
+		return didAboutMe || didAvatar;
+	}
+	async function didApplyGameVaultAutomation(snapshot, settings) {
+		if (!isAchievementAutomationEnabled(settings, "gameVault") || unearthedWithAutomation(snapshot, "gameVault").length === 0) return false;
+		const cooldowns = await loadAutomationCooldowns();
+		const today = utcDateString();
+		if (cooldowns.gameVaultDate === today) return false;
+		await visitPath(GAME_VAULT_PATH$1);
+		await saveAutomationCooldowns({ gameVaultDate: today });
+		return true;
+	}
+	async function didApplyReadArticlesAutomation(snapshot, settings) {
+		if (!isAchievementAutomationEnabled(settings, "readArticles") || unearthedWithAutomation(snapshot, "readArticles").length === 0) return false;
+		const cooldowns = await loadAutomationCooldowns();
+		const today = utcDateString();
+		if (cooldowns.readArticlesDate === today) return false;
+		const news = await fetchDocument$1(NEWS_PATH);
+		const articlePaths = news ? articlePathsFromNews(news) : [];
+		if (articlePaths.length === 0) await visitPathsWithBudget([NEWS_PATH]);
+		else await visitPathsWithBudget(articlePaths);
+		await saveAutomationCooldowns({ readArticlesDate: today });
+		return true;
+	}
+	async function didApplyWatchVideosAutomation(snapshot, settings) {
+		if (!isAchievementAutomationEnabled(settings, "watchVideos") || unearthedWithAutomation(snapshot, "watchVideos").length === 0) return false;
+		const cooldowns = await loadAutomationCooldowns();
+		const today = utcDateString();
+		if (cooldowns.watchVideosDate === today) return false;
+		const videos = await fetchDocument$1(VIDEOS_PATH);
+		const videoPaths = videos ? videoPathsFromVideos(videos) : [];
+		if (videoPaths.length === 0) await visitPathsWithBudget([VIDEOS_PATH]);
+		else await visitPathsWithBudget(videoPaths);
+		await saveAutomationCooldowns({ watchVideosDate: today });
+		return true;
+	}
+	async function didApplyAchievementAutomations(snapshot, settings) {
+		return (await Promise.all([
+			didApplyVisitPagesAutomation(snapshot, settings),
+			didApplyProfileCosmeticsAutomation(snapshot, settings),
+			didApplyGameVaultAutomation(snapshot, settings),
+			didApplyReadArticlesAutomation(snapshot, settings),
+			didApplyWatchVideosAutomation(snapshot, settings)
+		])).some(Boolean);
+	}
+	async function runAchievementAutomations(snapshot, settings) {
+		if (!settings.runAutomatically) return snapshot;
+		return await didApplyAchievementAutomations(snapshot, settings) ? refreshSnapshotAfterAutomation(snapshot, snapshot.username) : snapshot;
+	}
+	function requiresAchievementHydrate(snapshot, isEnabled = true, isForce = false) {
+		if (!isEnabled) return false;
+		return isForce || !isSnapshotFresh$1(snapshot);
+	}
+	async function scrapeAchievementsSnapshot(username) {
+		if (isAchievementsPage()) {
+			await waitForAchievementsDocument();
+			return scrapeAchievementsFromDocument(document, scrapeOptions({ username }));
+		}
+		const path = resolveAchievementsUrl(username);
+		if (!path) return emptySnapshot(username);
+		const document_ = await loadAchievementsDocument(path);
+		return document_ ? scrapeAchievementsFromDocument(document_, scrapeOptions({
+			username,
+			pathHint: path
+		})) : void 0;
+	}
+	async function refreshSnapshotAfterAutomation(snapshot, username) {
+		const resolvedUsername = snapshot.username ?? username;
+		const path = resolveAchievementsUrl(resolvedUsername);
+		if (path) {
+			const refreshed = await loadAchievementsDocument(path);
+			if (refreshed) return scrapeAchievementsFromDocument(refreshed, scrapeOptions({
+				username: resolvedUsername,
+				pathHint: path
+			}));
+		}
+		if (isAchievementsPage()) {
+			await waitForAchievementsDocument();
+			return scrapeAchievementsFromDocument(document, scrapeOptions({ username: resolvedUsername }));
+		}
+		return snapshot;
+	}
+	function isForceWithinCooldown(existing) {
+		const scrapedAt = Date.parse(existing.scrapedAt);
+		return !Number.isNaN(scrapedAt) && Date.now() - scrapedAt < FORCE_REFRESH_COOLDOWN_MS$1;
+	}
+	async function ensureAchievementSnapshot(options = {}) {
+		const existing = await loadAchievementSnapshot();
+		const username = options.username ?? existing?.username ?? readUsernameFromDocument(document);
+		const isForce = options.force === true;
+		const settings = await getAchievementSettings();
+		if (!isForce && isSnapshotFresh$1(existing)) {
+			if (existing && settings.runAutomatically) await didApplyAchievementAutomations(existing, settings);
+			return existing;
+		}
+		if (isForce && existing && isForceWithinCooldown(existing)) {
+			if (settings.runAutomatically) await didApplyAchievementAutomations(existing, settings);
+			return existing;
+		}
+		let snapshot = await scrapeAchievementsSnapshot(username);
+		if (!snapshot || Object.keys(snapshot.items).length === 0) return existing ?? snapshot;
+		if (await didApplyAchievementAutomations(snapshot, settings)) snapshot = await refreshSnapshotAfterAutomation(snapshot, username);
+		await saveAchievementSnapshot(snapshot);
+		return snapshot;
+	}
+	var MAX_ACTION_TODOS = 8;
+	var MAX_INFORM_TODOS = 3;
+	var BORDER_GROUPS = new Set([
+		"border-first",
+		"border-use",
+		"border-daily",
+		"border-monthly"
+	]);
+	var AVATAR_GROUPS = new Set(["avatar-daily", "avatar-monthly"]);
+	var ABOUT_ME_ID = "add-about-me";
+	function isAchievementEarned(snapshot, id) {
+		return snapshot?.items[id]?.isEarned === true;
+	}
+	function isAchievementKnownUnearned(snapshot, id) {
+		return snapshot?.items[id]?.isEarned === false;
+	}
+	function nextUnearnedInGroup(snapshot, group) {
+		const chain = ACHIEVEMENTS.filter((achievement) => achievement.group === group).toSorted((left, right) => left.rank - right.rank);
+		if (!chain.some((achievement) => snapshot?.items[achievement.id] !== void 0)) return;
+		return chain.find((achievement) => isAchievementKnownUnearned(snapshot, achievement.id));
+	}
+	function collectNextUnearned(snapshot) {
+		if (!snapshot || Object.keys(snapshot.items).length === 0) return [];
+		const seenGroups = new Set();
+		const nexts = [];
+		for (const achievement of ACHIEVEMENTS) {
+			if (seenGroups.has(achievement.group)) continue;
+			seenGroups.add(achievement.group);
+			const next = nextUnearnedInGroup(snapshot, achievement.group);
+			if (next && next.coveredByActionPlan !== true) nexts.push(next);
+		}
+		return nexts;
+	}
+	function isSatisfiedForCurrentInterval(achievement, settings, cooldowns, today) {
+		const key = achievement.automation;
+		if (key === void 0 || !isAchievementAutomationEnabled(settings, key)) return false;
+		if (key === "profileCosmetics") {
+			if (BORDER_GROUPS.has(achievement.group)) return cooldowns.borderRotatedDate === today;
+			if (AVATAR_GROUPS.has(achievement.group)) return cooldowns.avatarRotatedDate === today;
+			return false;
+		}
+		if (key === "visitPages") return cooldowns.visitPagesDate === today;
+		if (key === "watchVideos") return cooldowns.watchVideosDate === today;
+		return (key === "readArticles" ? cooldowns.readArticlesDate : cooldowns.gameVaultDate) === today;
+	}
+	function buildTodo(achievement, settings, username) {
+		const canAutomate = achievement.automation !== void 0 && isAchievementAutomationEnabled(settings, achievement.automation);
+		const canVisitInBackground = canAutomate && achievement.automation !== "profileCosmetics";
+		const todo = {
+			text: achievement.title,
+			reasons: [{ text: achievement.hint }],
+			tone: achievement.kind === "inform" ? "muted" : "default",
+			urgency: {
+				kind: achievement.kind === "inform" ? "info" : "action",
+				readyAtMs: 0,
+				durationMs: 0
+			}
+		};
+		if (achievement.href) {
+			const href = achievement.href;
+			todo.openHref = username && href.includes("{username}") ? href.split("{username}").join(encodeURIComponent(username)) : href;
+			todo.openHrefLabel = canAutomate ? `${achievement.hrefLabel ?? "Open"} now` : achievement.hrefLabel ?? "Open";
+			if (canVisitInBackground) todo.visitInBackground = true;
+		}
+		return todo;
+	}
+	function progressNeededTodo(snapshot) {
+		const href = resolveAchievementsUrl(snapshot?.username);
+		const todo = {
+			text: "Load achievement progress",
+			reasons: [{ text: "We fetch your achievements page in the background (like Battle Pass). If this stays, use the button to retry or open the page." }],
+			urgency: {
+				kind: "action",
+				readyAtMs: 0,
+				durationMs: 0
+			}
+		};
+		if (href) {
+			todo.openHref = href;
+			todo.openHrefLabel = "Load progress";
+			todo.visitInBackground = true;
+		}
+		return todo;
+	}
+	function emptyTodos(snapshot) {
+		if (!snapshot || Object.keys(snapshot.items).length === 0) return [progressNeededTodo(snapshot)];
+		return [{
+			tone: "muted",
+			text: "No extra achievement steps — daily ARP work already covers the rest",
+			urgency: {
+				kind: "info",
+				readyAtMs: 0,
+				durationMs: 0
+			}
+		}];
+	}
+	function aboutMeWaitingTodo(achievement) {
+		return {
+			text: achievement.title,
+			reasons: [{ text: "Submitted this month — waiting for credit" }],
+			tone: "muted",
+			urgency: {
+				kind: "info",
+				readyAtMs: 0,
+				durationMs: 0
+			}
+		};
+	}
+	function isAboutMeWaitingCredit(achievement, snapshot, cooldowns, thisMonth) {
+		return achievement.id === ABOUT_ME_ID && cooldowns.aboutMeSubmittedMonth === thisMonth && !isAchievementEarned(snapshot, ABOUT_ME_ID);
+	}
+	function pushCapped(list, todo, max) {
+		if (list.length < max) list.push(todo);
+	}
+	function buildAchievementTodos(snapshot, settings, cooldowns = {}) {
+		const actions = [];
+		const infos = [];
+		const today = utcDateString();
+		const thisMonth = utcMonthString();
+		const collected = collectNextUnearned(snapshot).filter((next) => !isSatisfiedForCurrentInterval(next, settings, cooldowns, today));
+		for (const next of collected) {
+			if (isAboutMeWaitingCredit(next, snapshot, cooldowns, thisMonth)) {
+				pushCapped(infos, aboutMeWaitingTodo(next), MAX_INFORM_TODOS);
+				continue;
+			}
+			const todo = buildTodo(next, settings, snapshot?.username);
+			if (next.kind === "inform") {
+				pushCapped(infos, todo, MAX_INFORM_TODOS);
+				continue;
+			}
+			pushCapped(actions, todo, MAX_ACTION_TODOS);
+		}
+		return actions.length === 0 && infos.length === 0 ? emptyTodos(snapshot) : [...actions, ...infos];
+	}
+	function achievementProgressLabel(snapshot) {
+		return !snapshot || snapshot.totalCount <= 0 ? "progress unknown" : `${snapshot.earnedCount}/${snapshot.totalCount} earned`;
+	}
+	function achievementUpdatedLabel(snapshot) {
+		const scrapedAt = snapshot?.scrapedAt;
+		if (!scrapedAt) return "Updated: never";
+		const at = Date.parse(scrapedAt);
+		if (Number.isNaN(at) || at <= 0) return "Updated: never";
+		return `Updated: ${new Date(at).toLocaleString()}`;
+	}
+	function renderSwitch(options) {
+		return `
+      <label class="ao-switch${options.isSmall === true ? " ao-switch-sm" : ""}">
+        <span class="ao-switch-copy">
+          <span class="ao-switch-title">${escapeHtml(options.title)}</span>
+          <span class="ao-switch-hint">${escapeHtml(options.hint)}</span>
+        </span>
+        <input type="checkbox" id="${escapeHtml(options.id)}" class="ao-switch-input" ${options.isChecked ? "checked" : ""}/>
+        <span class="ao-switch-track" aria-hidden="true"><span class="ao-switch-knob"></span></span>
+      </label>`;
+	}
+	function renderCategoryAutomationSwitches(settings) {
+		const switches = ACHIEVEMENT_AUTOMATION_KEYS.map((key) => {
+			const copy = ACHIEVEMENT_AUTOMATION_COPY[key];
+			return renderSwitch({
+				id: `ao-ach-auto-${key}`,
+				title: copy.title,
+				hint: copy.hint,
+				isChecked: settings.automations[key],
+				isSmall: true
+			});
+		}).join("");
+		return `<div class="ao-ach-autos"${areAchievementAutomationsEnabled(settings) ? "" : " data-off=\"\""}>${switches}</div>`;
+	}
+	function renderAchievementHelperSwitch(isEnabled) {
+		return renderSwitch({
+			id: "ao-achievements-enabled",
+			title: "Achievements helper",
+			hint: "Show what to do next for unearned achievements. Turn on Run automatically to visit pages in the background.",
+			isChecked: isEnabled
+		});
+	}
+	function renderAchievementAutoControls(settings, options = {}) {
+		const isAutoOn = areAchievementAutomationsEnabled(settings);
+		const master = renderSwitch({
+			id: "ao-ach-run-automatically",
+			title: "Run automatically",
+			hint: "On each Refresh, do the safe background actions for achievements: visit FAQ/Hive, save your About Me, rotate your border, open video pages, open news posts, and enter Game Vault when those are still unearned. Does not post Relays or spend ARP.",
+			isChecked: isAutoOn
+		});
+		if (options.masterOnly === true) return master;
+		return `
+    ${master}
+    <div class="ao-ach-sub${isAutoOn ? "" : " ao-ach-sub--off"}">
+      ${renderCategoryAutomationSwitches(settings)}
+    </div>`;
+	}
 	function renderAchievementsPanel(options) {
 		if (!options.isEnabled) return "";
+		const todos = buildAchievementTodos(options.snapshot, options.settings, options.cooldowns ?? {});
+		const progress = achievementProgressLabel(options.snapshot);
+		const updated = achievementUpdatedLabel(options.snapshot);
+		const contents = renderActionPlanContents(todos, { heading: `Achievements · ${progress}` });
 		return `
     <div id="ao-achievements">
-      ${renderActionPlanContents(buildAchievementTodos(options.snapshot, options.settings, options.cooldowns ?? {}), { heading: `Achievements · ${achievementProgressLabel(options.snapshot)}` })}
+      <div class="ao-muted">${escapeHtml(updated)}</div>
+      ${contents}
     </div>
   `;
+	}
+	function renderAchievementsControlBlock(options) {
+		if (!options.isHelperEnabled) return "";
+		return renderAchievementsPanel({
+			snapshot: options.snapshot,
+			settings: options.settings,
+			isEnabled: true,
+			...options.cooldowns !== void 0 && { cooldowns: options.cooldowns }
+		});
+	}
+	async function fetchAndMaybeScrapeAchievements(href) {
+		const response = await fetch(href, { headers: { Accept: "text/html" } });
+		if (!response.ok) throw new Error(`GET ${href} failed: ${String(response.status)}`);
+		const path = new URL(href, location.origin).pathname;
+		if (!isAchievementsPage(path)) return;
+		const snapshot = scrapeAchievementsFromDocument(new DOMParser().parseFromString(await response.text(), "text/html"), { pathHint: path });
+		if (Object.keys(snapshot.items).length > 0) await saveAchievementSnapshot(snapshot);
 	}
 	function bindAchievementOpenButtons(root, onVisited) {
 		for (const button of root.querySelectorAll(".ao-ach-open-btn")) button.addEventListener("click", () => {
@@ -10404,8 +11306,8 @@
 			if (button.dataset.visit === "1") {
 				(async () => {
 					try {
-						await fetch(href, { headers: { Accept: "text/html" } });
-						showAoToast("Visited page for achievement progress.");
+						await fetchAndMaybeScrapeAchievements(href);
+						showAoToast(href.includes("/achievements") || href === resolveAchievementsUrl() ? "Achievement progress updated." : "Visited page for achievement progress.");
 						await onVisited?.();
 					} catch (error) {
 						console.warn("[Achievements] Visit failed", href, error);
@@ -10421,6 +11323,16 @@
 		const sub = root.querySelector(".ao-ach-sub");
 		if (!sub) return;
 		sub.classList.toggle("ao-ach-sub--off", !isOn);
+	}
+	function bindAchievementHelperSwitch(root, onChanged) {
+		root.querySelector("#ao-achievements-enabled")?.addEventListener("change", (event) => {
+			const input = event.currentTarget;
+			if (!(input instanceof HTMLInputElement)) return;
+			(async () => {
+				await saveArtifactSettings({ achievementsEnabled: input.checked });
+				await onChanged();
+			})();
+		});
 	}
 	function bindAchievementAutomationSwitches(root, onChanged) {
 		root.querySelector("#ao-ach-run-automatically")?.addEventListener("change", (event) => {
@@ -10467,8 +11379,8 @@
 	var SHOW_GIVEAWAY_HREF = /\/ucf\/show\/(\d+)\/(?:[\w.-]+\/)*Giveaway\/([\w.-]+)/i;
 	var LISTING_PATH = /\/ucf\/Giveaway\/?$/i;
 	var IFRAME_WAIT_MS = 15e3;
-	var IFRAME_SETTLE_MS$1 = 600;
-	function delay$2(ms) {
+	var IFRAME_SETTLE_MS = 600;
+	function delay$1(ms) {
 		return new Promise((resolve) => {
 			setTimeout(resolve, ms);
 		});
@@ -10610,7 +11522,7 @@
 			}, IFRAME_WAIT_MS);
 			iframe.addEventListener("load", () => {
 				clearTimeout(timer);
-				delay$2(IFRAME_SETTLE_MS$1).then(() => {
+				delay$1(IFRAME_SETTLE_MS).then(() => {
 					const document_ = iframe.contentDocument ?? void 0;
 					cleanup();
 					resolve(document_);
@@ -11140,13 +12052,13 @@
 		};
 		scheduleBrowserNotifications(notifyRuntime.lastSource);
 	}
-	var STALE_MS$1 = 216e5;
+	var STALE_MS = 216e5;
 	var SLOT_LOCK_STALE_MS = 3e5;
 	var ARP_LOG_STALE_MS = 216e5;
-	var FORCE_REFRESH_COOLDOWN_MS$1 = 5e3;
+	var FORCE_REFRESH_COOLDOWN_MS = 5e3;
 	var EQUIP_CONFIRM_RETRY_MS = 750;
 	var BATTLE_PASS_STALE_MS = 36e5;
-	var COMMUNITY_EVENT_PENDING_STALE_MS = STALE_MS$1;
+	var COMMUNITY_EVENT_PENDING_STALE_MS = STALE_MS;
 	var CONTROL_CENTER_PATH = "/control-center";
 	var GAME_VAULT_PATH = "/marketplace/game-vault";
 	var MARKETPLACE_FRAGMENTS_PATH = "/marketplace/?type=fragment";
@@ -11169,7 +12081,7 @@
 			return fallback;
 		}
 	}
-	async function fetchDocument$1(path) {
+	async function fetchDocument(path) {
 		try {
 			const response = await fetch(path, { headers: { Accept: "text/html" } });
 			if (!response.ok) {
@@ -11186,7 +12098,7 @@
 			return;
 		}
 	}
-	function delay$1(ms) {
+	function delay(ms) {
 		return new Promise((resolve) => {
 			setTimeout(resolve, ms);
 		});
@@ -11195,7 +12107,7 @@
 		const started = Date.now();
 		while (Date.now() - started < 4e3) {
 			if (document_.querySelector("#personal-hours")?.textContent.trim()) break;
-			await delay$1(250);
+			await delay(250);
 		}
 	}
 	async function settleIframePage(iframe, path) {
@@ -11204,13 +12116,13 @@
 		if (path.includes("/steam/community-event")) await waitForCommunityEventHours(document_);
 		else if (path.includes("/battle-pass")) await waitForBattlePassUi(document_);
 		else if (path.includes("/game-vault")) await waitForGameVaultUi(document_);
-		else await delay$1(400);
+		else await delay(400);
 		return {
 			document: document_,
 			url: iframe.contentWindow?.location.href ?? path
 		};
 	}
-	async function openPageDocument$1(path) {
+	async function openPageDocument(path) {
 		return new Promise((resolve) => {
 			const iframe = document.createElement("iframe");
 			iframe.setAttribute("aria-hidden", "true");
@@ -11242,7 +12154,7 @@
 		const started = Date.now();
 		while (Date.now() - started < 5e3) {
 			if (isBattlePassDocumentReady(document_)) return;
-			await delay$1(250);
+			await delay(250);
 		}
 	}
 	function hasPersonalHours(document_) {
@@ -11256,7 +12168,7 @@
 		const started = Date.now();
 		while (Date.now() - started < 5e3) {
 			if (isGameVaultDocumentReady(document_)) return;
-			await delay$1(250);
+			await delay(250);
 		}
 	}
 	function requiresIframeFallback(path, fetched) {
@@ -11272,17 +12184,17 @@
 		return [...document_.querySelectorAll("a, button")].map((element) => element.textContent.replaceAll(/\s+/g, " ").trim()).some((label) => /^(Check Game|Visit Steam|Sync Games|Launch Game)$/i.test(label)) || /completed this quest/i.test(documentBody(document_)?.textContent ?? "");
 	}
 	async function loadRemotePage(path) {
-		const fetched = await fetchDocument$1(path);
-		if (fetched?.document.querySelector("a.artifact-list-item, body")) return requiresIframeFallback(path, fetched.document) ? openPageDocument$1(path) : fetched;
-		return openPageDocument$1(path);
+		const fetched = await fetchDocument(path);
+		if (fetched?.document.querySelector("a.artifact-list-item, body")) return requiresIframeFallback(path, fetched.document) ? openPageDocument(path) : fetched;
+		return openPageDocument(path);
 	}
 	async function loadRemoteDocument(path) {
 		return (await loadRemotePage(path))?.document;
 	}
-	function isSnapshotFresh$1(snapshot) {
+	function isSnapshotFresh(snapshot) {
 		if (!snapshot || snapshot.artifacts.length === 0 || !snapshot.slotLocks) return false;
 		const scrapedAt = Date.parse(snapshot.scrapedAt);
-		return !Number.isNaN(scrapedAt) && Date.now() - scrapedAt < STALE_MS$1;
+		return !Number.isNaN(scrapedAt) && Date.now() - scrapedAt < STALE_MS;
 	}
 	function areSlotLocksFresh(snapshot) {
 		if (!snapshot?.slotLocks) return false;
@@ -11290,7 +12202,7 @@
 	}
 	function isCapsFresh(state, now = new Date()) {
 		const capsAt = state?.capsScrapedAt;
-		if (!state || !capsAt || !isScrapedWithin(capsAt, STALE_MS$1) || !isScrapedSinceUtcMidnight(capsAt, now)) return false;
+		if (!state || !capsAt || !isScrapedWithin(capsAt, STALE_MS) || !isScrapedSinceUtcMidnight(capsAt, now)) return false;
 		if (Object.values(state.caps).every((status) => status === "unknown")) return false;
 		if (state.caps.steamQuests === "available" && (state.steamQuests?.quests.length ?? 0) === 0) return false;
 		return true;
@@ -11349,7 +12261,7 @@
 		const event = state?.communityEvent;
 		if (!event?.isLive) return state?.caps.steamCommunityEvent !== "available" && isCapsFresh(state, now);
 		if (event.milestones.length === 0) return false;
-		const ttl = event.pendingArp > 0 ? COMMUNITY_EVENT_PENDING_STALE_MS : STALE_MS$1;
+		const ttl = event.pendingArp > 0 ? COMMUNITY_EVENT_PENDING_STALE_MS : STALE_MS;
 		if (!isScrapedWithin(event.scrapedAt, ttl)) return false;
 		return isScrapedSinceUtcMidnight(event.scrapedAt, now);
 	}
@@ -11419,7 +12331,7 @@
 		const previousSig = previous ? equippedSignature(previous) : "";
 		let snapshot = await fetchShowroomSnapshot();
 		if (snapshot && equippedSignature(snapshot) === previousSig) {
-			await delay$1(EQUIP_CONFIRM_RETRY_MS);
+			await delay(EQUIP_CONFIRM_RETRY_MS);
 			snapshot = await fetchShowroomSnapshot() ?? snapshot;
 		}
 		if (!snapshot) {
@@ -11446,7 +12358,7 @@
 			return true;
 		};
 		if (await didConfirm()) return;
-		await delay$1(EQUIP_CONFIRM_RETRY_MS);
+		await delay(EQUIP_CONFIRM_RETRY_MS);
 		if (await didConfirm()) return;
 		await invalidateSnapshotFreshness();
 	}
@@ -11454,7 +12366,7 @@
 		const existing = await loadSnapshot();
 		const isWantsForce = options.force === true;
 		const isElapsedLock = hasElapsedShowroomLock(await getArtifactSettings(), existing?.slotLocks);
-		if (!isWantsForce && !isElapsedLock && isSnapshotFresh$1(existing) && areSlotLocksFresh(existing)) return existing;
+		if (!isWantsForce && !isElapsedLock && isSnapshotFresh(existing) && areSlotLocksFresh(existing)) return existing;
 		const showroomPath = resolveShowroomUrl(existing?.username);
 		if (isWantsForce || isElapsedLock) return scrapeShowroomAfterLockNudge(showroomPath, existing);
 		const loaded = await loadRemotePage(showroomPath);
@@ -11617,7 +12529,7 @@
 		next.communityEvent = mergeCommunityEventScrape(scrapeCommunityEventFromDocument(eventDocument, communityEvent.url), communityEvent, { source: "remote" });
 	}
 	function requiresRemoteSnapshotHydrate(snapshot) {
-		return !isSnapshotFresh$1(snapshot) || !areSlotLocksFresh(snapshot);
+		return !isSnapshotFresh(snapshot) || !areSlotLocksFresh(snapshot);
 	}
 	function requiresRemoteSiteHydrate(state, options = {}) {
 		return !state || options.force === true || !isCapsFresh(state) || shouldRescrapeBattlePass(state) || !isArpLogFresh(state) || shouldRefreshCommunityEventArpLog(state) || !isCommunityEventFresh(state) || requiresSteamQuestEligibilityFetch(state);
@@ -11637,9 +12549,9 @@
 			force: isForce
 		});
 		const hasBattlePassSeasonChanged = battlePassPath !== void 0 && battlePassPath !== battlePassControlCenterPath(existing.battlePass?.url);
-		const isForceCaps = isForce && !isScrapedWithin(existing.capsScrapedAt, FORCE_REFRESH_COOLDOWN_MS$1);
+		const isForceCaps = isForce && !isScrapedWithin(existing.capsScrapedAt, FORCE_REFRESH_COOLDOWN_MS);
 		const isForceArpLog = isForce;
-		const isForceEvent = isForce && !isScrapedWithin(existing.communityEvent?.scrapedAt, FORCE_REFRESH_COOLDOWN_MS$1);
+		const isForceEvent = isForce && !isScrapedWithin(existing.communityEvent?.scrapedAt, FORCE_REFRESH_COOLDOWN_MS);
 		const requiresCapsRefresh = isForceCaps || !isCapsFresh(existing);
 		const requiresBattlePassRefresh = isForce || requiresCapsRefresh || hasBattlePassSeasonChanged || shouldRescrapeBattlePass(existing);
 		const requiresArpLogRefresh = isForceArpLog || !isArpLogFresh(existing) || shouldRefreshCommunityEventArpLog(existing);
@@ -11819,97 +12731,6 @@
 			handleStartBattlePass();
 		});
 	}
-	var COUNT_MARKER = " achievements";
-	[
-		".achievement-card",
-		".achievement",
-		".achievements-item",
-		".member-achievement",
-		".achievement-item"
-	].join(", ");
-	function isAchievementsPage(path = location.pathname) {
-		return /\/member\/[^/]+\/achievements\/?$/i.test(path);
-	}
-	function trailingNumber(value) {
-		let index = value.length - 1;
-		while (index >= 0 && value.charAt(index) === " ") index -= 1;
-		const end = index;
-		while (index >= 0) {
-			const char = value.charAt(index);
-			if (char < "0" || char > "9") break;
-			index -= 1;
-		}
-		if (end === index) return;
-		const parsed = Number(value.slice(index + 1, end + 1));
-		return Number.isFinite(parsed) ? parsed : void 0;
-	}
-	function leadingNumber(value) {
-		let index = 0;
-		while (index < value.length && value.charAt(index) === " ") index += 1;
-		const start = index;
-		while (index < value.length) {
-			const char = value.charAt(index);
-			if (char < "0" || char > "9") break;
-			index += 1;
-		}
-		if (start === index) return;
-		const parsed = Number(value.slice(start, index));
-		return Number.isFinite(parsed) ? parsed : void 0;
-	}
-	function parseCountFromText(text) {
-		const collapsed = text.replaceAll(/\s+/g, " ").toLowerCase();
-		let searchFrom = 0;
-		while (searchFrom < collapsed.length) {
-			const markerIndex = collapsed.indexOf(COUNT_MARKER, searchFrom);
-			if (markerIndex === -1) return;
-			const window = collapsed.slice(Math.max(0, markerIndex - 24), markerIndex);
-			const slashIndex = window.lastIndexOf("/");
-			if (slashIndex !== -1) {
-				const earned = trailingNumber(window.slice(0, slashIndex));
-				const total = leadingNumber(window.slice(slashIndex + 1));
-				if (earned !== void 0 && total !== void 0) return {
-					earned,
-					total
-				};
-			}
-			searchFrom = markerIndex + 13;
-		}
-	}
-	function parseCount(document_) {
-		const fromBody = parseCountFromText(documentBody(document_)?.textContent ?? "");
-		if (fromBody) return fromBody;
-		for (const element of document_.querySelectorAll("h1, h2, h3, h4, h5, strong, span, div, p")) {
-			const text = element.textContent;
-			const lowered = text.replaceAll(/\s+/g, " ").toLowerCase();
-			if (!lowered.includes("achievements") || !lowered.includes("/")) continue;
-			const parsed = parseCountFromText(text);
-			if (parsed) return parsed;
-		}
-	}
-	function isAchievementsDocumentReady(document_ = document) {
-		return parseCount(document_) !== void 0;
-	}
-	async function waitForAchievementsDocument(timeoutMs = 12e3) {
-		if (isAchievementsDocumentReady(document)) return;
-		await new Promise((resolve) => {
-			let isSettled = false;
-			const observer = new MutationObserver(() => {
-				if (isAchievementsDocumentReady(document)) finish();
-			});
-			const timer = setTimeout(finish, timeoutMs);
-			function finish() {
-				if (isSettled) return;
-				isSettled = true;
-				observer.disconnect();
-				clearTimeout(timer);
-				resolve();
-			}
-			observer.observe(document.documentElement, {
-				childList: true,
-				subtree: true
-			});
-		});
-	}
 	function isControlCenterPage() {
 		let path = location.pathname;
 		while (path.endsWith("/") && path.length > 1) path = path.slice(0, -1);
@@ -11938,7 +12759,24 @@
 	function assertGmStorage() {
 		if (!hasGmStorage()) throw new TypeError("GM storage is unavailable. For pnpm run dev, install the userscript served at http://localhost:3000 (named server:AWA Toolkit). A custom stub that only @requires that file does not get @grant, so recommendations never load.");
 	}
-	async function gatherAchievements(options) {}
+	async function gatherAchievements(options) {
+		if (!options.settings.achievementsEnabled) return;
+		if (isAchievementsPage()) {
+			await waitForAchievementsDocument();
+			let achievements = scrapeAchievementsFromDocument(document, options.username === void 0 ? {} : { username: options.username });
+			await saveAchievementSnapshot(achievements);
+			achievements = await runAchievementAutomations(achievements, options.achievementSettings);
+			await saveAchievementSnapshot(achievements);
+			return achievements;
+		}
+		const cached = await loadAchievementSnapshot();
+		if (options.isRemote || options.shouldForceSite || requiresAchievementHydrate(cached, true, options.shouldForceSite)) {
+			const ensureOptions = { force: options.shouldForceSite || !cached || Object.keys(cached.items).length === 0 };
+			if (options.username !== void 0) ensureOptions.username = options.username;
+			return ensureAchievementSnapshot(ensureOptions);
+		}
+		return cached;
+	}
 	async function gatherData(options) {
 		assertGmStorage();
 		const isRemote = options?.remote ?? true;
@@ -12019,7 +12857,7 @@
 	function requiresBackgroundHydrate(data, options = {}) {
 		if (options.force || hasElapsedShowroomLock(data.settings, data.snapshot?.slotLocks)) return true;
 		if (!isArtifactsShowroomPage() && requiresRemoteSnapshotHydrate(data.snapshot)) return true;
-		return requiresRemoteSiteHydrate(data.siteState) || requiresSteamFreeHydrate(data.siteState) || requiresAsceHydrate(data.siteState);
+		return requiresRemoteSiteHydrate(data.siteState) || requiresSteamFreeHydrate(data.siteState) || data.settings.achievementsEnabled && requiresAchievementHydrate(data.achievements, data.settings.achievementsEnabled) || requiresAsceHydrate(data.siteState);
 	}
 	async function requiresSeasonChangeHydrate(state) {
 		const path = await discoverBattlePassPath({ knownUrl: state?.battlePass?.url });
@@ -12413,6 +13251,13 @@
           <input type="number" min="0" max="2" step="0.1" data-freq="${key}" value="${a.frequency}"/>
         </label>`;
 		}).join("");
+		const achievementsBodyClass = areAchievementsOn ? "" : " ao-body--off";
+		const achievementsSettingsHtml = `<div class="ao-notify">
+      ${renderAchievementHelperSwitch(areAchievementsOn)}
+      <div class="ao-body${achievementsBodyClass}">
+        ${renderAchievementAutoControls(achievementSettings)}
+      </div>
+    </div>`;
 		return `
     <div class="ao-notify">
       ${renderNotifySwitch({
@@ -12430,7 +13275,7 @@
 			isChecked: settings.marketplaceDiscountPriorityPending
 		})}
     </div>
-    
+    ${achievementsSettingsHtml}
     <div class="ao-notify">
       ${renderNotifySwitch({
 			id: "ao-browser-notifications",
@@ -13246,9 +14091,40 @@
 		const container = findControlCenterMount();
 		if (container) {
 			if (panel.parentElement !== container) container.prepend(panel);
+			const ach = document.querySelector(`#${ACH_PANEL_ID}`);
+			if (ach && ach.previousElementSibling !== panel) panel.after(ach);
 			return;
 		}
 		parkElement(panel);
+	}
+	function insertControlCenterAchievementsHost(panel) {
+		const arp = document.querySelector(`#${CC_PANEL_ID}`);
+		if (arp?.isConnected) {
+			if (panel.previousElementSibling !== arp) arp.after(panel);
+			return;
+		}
+		const container = findControlCenterMount();
+		if (container) {
+			if (panel.parentElement !== container) container.prepend(panel);
+			return;
+		}
+		parkElement(panel);
+	}
+	function watchControlCenterAchievementsHost(panel) {
+		insertControlCenterAchievementsHost(panel);
+		if (panel.dataset.aoHostWatch === "1") return;
+		panel.dataset.aoHostWatch = "1";
+		new MutationObserver(() => {
+			if (!panel.isConnected) {
+				insertControlCenterAchievementsHost(panel);
+				return;
+			}
+			const arp = document.querySelector(`#${CC_PANEL_ID}`);
+			if (arp?.isConnected && panel.previousElementSibling !== arp) insertControlCenterAchievementsHost(panel);
+		}).observe(document.documentElement, {
+			childList: true,
+			subtree: true
+		});
 	}
 	function watchControlCenterHost(panel) {
 		insertControlCenterHost(panel);
@@ -13322,6 +14198,27 @@
 		}
 		insertControlCenterHost(panel);
 	}
+	function watchAchievementsHost(panel) {
+		insertAchievementsHost(panel);
+		if (panel.dataset.aoHostWatch === "1") return;
+		panel.dataset.aoHostWatch = "1";
+		new MutationObserver(() => {
+			if (!panel.isConnected) {
+				insertAchievementsHost(panel);
+				return;
+			}
+			const mount = findAchievementsMount();
+			if (mount && panel.parentElement !== mount && !panel.contains(mount)) {
+				insertAchievementsHost(panel);
+				return;
+			}
+			const parent = panel.parentElement;
+			if (parent === document.body || parent === document.documentElement) insertAchievementsHost(panel);
+		}).observe(document.documentElement, {
+			childList: true,
+			subtree: true
+		});
+	}
 	function mountInlinePanelShadow(host, bodyHtml) {
 		if (host.shadowRoot) host.shadowRoot.replaceChildren();
 		const shadow = host.shadowRoot ?? host.attachShadow({ mode: "open" });
@@ -13352,12 +14249,7 @@
 		return panel.isConnected && panel.dataset.aoGen === String(generation);
 	}
 	function compactLoadoutSummary(data) {
-		const achievementData = data.achievements === void 0 ? void 0 : {
-			snapshot: data.achievements,
-			settings: data.achievementSettings,
-			cooldowns: data.achievementCooldowns
-		};
-		const { todos, trace } = buildActionPlanDetailed(data.result, data.settings, data.siteState, data.nowMs, achievementData);
+		const { todos, trace } = buildActionPlanDetailed(data.result, data.settings, data.siteState, data.nowMs);
 		const isHideRecommendedEquip = isKeepingCurrentLoadout(todos) && Boolean(data.result.current);
 		return {
 			todos,
@@ -13405,7 +14297,6 @@
 			allowAccountActions: areActionsEnabled,
 			trace: summary.trace
 		})}
-    
     ${renderSectionDivider()}
     <div class="ao-row"><strong>${summary.label}:</strong> ${wrapArtifactNames(comboLabel(summary.combo))}</div>
     ${renderBreakdown(summary.combo)}
@@ -13583,7 +14474,6 @@
 		bindVaultDiscountActions(tree, () => {
 			injectControlCenterPanel({ force: true });
 		});
-		bindAchievementOpenButtons(tree, () => injectControlCenterPanel({ force: true }));
 		tree.querySelector("#ao-cc-artifacts")?.addEventListener("click", () => {
 			location.assign("/user-artifacts-room");
 		});
@@ -13591,11 +14481,61 @@
 			injectControlCenterPanel({ force: true });
 		});
 	}
+	function ensureControlCenterAchievementsHost(isHelperEnabled = false) {
+		if (!isHelperEnabled) {
+			document.querySelector(`#${ACH_PANEL_ID}`)?.remove();
+			return;
+		}
+		const existing = document.querySelector(`#${ACH_PANEL_ID}`);
+		if (existing) {
+			watchControlCenterAchievementsHost(existing);
+			return existing;
+		}
+		const panel = document.createElement("div");
+		panel.id = ACH_PANEL_ID;
+		mountInlinePanelShadow(panel, renderPanelSkeleton("Loading achievements…"));
+		watchControlCenterAchievementsHost(panel);
+		return panel;
+	}
+	function renderControlCenterAchievementsBody(data, options = {}) {
+		if (!areAchievementsEnabled(data.settings)) return "";
+		return `
+    ${options.isHydrating ? renderHydrateBanner("Updating in the background…") : ""}
+    ${renderAchievementsControlBlock({
+			isHelperEnabled: true,
+			snapshot: data.achievements,
+			settings: data.achievementSettings,
+			cooldowns: data.achievementCooldowns
+		})}
+    <div class="ao-actions">
+      <button type="button" id="ao-cc-ach-refresh" class="ao-secondary">Refresh</button>
+    </div>
+  `;
+	}
+	async function refreshControlCenterAchievements() {
+		await ensureAchievementSnapshot({ force: true });
+		await injectControlCenterPanel({ force: true });
+	}
+	function paintControlCenterAchievementsPanel(panel, data, isHydrating) {
+		if (!areAchievementsEnabled(data.settings)) {
+			panel.remove();
+			return;
+		}
+		replaceInlinePanelBody(panel, renderControlCenterAchievementsBody(data, { isHydrating }));
+		const tree = panelTree(panel);
+		bindAchievementOpenButtons(tree, refreshControlCenterAchievements);
+		tree.querySelector("#ao-cc-ach-refresh")?.addEventListener("click", () => {
+			refreshControlCenterAchievements();
+		});
+	}
 	function syncControlCenterFromGathered() {
 		if (!isControlCenterPage() || !gatheredCache.current) return;
 		const panel = document.querySelector(`#${CC_PANEL_ID}`);
 		if (!panel?.shadowRoot) return;
-		paintControlCenterPanel(panel, gatheredCache.current, false);
+		const data = gatheredCache.current;
+		paintControlCenterPanel(panel, data, false);
+		const achPanel = ensureControlCenterAchievementsHost(areAchievementsEnabled(data.settings));
+		if (achPanel?.shadowRoot) paintControlCenterAchievementsPanel(achPanel, data, false);
 	}
 	async function injectControlCenterPanel(options = {}) {
 		if (!isControlCenterPage()) return;
@@ -13605,9 +14545,15 @@
 		const generation = bumpPanelGeneration(panel);
 		const paint = (data, isHydrating) => {
 			paintControlCenterPanel(panel, data, isHydrating);
+			if (!isPanelGenerationCurrent(panel, generation)) return;
+			const achPanel = ensureControlCenterAchievementsHost(areAchievementsEnabled(data.settings));
+			if (!achPanel) return;
+			paintControlCenterAchievementsPanel(achPanel, data, isHydrating);
+			achPanel.dataset.aoReady = "1";
 		};
 		await fillPanelFromCacheThenHydrate(panel, generation, paint, options);
-		if (isPanelGenerationCurrent(panel, generation)) panel.dataset.aoReady = "1";
+		if (!isPanelGenerationCurrent(panel, generation)) return;
+		panel.dataset.aoReady = "1";
 	}
 	async function reloadOptimizerFromCache() {
 		const ccPanel = document.querySelector(`#${CC_PANEL_ID}`);
@@ -13696,7 +14642,71 @@
 		insertControlCenterHost(panel);
 		bindClaimAllButtons(panelTree(panel));
 	}
-	async function injectAchievementsPanel(options = {}) {}
+	function ensureAchievementsHost() {
+		const existing = document.querySelector(`#${ACH_PANEL_ID}`);
+		if (existing) {
+			watchAchievementsHost(existing);
+			return existing;
+		}
+		const panel = document.createElement("div");
+		panel.id = ACH_PANEL_ID;
+		mountInlinePanelShadow(panel, renderPanelSkeleton("Loading achievements…"));
+		watchAchievementsHost(panel);
+		return panel;
+	}
+	function renderAchievementsPageBody(data, options = {}) {
+		const hydrateBanner = options.isHydrating ? renderHydrateBanner("Updating in the background…") : "";
+		const isEnabled = areAchievementsEnabled(data.settings);
+		const helperSwitch = `<div class="ao-notify">${renderAchievementHelperSwitch(isEnabled)}</div>`;
+		const autoControls = areAchievementAutomationsEnabled(data.achievementSettings) ? renderAchievementAutoControls(data.achievementSettings) : "";
+		return `
+    <div class="ao-heading">Achievements helper</div>
+    ${hydrateBanner}
+    ${helperSwitch}
+    ${isEnabled ? `${autoControls}
+    ${renderAchievementsPanel({
+			snapshot: data.achievements,
+			settings: data.achievementSettings,
+			isEnabled: true,
+			cooldowns: data.achievementCooldowns
+		})}` : "<div class=\"ao-muted\">Turn on Achievements helper above to track progress here.</div>"}
+    <div class="ao-actions">
+      <button type="button" id="ao-ach-open" class="ao-secondary">Open Full Panel</button>
+      <button type="button" id="ao-ach-refresh" class="ao-secondary">Refresh</button>
+    </div>
+  `;
+	}
+	async function repaintAchievementsPanelSettings() {
+		const panel = document.querySelector(`#${ACH_PANEL_ID}`);
+		if (!panel?.shadowRoot) return;
+		paintAchievementsPanel(panel, await gatherData({ remote: false }), false);
+	}
+	function paintAchievementsPanel(panel, data, isHydrating) {
+		replaceInlinePanelBody(panel, renderAchievementsPageBody(data, { isHydrating }));
+		const tree = panelTree(panel);
+		tree.querySelector("#ao-ach-open")?.addEventListener("click", () => {
+			openOptimizerModal();
+		});
+		tree.querySelector("#ao-ach-refresh")?.addEventListener("click", () => {
+			injectAchievementsPanel({ force: true });
+		});
+		bindAchievementOpenButtons(tree, () => injectAchievementsPanel({ force: true }));
+		bindAchievementHelperSwitch(tree, () => repaintAchievementsPanelSettings());
+		bindAchievementAutomationSwitches(tree, () => repaintAchievementsPanelSettings());
+	}
+	async function injectAchievementsPanel(options = {}) {
+		if (!isAchievementsPage()) return;
+		ensureOptimizerStyles();
+		await waitForAchievementsMount();
+		const panel = ensureAchievementsHost();
+		if (panel.dataset.aoReady === "1" && options.force !== true) return;
+		const generation = bumpPanelGeneration(panel);
+		const paint = (data, isHydrating) => {
+			paintAchievementsPanel(panel, data, isHydrating);
+		};
+		await fillPanelFromCacheThenHydrate(panel, generation, paint, options);
+		if (isPanelGenerationCurrent(panel, generation)) panel.dataset.aoReady = "1";
+	}
 	function initArtifactOptimizer() {
 		ensureOptimizerStyles();
 		watchOptimizerMenuButton();
@@ -13706,14 +14716,19 @@
 			watchControlCenterPage(async (state) => {
 				await applyAsceCommunityHours(state);
 				await saveSiteState(state);
+				const data = await gatherData({ remote: false });
 				const panel = document.querySelector(`#${CC_PANEL_ID}`);
-				if (!panel?.shadowRoot) return;
-				paintControlCenterPanel(panel, await gatherData({ remote: false }), false);
+				if (panel?.shadowRoot) paintControlCenterPanel(panel, data, false);
+				const achPanel = ensureControlCenterAchievementsHost(areAchievementsEnabled(data.settings));
+				if (achPanel?.shadowRoot) paintControlCenterAchievementsPanel(achPanel, data, false);
 			});
 		} else if (isArtifactsShowroomPage()) {
 			ensureShowroomHost();
 			injectShowroomPanel();
-		} else if (isAchievementsPage()) {} else if (isSiteStatePage()) {
+		} else if (isAchievementsPage()) {
+			ensureAchievementsHost();
+			injectAchievementsPanel();
+		} else if (isSiteStatePage()) {
 			if (location.pathname.includes("/battle-pass")) {
 				injectBattlePassClaimBar();
 				watchBattlePassPage(async (state) => {

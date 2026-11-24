@@ -1,6 +1,7 @@
 export {
   buildAchievementTodos,
   achievementProgressLabel,
+  achievementUpdatedLabel,
 } from "./advisor";
 export {
   ACHIEVEMENT_AUTOMATION_COPY,
@@ -8,6 +9,7 @@ export {
   ACHIEVEMENTS,
 } from "./data";
 export {
+  ACHIEVEMENT_STALE_MS,
   ensureAchievementSnapshot,
   isAchievementsPage,
   loadAchievementSnapshot,
@@ -22,7 +24,10 @@ export {
 } from "./settings";
 export {
   bindAchievementAutomationSwitches,
+  bindAchievementHelperSwitch,
   bindAchievementOpenButtons,
   renderAchievementAutoControls,
+  renderAchievementHelperSwitch,
+  renderAchievementsControlBlock,
   renderAchievementsPanel,
 } from "./ui";

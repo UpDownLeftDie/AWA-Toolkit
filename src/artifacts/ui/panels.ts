@@ -41,11 +41,19 @@ import {
 import { showAoToast } from "./dialog";
 import {
   bindAchievementAutomationSwitches,
+  bindAchievementHelperSwitch,
   bindAchievementOpenButtons,
   renderAchievementAutoControls,
+  renderAchievementHelperSwitch,
+  renderAchievementsControlBlock,
   renderAchievementsPanel,
 } from "../../achievements/ui";
-import { isAchievementsPage, waitForAchievementsDocument } from "../../achievements/scraper";
+import {
+  ensureAchievementSnapshot,
+  isAchievementsPage,
+  waitForAchievementsDocument,
+} from "../../achievements/scraper";
+import { areAchievementAutomationsEnabled } from "../../achievements/settings";
 import {
   gatherData,
   gatheredCache,
@@ -405,9 +413,58 @@ function insertControlCenterHost(panel: HTMLElement): void {
     if (panel.parentElement !== container) {
       container.prepend(panel);
     }
+    // Keep the achievements sibling directly under the ARP panel.
+    const ach = document.querySelector<HTMLElement>(`#${ACH_PANEL_ID}`);
+    if (ach && ach.previousElementSibling !== panel) {
+      panel.after(ach);
+    }
     return;
   }
   parkElement(panel);
+}
+
+/**
+Mount the Control Center achievements panel as its own `ao-panel` host
+immediately below the ARP panel.
+*/
+function insertControlCenterAchievementsHost(panel: HTMLElement): void {
+  const arp = document.querySelector<HTMLElement>(`#${CC_PANEL_ID}`);
+  if (arp?.isConnected) {
+    if (panel.previousElementSibling !== arp) {
+      arp.after(panel);
+    }
+    return;
+  }
+  const container = findControlCenterMount();
+  if (container) {
+    if (panel.parentElement !== container) {
+      container.prepend(panel);
+    }
+    return;
+  }
+  parkElement(panel);
+}
+
+function watchControlCenterAchievementsHost(panel: HTMLElement): void {
+  insertControlCenterAchievementsHost(panel);
+  if (panel.dataset.aoHostWatch === "1") {
+    return;
+  }
+  panel.dataset.aoHostWatch = "1";
+  const observer = new MutationObserver(() => {
+    if (!panel.isConnected) {
+      insertControlCenterAchievementsHost(panel);
+      return;
+    }
+    const arp = document.querySelector<HTMLElement>(`#${CC_PANEL_ID}`);
+    if (arp?.isConnected && panel.previousElementSibling !== arp) {
+      insertControlCenterAchievementsHost(panel);
+    }
+  });
+  observer.observe(document.documentElement, {
+    childList: true,
+    subtree: true,
+  });
 }
 
 function watchControlCenterHost(panel: HTMLElement): void {
@@ -592,20 +649,11 @@ function compactLoadoutSummary(data: GatheredData): {
   label: "Currently equipped" | "Recommended";
   hideRecommendedEquip: boolean;
 } {
-  const achievementData =
-    data.achievements === undefined
-      ? undefined
-      : {
-          snapshot: data.achievements,
-          settings: data.achievementSettings,
-          cooldowns: data.achievementCooldowns,
-        };
   const { todos, trace } = buildActionPlanDetailed(
     data.result,
     data.settings,
     data.siteState,
     data.nowMs,
-    achievementData,
   );
   const isHideRecommendedEquip =
     isKeepingCurrentLoadout(todos) && Boolean(data.result.current);
@@ -679,16 +727,11 @@ function renderControlCenterPanelBody(
   const actionsOffNote = areActionsEnabled
     ? ""
     : '<div class="ao-muted">Account actions are off — enable in Open Full Panel.</div>';
-  // Achievement tasks are now merged into the unified action plan via
-  // provideAchievements when achievements are enabled. The separate panel is
-  // suppressed here to prevent double-rendering the same items.
-  const achievementsPanelHtml = "";
   return `
     <div class="ao-heading">Artifact Optimizer</div>
     ${renderCredits({ compact: true })}
     ${hydrateBanner}
     ${renderActionPlan(summary.todos, { allowAccountActions: areActionsEnabled, trace: summary.trace })}
-    ${achievementsPanelHtml}
     ${renderSectionDivider()}
     <div class="ao-row"><strong>${summary.label}:</strong> ${wrapArtifactNames(comboLabel(summary.combo))}</div>
     ${renderBreakdown(summary.combo)}
@@ -973,14 +1016,83 @@ function paintControlCenterPanel(
   bindVaultDiscountActions(tree, () => {
     void injectControlCenterPanel({ force: true });
   });
-  bindAchievementOpenButtons(tree, () =>
-    injectControlCenterPanel({ force: true }),
-  );
   tree.querySelector("#ao-cc-artifacts")?.addEventListener("click", () => {
     location.assign("/user-artifacts-room");
   });
   tree.querySelector("#ao-cc-refresh")?.addEventListener("click", () => {
     void injectControlCenterPanel({ force: true });
+  });
+}
+
+function ensureControlCenterAchievementsHost(
+  isHelperEnabled = false,
+): HTMLElement | undefined {
+  if (!isAchievementsHelperFeatureEnabled || !isHelperEnabled) {
+    document.querySelector(`#${ACH_PANEL_ID}`)?.remove();
+    return undefined;
+  }
+  const existing = document.querySelector<HTMLElement>(`#${ACH_PANEL_ID}`);
+  if (existing) {
+    watchControlCenterAchievementsHost(existing);
+    return existing;
+  }
+  const panel = document.createElement("div");
+  panel.id = ACH_PANEL_ID;
+  mountInlinePanelShadow(panel, renderPanelSkeleton("Loading achievements…"));
+  watchControlCenterAchievementsHost(panel);
+  return panel;
+}
+
+function renderControlCenterAchievementsBody(
+  data: GatheredData,
+  options: { isHydrating?: boolean } = {},
+): string {
+  if (!areAchievementsEnabled(data.settings)) {
+    return "";
+  }
+  const hydrateBanner = options.isHydrating
+    ? renderHydrateBanner("Updating in the background…")
+    : "";
+  const list = renderAchievementsControlBlock({
+    isHelperEnabled: true,
+    snapshot: data.achievements,
+    settings: data.achievementSettings,
+    cooldowns: data.achievementCooldowns,
+  });
+  return `
+    ${hydrateBanner}
+    ${list}
+    <div class="ao-actions">
+      <button type="button" id="ao-cc-ach-refresh" class="ao-secondary">Refresh</button>
+    </div>
+  `;
+}
+
+/**
+Force-refresh achievement progress (and re-paint Control Center panels).
+*/
+async function refreshControlCenterAchievements(): Promise<void> {
+  await ensureAchievementSnapshot({ force: true });
+  await injectControlCenterPanel({ force: true });
+}
+
+function paintControlCenterAchievementsPanel(
+  panel: HTMLElement,
+  data: GatheredData,
+  isHydrating: boolean,
+): void {
+  if (!areAchievementsEnabled(data.settings)) {
+    panel.remove();
+    return;
+  }
+  replaceInlinePanelBody(
+    panel,
+    renderControlCenterAchievementsBody(data, { isHydrating }),
+  );
+  const tree = panelTree(panel);
+  bindAchievementOpenButtons(tree, refreshControlCenterAchievements);
+  tree.querySelector("#ao-cc-ach-refresh")?.addEventListener("click", () => {
+    void refreshControlCenterAchievements();
   });
 }
 
@@ -992,7 +1104,14 @@ function syncControlCenterFromGathered(): void {
   if (!panel?.shadowRoot) {
     return;
   }
-  paintControlCenterPanel(panel, gatheredCache.current, false);
+  const data = gatheredCache.current;
+  paintControlCenterPanel(panel, data, false);
+  const achPanel = ensureControlCenterAchievementsHost(
+    areAchievementsEnabled(data.settings),
+  );
+  if (achPanel?.shadowRoot) {
+    paintControlCenterAchievementsPanel(achPanel, data, false);
+  }
 }
 
 export async function injectControlCenterPanel(
@@ -1010,12 +1129,24 @@ export async function injectControlCenterPanel(
 
   const paint = (data: GatheredData, isHydrating: boolean): void => {
     paintControlCenterPanel(panel, data, isHydrating);
+    if (!isPanelGenerationCurrent(panel, generation)) {
+      return;
+    }
+    const achPanel = ensureControlCenterAchievementsHost(
+      areAchievementsEnabled(data.settings),
+    );
+    if (!achPanel) {
+      return;
+    }
+    paintControlCenterAchievementsPanel(achPanel, data, isHydrating);
+    achPanel.dataset.aoReady = "1";
   };
 
   await fillPanelFromCacheThenHydrate(panel, generation, paint, options);
-  if (isPanelGenerationCurrent(panel, generation)) {
-    panel.dataset.aoReady = "1";
+  if (!isPanelGenerationCurrent(panel, generation)) {
+    return;
   }
+  panel.dataset.aoReady = "1";
 }
 
 /**
@@ -1197,24 +1328,47 @@ function renderAchievementsPageBody(
     ? renderHydrateBanner("Updating in the background…")
     : "";
   const isEnabled = areAchievementsEnabled(data.settings);
-  const helper = isEnabled
-    ? renderAchievementsPanel({
-        snapshot: data.achievements,
-        settings: data.achievementSettings,
-        isEnabled: true,
-        cooldowns: data.achievementCooldowns,
-      })
-    : '<div class="ao-muted">Turn on Achievements helper in Open Full Panel to track progress here.</div>';
+  const helperSwitch = isAchievementsHelperFeatureEnabled
+    ? `<div class="ao-notify">${renderAchievementHelperSwitch(isEnabled)}</div>`
+    : "";
+  // Profile page: only show automation controls when already on (turn on elsewhere).
+  const autoControls = areAchievementAutomationsEnabled(
+    data.achievementSettings,
+  )
+    ? renderAchievementAutoControls(data.achievementSettings)
+    : "";
+  const body = isEnabled
+    ? `${autoControls}
+    ${renderAchievementsPanel({
+      snapshot: data.achievements,
+      settings: data.achievementSettings,
+      isEnabled: true,
+      cooldowns: data.achievementCooldowns,
+    })}`
+    : '<div class="ao-muted">Turn on Achievements helper above to track progress here.</div>';
   return `
     <div class="ao-heading">Achievements helper</div>
     ${hydrateBanner}
-    ${renderAchievementAutoControls(data.achievementSettings)}
-    ${helper}
+    ${helperSwitch}
+    ${body}
     <div class="ao-actions">
       <button type="button" id="ao-ach-open" class="ao-secondary">Open Full Panel</button>
       <button type="button" id="ao-ach-refresh" class="ao-secondary">Refresh</button>
     </div>
   `;
+}
+
+/**
+Re-paint achievements page from GM cache only — no remote hydrate banner.
+Used after settings toggles that do not change scraped progress.
+*/
+async function repaintAchievementsPanelSettings(): Promise<void> {
+  const panel = document.querySelector<HTMLElement>(`#${ACH_PANEL_ID}`);
+  if (!panel?.shadowRoot) {
+    return;
+  }
+  const data = await gatherData({ remote: false });
+  paintAchievementsPanel(panel, data, false);
 }
 
 function paintAchievementsPanel(
@@ -1236,8 +1390,9 @@ function paintAchievementsPanel(
   bindAchievementOpenButtons(tree, () =>
     injectAchievementsPanel({ force: true }),
   );
+  bindAchievementHelperSwitch(tree, () => repaintAchievementsPanelSettings());
   bindAchievementAutomationSwitches(tree, () =>
-    injectAchievementsPanel({ force: true }),
+    repaintAchievementsPanelSettings(),
   );
 }
 
@@ -1273,15 +1428,17 @@ export function initArtifactOptimizer(): void {
     watchControlCenterPage(async (state) => {
       await applyAsceCommunityHours(state);
       await saveSiteState(state);
+      const data = await gatherData({ remote: false });
       const panel = document.querySelector<HTMLElement>(`#${CC_PANEL_ID}`);
-      if (!panel?.shadowRoot) {
-        return;
+      if (panel?.shadowRoot) {
+        paintControlCenterPanel(panel, data, false);
       }
-      paintControlCenterPanel(
-        panel,
-        await gatherData({ remote: false }),
-        false,
+      const achPanel = ensureControlCenterAchievementsHost(
+        areAchievementsEnabled(data.settings),
       );
+      if (achPanel?.shadowRoot) {
+        paintControlCenterAchievementsPanel(achPanel, data, false);
+      }
     });
   } else if (isArtifactsShowroomPage()) {
     ensureShowroomHost();

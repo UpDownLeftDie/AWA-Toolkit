@@ -148,16 +148,25 @@ async function gatherAchievements(options: {
     await saveAchievementSnapshot(achievements);
     return achievements;
   }
-  if (options.isRemote) {
+
+  const cached = await loadAchievementSnapshot();
+  const needsFetch =
+    options.isRemote ||
+    options.shouldForceSite ||
+    requiresAchievementHydrate(cached, true, options.shouldForceSite);
+
+  // Same pattern as Battle Pass / site state: fetch `/member/…/achievements`
+  // in the background whenever the cache is missing, thin, or stale.
+  if (needsFetch) {
     const ensureOptions: { force: boolean; username?: string } = {
-      force: options.shouldForceSite,
+      force: options.shouldForceSite || !cached || Object.keys(cached.items).length === 0,
     };
     if (options.username !== undefined) {
       ensureOptions.username = options.username;
     }
     return ensureAchievementSnapshot(ensureOptions);
   }
-  return loadAchievementSnapshot();
+  return cached;
 }
 
 export interface GatheredData {

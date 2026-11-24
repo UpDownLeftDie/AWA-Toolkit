@@ -393,6 +393,14 @@ function buildPanelShadowCss(variant: PanelShadowVariant): string {
       margin: 12px 0 4px;
       width: 100%;
     }
+    .ao-achievements-block {
+      display: block;
+      margin: 0 0 4px;
+      width: 100%;
+    }
+    .ao-achievements-block .ao-notify {
+      margin-bottom: 8px;
+    }
     .ao-notify > .ao-switch + .ao-switch {
       margin-top: 10px;
     }

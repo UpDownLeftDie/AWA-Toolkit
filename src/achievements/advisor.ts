@@ -1,9 +1,13 @@
 import type { ActionTodo } from "../artifacts/plan/types";
 import { ACHIEVEMENTS, type AchievementDefinition } from "./data";
-import type { AchievementSnapshot } from "./scraper";
+import {
+  resolveAchievementsUrl,
+  type AchievementSnapshot,
+} from "./scraper";
 import {
   isAchievementAutomationEnabled,
   utcDateString,
+  utcMonthString,
   type AchievementSettings,
   type AutomationCooldowns,
 } from "./settings";
@@ -12,17 +16,30 @@ const MAX_ACTION_TODOS = 8;
 const MAX_INFORM_TODOS = 3;
 
 const BORDER_GROUPS = new Set([
+  "border-first",
   "border-use",
   "border-daily",
   "border-monthly",
 ]);
 const AVATAR_GROUPS = new Set(["avatar-daily", "avatar-monthly"]);
+const ABOUT_ME_ID = "add-about-me";
 
 function isAchievementEarned(
   snapshot: AchievementSnapshot | undefined,
   id: string,
 ): boolean {
   return snapshot?.items[id]?.isEarned === true;
+}
+
+/**
+Only advise when the scrape positively marked an item unearned. Missing keys
+(unscraped / new catalog entries) are unknown — not assumed incomplete.
+*/
+function isAchievementKnownUnearned(
+  snapshot: AchievementSnapshot | undefined,
+  id: string,
+): boolean {
+  return snapshot?.items[id]?.isEarned === false;
 }
 
 function nextUnearnedInGroup(
@@ -32,14 +49,25 @@ function nextUnearnedInGroup(
   const chain = ACHIEVEMENTS.filter(
     (achievement) => achievement.group === group,
   ).toSorted((left, right) => left.rank - right.rank);
-  return chain.find(
-    (achievement) => !isAchievementEarned(snapshot, achievement.id),
+  // If nothing in the chain was scraped, skip the group (avoid listing
+  // every achievement when the snapshot is empty or partial).
+  const isGroupScraped = chain.some(
+    (achievement) => snapshot?.items[achievement.id] !== undefined,
+  );
+  if (!isGroupScraped) {
+    return undefined;
+  }
+  return chain.find((achievement) =>
+    isAchievementKnownUnearned(snapshot, achievement.id),
   );
 }
 
 function collectNextUnearned(
   snapshot: AchievementSnapshot | undefined,
 ): AchievementDefinition[] {
+  if (!snapshot || Object.keys(snapshot.items).length === 0) {
+    return [];
+  }
   const seenGroups = new Set<string>();
   const nexts: AchievementDefinition[] = [];
   for (const achievement of ACHIEVEMENTS) {
@@ -72,7 +100,12 @@ function isSatisfiedForCurrentInterval(
     if (BORDER_GROUPS.has(achievement.group)) {
       return cooldowns.borderRotatedDate === today;
     }
-    return AVATAR_GROUPS.has(achievement.group) ? cooldowns.avatarRotatedDate === today : achievement.id === "add-about-me" && cooldowns.aboutMeSubmittedMonth !== undefined;
+    if (AVATAR_GROUPS.has(achievement.group)) {
+      return cooldowns.avatarRotatedDate === today;
+    }
+    // About-me: never permanently hide here — buildAchievementTodos shows a
+    // muted "waiting for credit" row for the submit month instead.
+    return false;
   }
   if (key === "visitPages") {
     return cooldowns.visitPagesDate === today;
@@ -120,15 +153,31 @@ function buildTodo(
   return todo;
 }
 
+function progressNeededTodo(
+  snapshot: AchievementSnapshot | undefined,
+): ActionTodo {
+  const href = resolveAchievementsUrl(snapshot?.username);
+  const todo: ActionTodo = {
+    text: "Load achievement progress",
+    reasons: [
+      {
+        text: "We fetch your achievements page in the background (like Battle Pass). If this stays, use the button to retry or open the page.",
+      },
+    ],
+    urgency: { kind: "action", readyAtMs: 0, durationMs: 0 },
+  };
+  if (href) {
+    todo.openHref = href;
+    todo.openHrefLabel = "Load progress";
+    // Background fetch + scrape (see bindAchievementOpenButtons).
+    todo.visitInBackground = true;
+  }
+  return todo;
+}
+
 function emptyTodos(snapshot: AchievementSnapshot | undefined): ActionTodo[] {
   if (!snapshot || Object.keys(snapshot.items).length === 0) {
-    return [
-      {
-        tone: "muted",
-        text: "Achievements page not scraped yet — Refresh to load progress",
-        urgency: { kind: "info", readyAtMs: 0, durationMs: 0 },
-      },
-    ];
+    return [progressNeededTodo(snapshot)];
   }
   return [
     {
@@ -137,6 +186,40 @@ function emptyTodos(snapshot: AchievementSnapshot | undefined): ActionTodo[] {
       urgency: { kind: "info", readyAtMs: 0, durationMs: 0 },
     },
   ];
+}
+
+function aboutMeWaitingTodo(
+  achievement: AchievementDefinition,
+): ActionTodo {
+  return {
+    text: achievement.title,
+    reasons: [{ text: "Submitted this month — waiting for credit" }],
+    tone: "muted",
+    urgency: { kind: "info", readyAtMs: 0, durationMs: 0 },
+  };
+}
+
+function isAboutMeWaitingCredit(
+  achievement: AchievementDefinition,
+  snapshot: AchievementSnapshot | undefined,
+  cooldowns: AutomationCooldowns,
+  thisMonth: string,
+): boolean {
+  return (
+    achievement.id === ABOUT_ME_ID &&
+    cooldowns.aboutMeSubmittedMonth === thisMonth &&
+    !isAchievementEarned(snapshot, ABOUT_ME_ID)
+  );
+}
+
+function pushCapped(
+  list: ActionTodo[],
+  todo: ActionTodo,
+  max: number,
+): void {
+  if (list.length < max) {
+    list.push(todo);
+  }
 }
 
 /**
@@ -152,26 +235,46 @@ export function buildAchievementTodos(
   const actions: ActionTodo[] = [];
   const infos: ActionTodo[] = [];
   const today = utcDateString();
+  const thisMonth = utcMonthString();
   const collected = collectNextUnearned(snapshot).filter(
     (next) => !isSatisfiedForCurrentInterval(next, settings, cooldowns, today),
   );
   for (const next of collected) {
-    const todo = buildTodo(next, settings, snapshot?.username);
-    if (next.kind === "inform") {
-      if (infos.length < MAX_INFORM_TODOS) {
-        infos.push(todo);
-      }
+    if (isAboutMeWaitingCredit(next, snapshot, cooldowns, thisMonth)) {
+      pushCapped(infos, aboutMeWaitingTodo(next), MAX_INFORM_TODOS);
       continue;
     }
-    if (actions.length < MAX_ACTION_TODOS) {
-      actions.push(todo);
+    const todo = buildTodo(next, settings, snapshot?.username);
+    if (next.kind === "inform") {
+      pushCapped(infos, todo, MAX_INFORM_TODOS);
+      continue;
     }
+    pushCapped(actions, todo, MAX_ACTION_TODOS);
   }
-  return actions.length === 0 && infos.length === 0 ? emptyTodos(snapshot) : [...actions, ...infos];
+  return actions.length === 0 && infos.length === 0
+    ? emptyTodos(snapshot)
+    : [...actions, ...infos];
 }
 
 export function achievementProgressLabel(
   snapshot: AchievementSnapshot | undefined,
 ): string {
   return !snapshot || snapshot.totalCount <= 0 ? "progress unknown" : `${snapshot.earnedCount}/${snapshot.totalCount} earned`;
+}
+
+/**
+Locale timestamp for when achievement progress was last scraped (`scrapedAt`).
+*/
+export function achievementUpdatedLabel(
+  snapshot: AchievementSnapshot | undefined,
+): string {
+  const scrapedAt = snapshot?.scrapedAt;
+  if (!scrapedAt) {
+    return "Updated: never";
+  }
+  const at = Date.parse(scrapedAt);
+  if (Number.isNaN(at) || at <= 0) {
+    return "Updated: never";
+  }
+  return `Updated: ${new Date(at).toLocaleString()}`;
 }

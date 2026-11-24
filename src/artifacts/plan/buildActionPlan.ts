@@ -1,7 +1,6 @@
 import type { RankDecision, TaskCandidate } from '../../planner';
 import { debugRankTrace, lifetimeArpPolicy, rank } from '../../planner';
 import type { OptimizerResult, ScoredCombo } from '../optimizer';
-import { areAchievementsEnabled } from '../settings';
 import type { ArtifactOptimizerSettings } from '../settings';
 import type { SiteState } from '../siteState';
 import {
@@ -22,8 +21,6 @@ import {
   provideDiscordPoll,
   provideEquip,
 } from './providers';
-import type { AchievementPlanData } from './providers/achievements';
-import { provideAchievements } from './providers/achievements';
 import { taskToActionTodo } from './todoAdapter';
 import type { ActionTodo } from './types';
 import { isCautionTodo } from './types';
@@ -57,11 +54,6 @@ export interface PlanContext {
   };
   discord: { slot: DiscordPollSlot; todo: ActionTodo } | undefined;
   beforeSwapCount: number;
-  /**
-  Achievement data for the unified plan. Present only when achievements are
-  enabled in settings; undefined otherwise so the provider is a no-op.
-  */
-  achievementData: AchievementPlanData | undefined;
 }
 
 type PlanProvider = (context: PlanContext) => TaskCandidate[];
@@ -72,9 +64,6 @@ const PLAN_PROVIDERS: readonly PlanProvider[] = [
   provideActivities,
   provideDiscordPoll,
   provideEquip,
-  // Achievement tasks are only emitted when achievementData is populated (i.e.
-  // when areAchievementsEnabled returns true for the current settings).
-  provideAchievements,
 ];
 
 function computePlanContext(
@@ -82,7 +71,6 @@ function computePlanContext(
   settings: ArtifactOptimizerSettings,
   siteState: SiteState,
   nowMs: number,
-  achievementData?: AchievementPlanData,
 ): PlanContext {
   const best = result.best;
   const current = result.current;
@@ -134,13 +122,6 @@ function computePlanContext(
   const beforeSwapCount =
     sequenced.beforeSwap.length + (discord?.slot === 'before' ? 1 : 0);
 
-  // Only pass achievement data to the provider when the feature is enabled in
-  // settings. This guards the gate centrally so callers don't have to.
-  const resolvedAchievementData =
-    achievementData !== undefined && areAchievementsEnabled(settings)
-      ? achievementData
-      : undefined;
-
   return {
     result,
     settings,
@@ -161,7 +142,6 @@ function computePlanContext(
     sequenced,
     discord,
     beforeSwapCount,
-    achievementData: resolvedAchievementData,
   };
 }
 
@@ -213,9 +193,8 @@ function buildPlanInternal(
   settings: ArtifactOptimizerSettings,
   siteState: SiteState,
   nowMs: number,
-  achievementData?: AchievementPlanData,
 ): { todos: ActionTodo[]; trace: RankDecision[] } {
-  const context = computePlanContext(result, settings, siteState, nowMs, achievementData);
+  const context = computePlanContext(result, settings, siteState, nowMs);
   const candidates = wireEquipConstraints(
     PLAN_PROVIDERS.flatMap((provider) => provider(context)),
   );
@@ -243,9 +222,8 @@ export function buildActionPlan(
   settings: ArtifactOptimizerSettings,
   siteState: SiteState,
   nowMs = Date.now(),
-  achievementData?: AchievementPlanData,
 ): ActionTodo[] {
-  return buildPlanInternal(result, settings, siteState, nowMs, achievementData).todos;
+  return buildPlanInternal(result, settings, siteState, nowMs).todos;
 }
 
 /**
@@ -256,9 +234,8 @@ export function buildActionPlanDetailed(
   settings: ArtifactOptimizerSettings,
   siteState: SiteState,
   nowMs = Date.now(),
-  achievementData?: AchievementPlanData,
 ): { todos: ActionTodo[]; trace: RankDecision[] } {
-  return buildPlanInternal(result, settings, siteState, nowMs, achievementData);
+  return buildPlanInternal(result, settings, siteState, nowMs);
 }
 
 /**

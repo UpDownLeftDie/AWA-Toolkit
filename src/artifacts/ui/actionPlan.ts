@@ -1,7 +1,11 @@
 // Domain types and planning logic now live in artifacts/plan/.
 // This module re-exports for backward compatibility and keeps render-only code.
 
-export { buildActionPlan, buildActionPlanDetailed, isKeepingCurrentLoadout } from '../plan/buildActionPlan';
+export {
+  buildActionPlan,
+  buildActionPlanDetailed,
+  isKeepingCurrentLoadout,
+} from '../plan/buildActionPlan';
 export type {
   ActionTodo,
   ActionTodoChain,
@@ -11,13 +15,11 @@ export type {
   ActionTone,
   EquipComboKey,
 } from '../plan/types';
-import { isCautionTodo, type ActionTodo } from '../plan/types';
 import type { RankDecision } from '../../planner';
 import { formatMs } from '../loadoutFormat';
+import { isCautionTodo, type ActionTodo } from '../plan/types';
+import { battlePassClaimButtonLabel } from '../siteState/battlePass';
 import { wrapArtifactNames } from './artifactTip';
-import {
-  battlePassClaimButtonLabel,
-} from '../siteState/battlePass';
 import { escapeHtml } from './loadoutPlan';
 
 // ── Render helpers (UI-only, not moved to plan/) ───────────────────────
@@ -78,10 +80,7 @@ function renderTodoActionButton(
   if (todo.openTwitchStream === true) {
     return '<button type="button" class="ao-twitch-btn">Open stream</button>';
   }
-  if (
-    todo.startBattlePass === true &&
-    options.allowAccountActions === true
-  ) {
+  if (todo.startBattlePass === true && options.allowAccountActions === true) {
     return renderAccountTodoButton(todo);
   }
   if (todo.openHref) {
@@ -122,6 +121,112 @@ export function renderActionPlanContents(
   `;
 }
 
+function truncateHeadline(text: string, max = 72): string {
+  const trimmed = text.trim();
+  return trimmed.length <= max ? trimmed : `${trimmed.slice(0, max - 1)}…`;
+}
+
+const DECIDED_BY_PHRASE: Record<string, string> = {
+  kind: 'Ordered ahead of later/scheduled work',
+  readyAt: 'Sooner unlock than the next step',
+  chain: 'Swap sequencing',
+  duration: 'Shorter step first',
+  slack: 'Tighter deadline',
+  arp: 'Higher ARP than the next step',
+};
+
+function readyAtMsFromReasons(
+  reasons: readonly string[],
+  todo: ActionTodo | undefined,
+): number | undefined {
+  const readyToken = reasons.find((reason) => reason.startsWith('readyAt:'));
+  return readyToken
+    ? Number(readyToken.slice('readyAt:'.length))
+    : todo?.urgency?.readyAtMs;
+}
+
+function explainSchedule(readyAtMs: number | undefined): string {
+  return readyAtMs !== undefined && readyAtMs > 0
+    ? `Waiting — ready in ${formatMs(readyAtMs)}`
+    : 'Scheduled for later';
+}
+
+function explainTiming(
+  reasons: readonly string[],
+  todo: ActionTodo | undefined,
+): string | undefined {
+  const readyAtMs = readyAtMsFromReasons(reasons, todo);
+  if (
+    reasons.includes('kind:schedule') ||
+    (readyAtMs !== undefined && readyAtMs > 0)
+  ) {
+    return explainSchedule(readyAtMs);
+  }
+  if (readyAtMs === 0 || reasons.includes('kind:action')) {
+    return 'Ready now';
+  }
+  if (reasons.includes('kind:info')) {
+    return 'Informational';
+  }
+  return undefined;
+}
+
+function explainChainPosition(reasons: readonly string[]): string | undefined {
+  if (reasons.includes('chain:before')) {
+    return 'Before the loadout swap';
+  }
+  if (reasons.includes('chain:equip')) {
+    return 'Loadout swap step';
+  }
+  if (reasons.includes('chain:after')) {
+    return 'After the loadout swap';
+  }
+  return undefined;
+}
+
+function explainPredecessors(
+  reasons: readonly string[],
+  headlinesByTaskId: Map<string, string>,
+): string[] {
+  const parts: string[] = [];
+  for (const reason of reasons) {
+    if (!reason.startsWith('after:')) {
+      continue;
+    }
+    const predecessor = headlinesByTaskId.get(reason.slice('after:'.length));
+    parts.push(
+      predecessor
+        ? `After “${truncateHeadline(predecessor, 40)}”`
+        : 'After an earlier step',
+    );
+  }
+  return parts;
+}
+
+function explainArpStake(reasons: readonly string[]): string | undefined {
+  const arpToken = reasons.find((reason) => reason.startsWith('arp:'));
+  if (!arpToken) {
+    return undefined;
+  }
+  const arp = Number(arpToken.slice('arp:'.length));
+  return Number.isFinite(arp) && arp > 0
+    ? `~${String(Math.round(arp))} ARP at stake`
+    : undefined;
+}
+
+function explainDecidedBy(reasons: readonly string[]): string | undefined {
+  const decidedBy = reasons
+    .find((reason) => reason.startsWith('decidedBy:'))
+    ?.slice('decidedBy:'.length);
+  return decidedBy ? DECIDED_BY_PHRASE[decidedBy] : undefined;
+}
+
+function pushPhrase(parts: string[], phrase: string | undefined): void {
+  if (phrase) {
+    parts.push(phrase);
+  }
+}
+
 /**
 Turn planner rank tokens into short plain-English phrases for users.
 */
@@ -139,96 +244,28 @@ function explainRankDecision(
   if (reasons.includes('pinFirst')) {
     parts.push('First — do this before anything else');
   }
-
-  const readyToken = reasons.find((reason) => reason.startsWith('readyAt:'));
-  const readyAtMs = readyToken
-    ? Number(readyToken.slice('readyAt:'.length))
-    : todo?.urgency?.readyAtMs;
-  if (reasons.includes('kind:schedule') || (readyAtMs !== undefined && readyAtMs > 0)) {
-    parts.push(
-      readyAtMs !== undefined && readyAtMs > 0
-        ? `Waiting — ready in ${formatMs(readyAtMs)}`
-        : 'Scheduled for later',
-    );
-  } else if (reasons.includes('kind:action') || readyAtMs === 0) {
-    parts.push('Ready now');
-  } else if (reasons.includes('kind:info')) {
-    parts.push('Informational');
-  }
-
-  if (reasons.includes('chain:before')) {
-    parts.push('Before the loadout swap');
-  } else if (reasons.includes('chain:equip')) {
-    parts.push('Loadout swap step');
-  } else if (reasons.includes('chain:after')) {
-    parts.push('After the loadout swap');
-  }
-
-  for (const reason of reasons) {
-    if (!reason.startsWith('after:')) {
-      continue;
-    }
-    const predecessorId = reason.slice('after:'.length);
-    const predecessor = headlinesByTaskId.get(predecessorId);
-    parts.push(
-      predecessor
-        ? `After “${truncateHeadline(predecessor, 40)}”`
-        : 'After an earlier step',
-    );
-  }
-
-  const arpToken = reasons.find((reason) => reason.startsWith('arp:'));
-  if (arpToken) {
-    const arp = Number(arpToken.slice('arp:'.length));
-    if (Number.isFinite(arp) && arp > 0) {
-      parts.push(`~${String(Math.round(arp))} ARP at stake`);
-    }
-  }
-
-  const decidedBy = reasons
-    .find((reason) => reason.startsWith('decidedBy:'))
-    ?.slice('decidedBy:'.length);
-  if (decidedBy === 'kind') {
-    parts.push('Ordered ahead of later/scheduled work');
-  } else if (decidedBy === 'readyAt') {
-    parts.push('Sooner unlock than the next step');
-  } else if (decidedBy === 'chain') {
-    parts.push('Swap sequencing');
-  } else if (decidedBy === 'duration') {
-    parts.push('Shorter step first');
-  } else if (decidedBy === 'slack') {
-    parts.push('Tighter deadline');
-  } else if (decidedBy === 'arp') {
-    parts.push('Higher ARP than the next step');
-  }
-
+  pushPhrase(parts, explainTiming(reasons, todo));
+  pushPhrase(parts, explainChainPosition(reasons));
+  parts.push(...explainPredecessors(reasons, headlinesByTaskId));
+  pushPhrase(parts, explainArpStake(reasons));
+  pushPhrase(parts, explainDecidedBy(reasons));
   if (reasons.includes('constraintCycle')) {
     parts.push('Dependency loop broken by ARP rules');
   }
 
   const unique = [...new Set(parts.filter((part) => part.length > 0))];
-  return unique.length > 0 ? unique.join(' · ') : 'Ranked by lifetime ARP rules';
+  return unique.length > 0
+    ? unique.join(' · ')
+    : 'Ranked by lifetime ARP rules';
 }
 
-function truncateHeadline(text: string, max = 72): string {
-  const trimmed = text.trim();
-  return trimmed.length <= max ? trimmed : `${trimmed.slice(0, max - 1)}…`;
-}
-
-function renderRankTrace(
-  trace: RankDecision[],
-  todos: ActionTodo[],
-): string {
+function renderRankTrace(trace: RankDecision[], todos: ActionTodo[]): string {
   if (trace.length === 0) {
     return '';
   }
   const headlinesByTaskId = new Map<string, string>();
-  for (let i = 0; i < trace.length; i += 1) {
-    const decision = trace[i];
-    if (decision === undefined) {
-      continue;
-    }
-    const todo = todos[i];
+  for (const [index, decision] of trace.entries()) {
+    const todo = todos[index];
     headlinesByTaskId.set(decision.taskId, todo?.text ?? decision.taskId);
   }
   const items = trace
@@ -251,8 +288,6 @@ export function renderActionPlan(
   todos: ActionTodo[],
   options: { allowAccountActions?: boolean; trace?: RankDecision[] } = {},
 ): string {
-  const traceHtml = options.trace
-    ? renderRankTrace(options.trace, todos)
-    : '';
+  const traceHtml = options.trace ? renderRankTrace(options.trace, todos) : '';
   return `<div id="ao-action-plan">${renderActionPlanContents(todos, options)}${traceHtml}</div>`;
 }

@@ -1,5 +1,5 @@
 import type { ArtifactDefinition, ArtifactTier } from '../data';
-import { displayNameFor } from '../data';
+import { displayNameFor, resolveArtifactByDisplayName } from '../data';
 import type { OwnedArtifact } from '../scraper';
 import {
   battlePassClaimableArp,
@@ -15,6 +15,7 @@ import {
   nextLockedCommunityArpMilestone,
   primaryExpiringFragmentOffer,
   vaultPayArp,
+  type MarketplaceFragmentOffer,
 } from '../siteState';
 import { collectBonuses } from './bonuses';
 import {
@@ -149,8 +150,19 @@ Soft guidance for timed Artifacts/Fragments marketplace listings. Never
 replaces the ARP-optimal loadout — only surfaces buy-before-expiry timing
 and how it lines up with Game Vault discount windows.
 */
+function isOwnedArtifactOffer(
+  offer: MarketplaceFragmentOffer,
+  ownedFamilyIds: ReadonlySet<string>,
+): boolean {
+  const resolved = resolveArtifactByDisplayName(offer.name);
+  return (
+    resolved !== undefined && ownedFamilyIds.has(resolved.definition.id)
+  );
+}
+
 export function appendMarketplaceFragmentNotes(
   notes: string[],
+  owned: OwnedArtifact[],
   equipped: OwnedArtifact[],
   best: ScoredCombo | undefined,
   discountCombo: ScoredCombo | undefined,
@@ -167,11 +179,16 @@ export function appendMarketplaceFragmentNotes(
     best,
     discountCombo,
   );
+  const ownedFamilyIds = new Set(owned.map((artifact) => artifact.familyId));
   const offer = primaryExpiringFragmentOffer(
     context.siteState,
     discountPct,
     availableArp,
     now,
+    {
+      shouldSkip: (candidate) =>
+        isOwnedArtifactOffer(candidate, ownedFamilyIds),
+    },
   );
   if (!offer) {
     return;
@@ -243,6 +260,7 @@ export function collectNotes(
   appendCommunityEventNotes(notes, owned, equipped, context);
   appendMarketplaceFragmentNotes(
     notes,
+    owned,
     equipped,
     best,
     discountCombo,

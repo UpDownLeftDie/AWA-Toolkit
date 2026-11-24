@@ -4,8 +4,9 @@ import {
   type AchievementSettings,
   type AutomationCooldowns,
 } from '../../achievements/settings';
-import {
+  import {
   renderAchievementAutoControls,
+  renderAchievementHelperSwitch,
   renderAchievementsPanel,
 } from '../../achievements/ui';
 import { ARTIFACTS, CREDIT_SOURCES, TIER_LABELS } from '../data';
@@ -697,12 +698,7 @@ export function renderResultBody(
   const achievementsBodyClass = areAchievementsOn ? '' : ' ao-body--off';
   const achievementsSettingsHtml = isAchievementsHelperFeatureEnabled
     ? `<div class="ao-notify">
-      ${renderNotifySwitch({
-        id: 'ao-achievements-enabled',
-        title: 'Achievements helper',
-        hint: 'Show what to do next for unearned achievements. Turn on Run automatically below to visit pages in the background.',
-        isChecked: areAchievementsOn,
-      })}
+      ${renderAchievementHelperSwitch(areAchievementsOn)}
       <div class="ao-body${achievementsBodyClass}">
         ${renderAchievementAutoControls(achievementSettings)}
       </div>

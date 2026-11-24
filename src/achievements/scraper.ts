@@ -22,13 +22,25 @@ import {
 } from './settings';
 
 const SNAPSHOT_KEY = 'achievementSnapshot';
-const STALE_MS = 6 * 60 * 60 * 1000;
+/**
+How long a good scrape stays fresh before background hydrate re-fetches.
+Same ballpark as inventory / caps (6h); Refresh still force-fetches anytime.
+*/
+export const ACHIEVEMENT_STALE_MS = 6 * 60 * 60 * 1000;
 const FORCE_REFRESH_COOLDOWN_MS = 5 * 1000;
-const IFRAME_TIMEOUT_MS = 15_000;
+const IFRAME_TIMEOUT_MS = 8000;
 const IFRAME_SETTLE_MS = 400;
 const PERSONALIZATION_PATH = '/account/personalization';
 const AUTOMATION_ARTICLE_LIMIT = 10;
 const AUTOMATION_VIDEO_LIMIT = 10;
+/*
+Per-path ceiling for fetch + iframe fallback during automations.
+*/
+const AUTOMATION_VISIT_TIMEOUT_MS = 5000;
+/*
+Soft wall-clock budget for article/video visit batches.
+*/
+const AUTOMATION_BATCH_BUDGET_MS = 20_000;
 const NOT_EARNED_PATTERN = /not earned yet/i;
 const COUNT_MARKER = ' achievements';
 const CARD_SELECTOR = [
@@ -111,7 +123,9 @@ function emptySnapshot(username: string | undefined): AchievementSnapshot {
     scrapedAt: new Date(0).toISOString(),
     username,
     earnedCount: 0,
-    totalCount: ACHIEVEMENTS.length,
+    // Live total comes from the page header (e.g. 77/118). Do not pretend the
+    // local catalog length is the site total before a scrape.
+    totalCount: 0,
     items: {},
   };
 }
@@ -430,13 +444,23 @@ export function scrapeAchievementsFromDocument(
   };
 }
 
+/**
+Minimum items before a scrape counts as usable. Thin parses (login wall,
+partial DOM) are treated as stale so the next hydrate re-fetches.
+*/
+const MIN_FRESH_ITEM_COUNT = 15;
+
 function isSnapshotFresh(snapshot: AchievementSnapshot | undefined): boolean {
-  if (!snapshot || Object.keys(snapshot.items).length === 0) {
+  if (!snapshot) {
+    return false;
+  }
+  const itemCount = Object.keys(snapshot.items).length;
+  if (itemCount < MIN_FRESH_ITEM_COUNT) {
     return false;
   }
   const now = Date.now();
   const scrapedAt = Date.parse(snapshot.scrapedAt);
-  return !Number.isNaN(scrapedAt) && now - scrapedAt < STALE_MS;
+  return !Number.isNaN(scrapedAt) && now - scrapedAt < ACHIEVEMENT_STALE_MS;
 }
 
 export async function loadAchievementSnapshot(): Promise<
@@ -542,10 +566,15 @@ function articlePathsFromNews(document_: Document): string[] {
   const paths: string[] = [];
   const seen = new Set<string>();
   for (const link of document_.querySelectorAll<HTMLAnchorElement>(
-    'a[href*="/ucf/show/"], a[href*="/news/"], a[href*="/blogs/"]',
+    'a[href*="/ucf/show/"], a[href*="/ucf/News"], a[href*="/blogs/"]',
   )) {
     const path = link.pathname;
-    if (path === NEWS_PATH || !path || seen.has(path)) {
+    if (
+      path === NEWS_PATH ||
+      path === '/ucf/News' ||
+      !path ||
+      seen.has(path)
+    ) {
       continue;
     }
     seen.add(path);
@@ -561,10 +590,15 @@ function videoPathsFromVideos(document_: Document): string[] {
   const paths: string[] = [];
   const seen = new Set<string>();
   for (const link of document_.querySelectorAll<HTMLAnchorElement>(
-    'a[href*="/ucf/show/"], a[href*="/videos/"], a[href*="/video/"]',
+    'a[href*="/ucf/show/"], a[href*="/ucf/Video"], a[href*="/video/"]',
   )) {
     const path = link.pathname;
-    if (path === VIDEOS_PATH || !path || seen.has(path)) {
+    if (
+      path === VIDEOS_PATH ||
+      path === '/ucf/Video' ||
+      !path ||
+      seen.has(path)
+    ) {
       continue;
     }
     seen.add(path);
@@ -576,12 +610,58 @@ function videoPathsFromVideos(document_: Document): string[] {
   return paths;
 }
 
+/**
+Race a promise against a timeout. Exported for unit tests.
+*/
+export async function raceWithTimeout<T>(
+  promise: Promise<T>,
+  timeoutMs: number,
+): Promise<T | undefined> {
+  if (timeoutMs <= 0) {
+    return undefined;
+  }
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([
+      promise,
+      new Promise<undefined>((resolve) => {
+        timer = setTimeout(() => {
+          resolve(undefined);
+        }, timeoutMs);
+      }),
+    ]);
+  } finally {
+    if (timer !== undefined) {
+      clearTimeout(timer);
+    }
+  }
+}
+
 async function visitPath(path: string): Promise<void> {
   const fetched = await fetchDocument(path);
   if (fetched) {
     return;
   }
   await openPageDocument(path);
+}
+
+/**
+Visit paths sequentially under a wall-clock budget so iframe fallbacks cannot
+block Refresh for minutes.
+*/
+async function visitPathsWithBudget(paths: string[]): Promise<void> {
+  const deadline = Date.now() + AUTOMATION_BATCH_BUDGET_MS;
+  for (const path of paths) {
+    const remaining = deadline - Date.now();
+    if (remaining <= 0) {
+      console.warn(
+        '[Achievements] automation budget exceeded; skipping remaining visits',
+      );
+      return;
+    }
+    const timeoutMs = Math.min(AUTOMATION_VISIT_TIMEOUT_MS, remaining);
+    await raceWithTimeout(visitPath(path), timeoutMs);
+  }
 }
 
 function parseSelectedBorderId(document_: Document): number | undefined {
@@ -781,6 +861,13 @@ async function didSubmitAboutMeAutomation(
   if (snapshot.items['add-about-me']?.isEarned === true) {
     return false;
   }
+  const cooldowns = await loadAutomationCooldowns();
+  const thisMonth = utcMonthString();
+  // Already submitted successfully this month — do not re-POST until next month
+  // (advisor shows a muted waiting row while still unearned).
+  if (cooldowns.aboutMeSubmittedMonth === thisMonth) {
+    return false;
+  }
   const currentAboutText = stripHtmlTags(state.aboutHtml);
   const aboutHtml = currentAboutText.length > 0 ? state.aboutHtml : '<p>Hi</p>';
   const customTitle =
@@ -790,8 +877,9 @@ async function didSubmitAboutMeAutomation(
     aboutHtml,
   });
   await submitPersonalizationUpdate(state, { customTitle, aboutHtml });
+  // Only stamp the month after a successful POST (throws on failure above).
   await saveAutomationCooldowns({
-    aboutMeSubmittedMonth: utcMonthString(),
+    aboutMeSubmittedMonth: thisMonth,
   });
   return true;
 }
@@ -900,8 +988,7 @@ async function didApplyVisitPagesAutomation(
   if (cooldowns.visitPagesDate === today) {
     return false;
   }
-  await visitPath(FAQ_PATH);
-  await visitPath(HIVE_PATH);
+  await visitPathsWithBudget([FAQ_PATH, HIVE_PATH]);
   await saveAutomationCooldowns({ visitPagesDate: today });
   return true;
 }
@@ -987,9 +1074,9 @@ async function didApplyReadArticlesAutomation(
   const news = await fetchDocument(NEWS_PATH);
   const articlePaths = news ? articlePathsFromNews(news) : [];
   if (articlePaths.length === 0) {
-    await visitPath(NEWS_PATH);
+    await visitPathsWithBudget([NEWS_PATH]);
   } else {
-    await Promise.all(articlePaths.map((path) => visitPath(path)));
+    await visitPathsWithBudget(articlePaths);
   }
   await saveAutomationCooldowns({ readArticlesDate: today });
   return true;
@@ -1013,9 +1100,9 @@ async function didApplyWatchVideosAutomation(
   const videos = await fetchDocument(VIDEOS_PATH);
   const videoPaths = videos ? videoPathsFromVideos(videos) : [];
   if (videoPaths.length === 0) {
-    await visitPath(VIDEOS_PATH);
+    await visitPathsWithBudget([VIDEOS_PATH]);
   } else {
-    await Promise.all(videoPaths.map((path) => visitPath(path)));
+    await visitPathsWithBudget(videoPaths);
   }
   await saveAutomationCooldowns({ watchVideosDate: today });
   return true;

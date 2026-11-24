@@ -1,4 +1,3 @@
-export { provideAchievements } from './achievements';
 export { provideActivities } from './activities';
 export { provideBattlePass } from './battlePass';
 export { provideCautions } from './cautions';

@@ -85,17 +85,24 @@ export function expiringFragmentOffers(
 /**
 Soonest-ending affordable timed listing, prefer higher list price as the buy
 target when several end at the same time.
+Pass `shouldSkip` to drop listings the caller does not want (e.g. artifacts
+already owned).
 */
 export function primaryExpiringFragmentOffer(
   state: Pick<SiteState, 'marketplaceFragments' | 'arpLog'>,
   discountPct = 0,
   availableArp: number | undefined = state.arpLog?.redeemableArp,
   now = Date.now(),
+  options: {
+    shouldSkip?: (offer: MarketplaceFragmentOffer) => boolean;
+  } = {},
 ): MarketplaceFragmentOffer | undefined {
+  const shouldSkip = options.shouldSkip;
   const candidates = expiringFragmentOffers(state, now)
     .filter((offer) =>
       isAffordableFragmentOffer(offer, state, discountPct, availableArp),
     )
+    .filter((offer) => !shouldSkip?.(offer))
     .toSorted((left, right) => {
       const leftEnd = fragmentOfferEndsAtMs(left) ?? Number.POSITIVE_INFINITY;
       const rightEnd = fragmentOfferEndsAtMs(right) ?? Number.POSITIVE_INFINITY;

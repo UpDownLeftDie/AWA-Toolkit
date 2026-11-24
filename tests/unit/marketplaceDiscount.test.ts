@@ -206,6 +206,7 @@ describe('soft path fragment notes', () => {
     appendMarketplaceFragmentNotes(
       notes,
       [],
+      [],
       discount,
       discount,
       buildContext(
@@ -216,6 +217,44 @@ describe('soft path fragment notes', () => {
       ),
     );
     expect(notes[0]).toMatch(/before Game Vault opens/i);
+  });
+
+  it('does not recommend buying an artifact the user already owns', () => {
+    resetArtifactIds(7100);
+    const snapshot = makeSnapshot([
+      makeArtifact('bali-arches', ArtifactTier.Interstellar, {
+        equippedPosition: 1,
+      }),
+      makeArtifact('pn295', ArtifactTier.Interstellar, {
+        equippedPosition: 2,
+      }),
+      makeArtifact('chai-stones', ArtifactTier.Interstellar, {
+        equippedPosition: 3,
+      }),
+    ]);
+    const state = baseState({
+      marketplaceFragments: [
+        {
+          name: "Ba'li Arches",
+          price: 1000,
+          inStock: true,
+          endsAt: isoAt(NOW_MS + 7 * 24 * 60 * 60 * 1000),
+        },
+        {
+          name: '10 Fragments',
+          price: 150,
+          inStock: true,
+          endsAt: isoAt(NOW_MS + 2 * 24 * 60 * 60 * 1000),
+        },
+      ],
+    });
+    const result = optimize(
+      buildContext(snapshot, defaultArtifactSettings, state, NOW_MS),
+    );
+    expect(result.notes.some((note) => /Ba'?li Arches/i.test(note))).toBe(
+      false,
+    );
+    expect(result.notes.some((note) => /10 Fragments/i.test(note))).toBe(true);
   });
 
   it('picks the soonest affordable expiring offer', () => {
