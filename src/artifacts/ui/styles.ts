@@ -115,6 +115,29 @@ function buildOptimizerCss(): string {
         color: #eee;
         white-space: pre-wrap;
       }
+      #${DIALOG_ID} .ao-dialog-box {
+        margin: 0 0 16px;
+        padding: 10px 12px;
+        background: #111;
+        border: 1px solid #333;
+        border-radius: 6px;
+        color: #ccc;
+        font-size: 13px;
+        line-height: 1.4;
+      }
+      #${DIALOG_ID} .ao-dialog-box-title {
+        margin: 0 0 6px;
+        color: #9ad8c4;
+        font-size: 12px;
+        font-weight: 600;
+      }
+      #${DIALOG_ID} .ao-dialog-box-line {
+        margin: 0;
+        white-space: pre-wrap;
+      }
+      #${DIALOG_ID} .ao-dialog-box-line + .ao-dialog-box-line {
+        margin-top: 2px;
+      }
       #${DIALOG_ID} .ao-dialog-actions {
         display: flex;
         flex-wrap: wrap;

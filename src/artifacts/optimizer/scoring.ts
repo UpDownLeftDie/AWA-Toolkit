@@ -38,6 +38,7 @@ import {
 } from './context';
 import { hasAllArpEffect, shouldDeferBattlePassForContext } from './search';
 import type {
+  ArpLossLine,
   BreakdownLine,
   OptimizerContext,
   RawBreakdownParts,
@@ -377,6 +378,48 @@ function scoreWindowActivities(
 
 export function comboMarketDiscountPct(combo: ScoredCombo | undefined): number {
   return combo?.marketDiscountPct ?? 0;
+}
+
+export function pickHighestWeeklyArpCombo(
+  ...combos: (ScoredCombo | undefined)[]
+): ScoredCombo | undefined {
+  let best: ScoredCombo | undefined;
+  for (const combo of combos) {
+    if (!combo) {
+      continue;
+    }
+    if (!best || combo.weeklyArp > best.weeklyArp) {
+      best = combo;
+    }
+  }
+  return best;
+}
+
+/**
+Per-activity lock-window ARP deltas from an ARP-optimal loadout to a
+market-discount loadout. Positive `delta` is ARP left on the table.
+*/
+export function lockWindowArpLossLines(
+  arpBest: ScoredCombo,
+  discount: ScoredCombo,
+): ArpLossLine[] {
+  const keys = new Set([
+    ...Object.keys(arpBest.breakdown),
+    ...Object.keys(discount.breakdown),
+  ]);
+  const lines: ArpLossLine[] = [];
+  for (const key of keys) {
+    const from = arpBest.breakdown[key]?.total ?? 0;
+    const to = discount.breakdown[key]?.total ?? 0;
+    const delta = from - to;
+    if (delta === 0) {
+      continue;
+    }
+    lines.push({ key, from, to, delta });
+  }
+  return lines.toSorted(
+    (left, right) => Math.abs(right.delta) - Math.abs(left.delta),
+  );
 }
 
 /**

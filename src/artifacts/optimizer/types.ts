@@ -3,6 +3,17 @@ import type { ArtifactSnapshot, OwnedArtifact } from '../scraper';
 import type { ArtifactOptimizerSettings } from '../settings';
 import type { SiteState } from '../siteState';
 
+/**
+Per-activity lock-window ARP change when leaving an ARP-optimal loadout for
+a market-discount set. `delta = from - to` (positive = loss).
+*/
+export interface ArpLossLine {
+  key: string;
+  from: number;
+  to: number;
+  delta: number;
+}
+
 export interface BreakdownLine {
   /**
   Final ARP after All-ARP% multiplier.
@@ -165,6 +176,31 @@ export interface OptimizerResult {
     cycleId: string;
     note?: string;
     dismissed: boolean;
+  };
+  /**
+  One-shot marketplace discount prioritization (switch pending until equip).
+  */
+  marketplaceDiscountPriority?: {
+    pending: boolean;
+    note: string;
+    /**
+    Estimated lock-window ARP left on the table vs ARP-optimal loadout
+    (`arpBest.weeklyArp - discount.weeklyArp`, floored at 0).
+    */
+    arpDelta: number;
+    /**
+    Per-activity lock-window deltas (ARP-optimal → discount). Positive
+    `delta` means ARP lost on that activity.
+    */
+    arpLossLines?: ArpLossLine[];
+    /**
+    True when the user already wears a ≥10% discount set (UI should clear).
+    */
+    alreadyEquipped?: boolean;
+    /**
+    True when slots are locked and discount cannot be worn yet.
+    */
+    slotsLocked?: boolean;
   };
   /**
   Recommended set is tomorrow's 00:00 UTC 24h pick, equipped now so the lock

@@ -72,6 +72,11 @@ export interface ArtifactOptimizerSettings {
   */
   vaultDiscountDismissedCycle?: string;
   /**
+  One-shot: promote ≥10% market-discount loadout until successfully equipped,
+  then clear so the 24h lock is the shopping window.
+  */
+  marketplaceDiscountPriorityPending: boolean;
+  /**
   Twitch logins to open first when picking a Watch Twitch stream (list order).
   */
   preferredTwitchStreamers: string[];
@@ -164,6 +169,7 @@ export const defaultArtifactSettings: ArtifactOptimizerSettings = {
   notificationTypes: { ...DEFAULT_NOTIFICATION_TYPES },
   allowAccountActions: false,
   achievementsEnabled: false,
+  marketplaceDiscountPriorityPending: false,
 };
 
 function isPartialSettings(
@@ -233,6 +239,10 @@ function applyParsedSettings(
     } else {
       delete settings.vaultDiscountDismissedCycle;
     }
+  }
+  if (typeof parsed.marketplaceDiscountPriorityPending === 'boolean') {
+    settings.marketplaceDiscountPriorityPending =
+      parsed.marketplaceDiscountPriorityPending;
   }
   if (Array.isArray(parsed.preferredTwitchStreamers)) {
     const rawLogins = parsed.preferredTwitchStreamers.filter(

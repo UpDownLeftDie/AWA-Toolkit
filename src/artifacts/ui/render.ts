@@ -175,8 +175,20 @@ const BREAKDOWN_LABELS: Record<string, string> = {
   battlePassClaims: 'Battle Pass claims',
 };
 
-function breakdownLabel(key: string): string {
+export function breakdownLabel(key: string): string {
   return BREAKDOWN_LABELS[key] ?? key;
+}
+
+/**
+Plain-text lines for dialogs / notes: `Watch Twitch: 45 → 15 (−30)`.
+*/
+export function formatArpLossBreakdownLines(
+  lines: { key: string; from: number; to: number; delta: number }[],
+): string[] {
+  return lines.map((line) => {
+    const sign = line.delta > 0 ? '−' : '+';
+    return `${breakdownLabel(line.key)}: ${String(line.from)} → ${String(line.to)} (${sign}${String(Math.abs(line.delta))})`;
+  });
 }
 
 function formatBreakdownLine(entry: BreakdownLine): string {
@@ -257,17 +269,42 @@ export function renderCredits(options?: { compact?: boolean }): string {
 /**
 Notes already covered by the action plan — keep market / inventory extras only.
 */
-export function renderVaultDiscountBlock(result: OptimizerResult): string {
-  const hint = result.vaultDiscount;
-  if (!hint || hint.dismissed || !hint.note) {
+export function renderMarketplaceDiscountPriorityBlock(
+  result: OptimizerResult,
+): string {
+  const hint = result.marketplaceDiscountPriority;
+  if (!hint?.pending || !hint.note) {
     return '';
   }
-  return `<div class="ao-note ao-vault-discount">
+  const lossLines = hint.arpLossLines ?? [];
+  const breakdown =
+    lossLines.length > 0
+      ? `<details>
+      <summary class="ao-muted">ARP loss breakdown (~${String(hint.arpDelta)} total)</summary>
+      ${formatArpLossBreakdownLines(lossLines)
+        .map((line) => `<div class="ao-row ao-muted">${escapeHtml(line)}</div>`)
+        .join('')}
+    </details>`
+      : '';
+  return `<div class="ao-note ao-marketplace-discount-priority">
+    <div>${escapeHtml(hint.note)}</div>
+    ${breakdown}
+  </div>`;
+}
+
+export function renderVaultDiscountBlock(result: OptimizerResult): string {
+  const priority = renderMarketplaceDiscountPriorityBlock(result);
+  const hint = result.vaultDiscount;
+  if (!hint || hint.dismissed || !hint.note) {
+    return priority;
+  }
+  const vault = `<div class="ao-note ao-vault-discount">
     <div>${escapeHtml(hint.note)}</div>
     <div class="ao-note-actions">
       <button type="button" class="ao-secondary" data-ao-dismiss-vault="${escapeHtml(hint.cycleId)}">Skip vault discount</button>
     </div>
   </div>`;
+  return priority ? `${priority}${vault}` : vault;
 }
 
 function renderVaultDiscountRestore(result: OptimizerResult): string {
@@ -606,6 +643,10 @@ export function renderResultBody(
     .map((n) => `<div class="ao-note">${wrapArtifactNames(n)}</div>`)
     .join('');
   const vaultDiscount = renderVaultDiscountBlock(result);
+  const hasMarketDiscountLoadout =
+    (result.marketDiscountLoadout?.marketDiscountPct ?? 0) >= 0.1 ||
+    (result.marketplaceDiscountPriority?.pending === true &&
+      (result.marketDiscountLoadout?.marketDiscountPct ?? 0) > 0);
 
   const areActionsEnabled = areAccountActionsEnabled(settings);
   const areAchievementsOn = areAchievementsEnabled(settings);
@@ -675,6 +716,16 @@ export function renderResultBody(
         title: 'Account actions',
         hint: 'Equip artifacts, upgrade, and claim Battle Pass for you. Use at your own risk.',
         isChecked: areActionsEnabled,
+      })}
+    </div>
+    <div class="ao-notify">
+      ${renderNotifySwitch({
+        id: 'ao-marketplace-discount-priority',
+        title: 'Marketplace discount prioritization',
+        hint: hasMarketDiscountLoadout
+          ? 'Equips your ≥10% discount set, then turns off after.'
+          : 'Needs a ≥10% discount set (Stanley Excavation or Light Warping Platinum).',
+        isChecked: settings.marketplaceDiscountPriorityPending,
       })}
     </div>
     ${achievementsSettingsHtml}

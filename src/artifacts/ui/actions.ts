@@ -1,3 +1,7 @@
+import {
+  bindAchievementAutomationSwitches,
+  bindAchievementOpenButtons,
+} from '../../achievements/ui';
 import { applyLoadout, upgradeArtifact } from '../api';
 import { artifactTierAt } from '../data';
 import {
@@ -5,7 +9,13 @@ import {
   isNotificationPermissionGranted,
   saveNotificationType,
 } from '../notifications';
-import type { OptimizerResult, ScoredCombo } from '../optimizer';
+import {
+  hasMarketDiscount,
+  lockWindowArpLossLines,
+  pickHighestWeeklyArpCombo,
+  type OptimizerResult,
+  type ScoredCombo,
+} from '../optimizer';
 import {
   confirmShowroomLoadout,
   resyncShowroomSnapshot,
@@ -19,10 +29,6 @@ import {
   saveArtifactSettings,
   type ArtifactOptimizerSettings,
 } from '../settings';
-import {
-  bindAchievementAutomationSwitches,
-  bindAchievementOpenButtons,
-} from '../../achievements/ui';
 import { bindClaimAllButtons } from './battlePassClaim';
 import {
   didAllowAccountActions,
@@ -46,7 +52,10 @@ import {
   injectShowroomPanel,
   reloadOptimizerFromCache,
 } from './panels';
-import { bindVaultDiscountActions } from './render';
+import {
+  bindVaultDiscountActions,
+  formatArpLossBreakdownLines,
+} from './render';
 import { bindOpenTwitchButtons } from './twitchPick';
 
 export async function persistFormSettings(root: ParentNode): Promise<void> {
@@ -117,6 +126,32 @@ export async function confirmAndApplyLoadout(
   );
 }
 
+/**
+Clear one-shot marketplace discount prioritization after a qualifying
+≥10% discount loadout is worn (or was already worn when the switch flipped).
+*/
+export async function clearMarketplaceDiscountPriorityAfterEquip(
+  combo: ScoredCombo | undefined,
+  result?: OptimizerResult,
+): Promise<boolean> {
+  const settings = await getArtifactSettings();
+  if (!settings.marketplaceDiscountPriorityPending) {
+    return false;
+  }
+  const target =
+    combo ??
+    result?.marketDiscountLoadout ??
+    (hasMarketDiscount(result?.best) ? result?.best : undefined);
+  if (!hasMarketDiscount(target)) {
+    return false;
+  }
+  await saveArtifactSettings({ marketplaceDiscountPriorityPending: false });
+  showAoToast(
+    'Market-discount equipped — you have ~24h to shop. Back to ARP optimization.',
+  );
+  return true;
+}
+
 export async function confirmAndApplyCombo(
   combo: ScoredCombo | undefined,
   current: ScoredCombo | undefined,
@@ -161,11 +196,13 @@ export async function confirmAndApplyCombo(
     if (applied.length > 0) {
       await confirmShowroomLoadout(applied);
     }
+    await clearMarketplaceDiscountPriorityAfterEquip(combo, result);
     notifyLoadoutResult(true, results, label);
     return;
   }
   if (applied.length > 0) {
     await confirmShowroomLoadout(applied);
+    await clearMarketplaceDiscountPriorityAfterEquip(combo, result);
     notifyLoadoutResult(false, results, label);
     return;
   }
@@ -197,7 +234,9 @@ function namedLoadout(
   label: string,
   activeSetNames: string[] | undefined,
 ): string {
-  return !activeSetNames || activeSetNames.length === 0 ? label : `${label} (${activeSetNames.join(', ')})`;
+  return !activeSetNames || activeSetNames.length === 0
+    ? label
+    : `${label} (${activeSetNames.join(', ')})`;
 }
 
 async function explainNothingToEquip(
@@ -529,6 +568,13 @@ export function bindDynamicBody(
   root: HTMLElement,
   onChanged: () => Promise<void>,
 ): void {
+  const pendingClear = gatheredCache.current;
+  if (pendingClear?.result.marketplaceDiscountPriority?.alreadyEquipped) {
+    void clearMarketplaceDiscountPriorityAfterEquip(
+      pendingClear.result.current,
+      pendingClear.result,
+    ).then(() => reloadOptimizerFromCache());
+  }
   root
     .querySelector<HTMLInputElement>('#ao-account-actions')
     ?.addEventListener('change', (event) => {
@@ -559,6 +605,92 @@ export function bindDynamicBody(
           return;
         }
         await saveArtifactSettings({ allowAccountActions: true });
+        await reloadOptimizerFromCache();
+      })();
+    });
+  root
+    .querySelector<HTMLInputElement>('#ao-marketplace-discount-priority')
+    ?.addEventListener('change', (event) => {
+      const input = event.currentTarget;
+      if (!(input instanceof HTMLInputElement)) {
+        return;
+      }
+      void (async () => {
+        if (!input.checked) {
+          await saveArtifactSettings({
+            marketplaceDiscountPriorityPending: false,
+          });
+          await reloadOptimizerFromCache();
+          return;
+        }
+        const gathered = gatheredCache.current;
+        const discount =
+          gathered?.result.marketDiscountLoadout ??
+          (hasMarketDiscount(gathered?.result.best)
+            ? gathered?.result.best
+            : undefined);
+        if (!discount || !hasMarketDiscount(discount)) {
+          input.checked = false;
+          await showAoAlert(
+            'Marketplace discount prioritization needs a ≥10% discount set (e.g. Stanley Excavation or Light Warping Platinum).',
+            'No market-discount set',
+          );
+          return;
+        }
+        const arpBest = pickHighestWeeklyArpCombo(
+          gathered?.result.current,
+          gathered?.result.best,
+          ...(gathered?.result.alternatives ?? []),
+        );
+        const delta = Math.max(
+          0,
+          (arpBest?.weeklyArp ?? 0) - discount.weeklyArp,
+        );
+        const lossLines =
+          arpBest && delta > 0 ? lockWindowArpLossLines(arpBest, discount) : [];
+        const lossBreakdown = formatArpLossBreakdownLines(lossLines);
+        const didAgree = await didConfirmAoDialog(
+          [
+            'Equip your market-discount set so you can shop with the ARP marketplace discount.',
+            '',
+            delta > 0
+              ? `Estimated lock-window cost: ~${String(delta)} ARP.`
+              : 'Lock-window ARP looks similar to your best set.',
+          ].join('\n'),
+          {
+            title: 'Prioritize marketplace discount?',
+            confirmLabel: 'Prioritize',
+            ...(lossBreakdown.length > 0 && {
+              detailBox: {
+                title: 'Breakdown (ARP-optimal → discount)',
+                lines: lossBreakdown,
+              },
+            }),
+            afterMessage: [
+              'Delay Steam Quests until after the swap when possible. Finish non-delayable dailies first if the action plan warns.',
+              '',
+              'After discount gear is equipped, this switch turns off and you have ~24h to buy.',
+            ].join('\n'),
+          },
+        );
+        if (!didAgree) {
+          input.checked = false;
+          return;
+        }
+        if (hasMarketDiscount(gathered?.result.current)) {
+          await saveArtifactSettings({
+            marketplaceDiscountPriorityPending: false,
+          });
+          showAoToast(
+            'Market-discount already equipped — you have ~24h to shop.',
+          );
+          input.checked = false;
+          await reloadOptimizerFromCache();
+          return;
+        }
+        await saveArtifactSettings({
+          marketplaceDiscountPriorityPending: true,
+        });
         await reloadOptimizerFromCache();
       })();
     });
@@ -657,7 +789,9 @@ export function bindEquipTodoButtons(
   result: OptimizerResult,
   settings: ArtifactOptimizerSettings,
 ): void {
-  for (const button of root.querySelectorAll<HTMLButtonElement>('.ao-equip-btn')) {
+  for (const button of root.querySelectorAll<HTMLButtonElement>(
+    '.ao-equip-btn',
+  )) {
     button.addEventListener('click', () => {
       const isAllArp = button.dataset.equip === 'allArp';
       void confirmAndApplyCombo(

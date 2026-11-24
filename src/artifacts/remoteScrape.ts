@@ -21,6 +21,7 @@ import {
   applyBattlePassStartHintFromDocument,
   applyDailyQuestsFromDocument,
   applyGameVaultDocument,
+  applyMarketplaceFragmentsDocument,
   applyRedeemableArpFromDocument,
   applySteamFreeToPlayResolution,
   applySteamQuestsFromDocument,
@@ -95,6 +96,7 @@ comes from ASCE (~hourly), so this can follow the normal 6h cadence.
 const COMMUNITY_EVENT_PENDING_STALE_MS = STALE_MS;
 const CONTROL_CENTER_PATH = '/control-center';
 const GAME_VAULT_PATH = '/marketplace/game-vault';
+const MARKETPLACE_FRAGMENTS_PATH = '/marketplace/?type=fragment';
 const ARP_LOG_PATH = '/account/arp-log';
 const QUEST_SETUP_PATH = '/steam/questsetup';
 /**
@@ -425,9 +427,15 @@ async function refreshBattlePassOnly(
 }
 
 async function refreshGameVaultOnly(next: SiteState): Promise<void> {
-  const vaultDocument = await loadRemoteDocument(GAME_VAULT_PATH);
+  const [vaultDocument, fragmentsDocument] = await Promise.all([
+    loadRemoteDocument(GAME_VAULT_PATH),
+    loadRemoteDocument(MARKETPLACE_FRAGMENTS_PATH),
+  ]);
   if (vaultDocument) {
     applyGameVaultDocument(next, vaultDocument);
+  }
+  if (fragmentsDocument) {
+    applyMarketplaceFragmentsDocument(next, fragmentsDocument);
   }
 }
 
@@ -992,15 +1000,21 @@ async function refreshActivityPages(
   next: SiteState,
   battlePassPath: string | undefined,
 ): Promise<void> {
-  const [controlDocument, questDocument, battleDocument, vaultDocument] =
-    await Promise.all([
-      loadControlCenterDocument(),
-      loadRemoteDocument(QUEST_SETUP_PATH),
-      battlePassPath
-        ? loadRemoteDocument(battlePassPath)
-        : Promise.resolve(undefined),
-      loadRemoteDocument(GAME_VAULT_PATH),
-    ]);
+  const [
+    controlDocument,
+    questDocument,
+    battleDocument,
+    vaultDocument,
+    fragmentsDocument,
+  ] = await Promise.all([
+    loadControlCenterDocument(),
+    loadRemoteDocument(QUEST_SETUP_PATH),
+    battlePassPath
+      ? loadRemoteDocument(battlePassPath)
+      : Promise.resolve(undefined),
+    loadRemoteDocument(GAME_VAULT_PATH),
+    loadRemoteDocument(MARKETPLACE_FRAGMENTS_PATH),
+  ]);
 
   if (controlDocument) {
     applyControlCenterDocument(next, controlDocument);
@@ -1016,6 +1030,9 @@ async function refreshActivityPages(
   );
   if (vaultDocument) {
     applyGameVaultDocument(next, vaultDocument);
+  }
+  if (fragmentsDocument) {
+    applyMarketplaceFragmentsDocument(next, fragmentsDocument);
   }
 
   await Promise.all([

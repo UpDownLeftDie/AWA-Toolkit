@@ -38,6 +38,10 @@ import {
   scrapeUserArpTierFromDocument,
 } from "./gameVault";
 import {
+  applyMarketplaceFragmentsDocument,
+  isMarketplaceFragmentsPath,
+} from "./marketplaceFragments";
+import {
   applySteamQuestDetailFromDocument,
   applySteamQuestsFromDocument,
   steamQuestsCapFromRows,
@@ -185,6 +189,12 @@ export function applyLiveDocumentToSiteState(next: SiteState): void {
 
   if (path.includes("/marketplace") || path.includes("/game-vault")) {
     applyGameVaultDocument(next, document);
+  }
+  if (
+    isMarketplaceFragmentsPath(path, location.search) ||
+    path.includes("/marketplace")
+  ) {
+    applyMarketplaceFragmentsDocument(next, document);
   }
 
   if (path.includes("/battle-pass")) {
@@ -581,6 +591,21 @@ export {
   scrapeUserArpTierFromDocument,
   applyGameVaultDocument,
 } from "./gameVault";
+export type { MarketplaceFragmentOffer } from "./marketplaceFragments";
+export {
+  isPostedListPriceFragment,
+  isExpiringFragmentOffer,
+  fragmentOfferEndsAtMs,
+  isAffordableFragmentOffer,
+  expiringFragmentOffers,
+  primaryExpiringFragmentOffer,
+  marketplaceFragmentsCatalogPrice,
+  parseMarketplaceTimerEndDate,
+  scrapeMarketplaceFragmentsFromDocument,
+  scrapeMarketplaceFragments,
+  isMarketplaceFragmentsPath,
+  applyMarketplaceFragmentsDocument,
+} from "./marketplaceFragments";
 export type { BattlePassReadyClaim, BattlePassState } from "./battlePass";
 export {
   scrapeBattlePassFromDocument,

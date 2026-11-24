@@ -8,8 +8,13 @@ import {
   describeWaitingCommunityArpLine,
   formatCommunityEta,
   formatCommunityEventArp,
+  fragmentOfferEndsAtMs,
+  gameVaultOpensAtMs,
   isActivityPending,
+  isGameVaultDiscountWindow,
   nextLockedCommunityArpMilestone,
+  primaryExpiringFragmentOffer,
+  vaultPayArp,
 } from '../siteState';
 import { collectBonuses } from './bonuses';
 import {
@@ -20,11 +25,18 @@ import {
 import {
   hasAllArpEffect,
   hasInventoryAllArp,
+  hasMarketDiscount,
   resolveDeferredAllArp,
   shouldDeferBattlePassForContext,
+  VAULT_PRIORITY_DISCOUNT_PCT,
 } from './search';
-import { communityEventArpInSwapWindow } from './scoring';
+import {
+  comboMarketDiscountPct,
+  communityEventArpInSwapWindow,
+  projectedRedeemableArp,
+} from './scoring';
 import type { OptimizerContext, ScoredCombo } from './types';
+import { earliestSlotUnlockMs } from './vaultDiscount';
 
 export function appendBattlePassNotes(
   notes: string[],
@@ -132,15 +144,110 @@ function describeCommunityEventPendingNote(
   return breakdown.imminentArp > 0 ? `${formatCommunityEventArp(breakdown.imminentArp)} unlocked — not awarded yet` : `${formatCommunityEventArp(event.pendingArp)} still open`;
 }
 
+/**
+Soft guidance for timed Artifacts/Fragments marketplace listings. Never
+replaces the ARP-optimal loadout — only surfaces buy-before-expiry timing
+and how it lines up with Game Vault discount windows.
+*/
+export function appendMarketplaceFragmentNotes(
+  notes: string[],
+  equipped: OwnedArtifact[],
+  best: ScoredCombo | undefined,
+  discountCombo: ScoredCombo | undefined,
+  context: OptimizerContext,
+): void {
+  const now = resolveNow(context);
+  const discountPct = Math.max(
+    comboMarketDiscountPct(discountCombo),
+    comboMarketDiscountPct(best),
+    collectBonuses(equipped).marketDiscountPct,
+  );
+  const availableArp = projectedRedeemableArp(
+    context,
+    best,
+    discountCombo,
+  );
+  const offer = primaryExpiringFragmentOffer(
+    context.siteState,
+    discountPct,
+    availableArp,
+    now,
+  );
+  if (!offer) {
+    return;
+  }
+  const endsAt = fragmentOfferEndsAtMs(offer);
+  if (endsAt === undefined) {
+    return;
+  }
+  const eta = formatCommunityEta(Math.max(0, endsAt - now));
+  const payArp = vaultPayArp(offer.price, discountPct);
+  const hasDiscountSet =
+    hasMarketDiscount(discountCombo) ||
+    discountPct >= VAULT_PRIORITY_DISCOUNT_PCT;
+  const discountLabel =
+    discountPct > 0
+      ? `${String(Math.round(discountPct * 100))}% off → ${String(payArp)} ARP`
+      : `${String(offer.price)} ARP`;
+
+  if (hasDiscountSet && isGameVaultDiscountWindow(context.siteState, now)) {
+    notes.push(
+      `Marketplace: buy ${offer.name} before ${eta} (${discountLabel}) — Game Vault is open; group the claim with your market-discount window.`,
+    );
+    return;
+  }
+
+  const opensAt = gameVaultOpensAtMs(context.siteState);
+  if (
+    hasDiscountSet &&
+    opensAt !== undefined &&
+    opensAt > now &&
+    opensAt < endsAt
+  ) {
+    const vaultEta = formatCommunityEta(opensAt - now);
+    notes.push(
+      `Marketplace: ${offer.name} ends in ${eta} (${discountLabel}) — Game Vault opens in ${vaultEta}; buy with vault discount gear if you can wait.`,
+    );
+    return;
+  }
+
+  const unlockAt = earliestSlotUnlockMs(context, now);
+  if (hasDiscountSet && endsAt <= unlockAt) {
+    notes.push(
+      `Marketplace: ${offer.name} ends in ${eta} (${discountLabel}) before slots unlock for discount gear — use marketplace discount prioritization or buy without the discount.`,
+    );
+    return;
+  }
+
+  if (hasDiscountSet && opensAt !== undefined && opensAt > endsAt) {
+    notes.push(
+      `Marketplace: ${offer.name} ends in ${eta} (${discountLabel}) before Game Vault opens — equip market-discount (or turn on prioritization) if you want the savings.`,
+    );
+    return;
+  }
+
+  notes.push(
+    `Marketplace: buy ${offer.name} before ${eta} if you want it (${discountLabel}).`,
+  );
+}
+
 export function collectNotes(
   owned: OwnedArtifact[],
   equipped: OwnedArtifact[],
   best: ScoredCombo | undefined,
   context: OptimizerContext,
+  discountCombo?: ScoredCombo,
 ): string[] {
   const notes: string[] = [];
   appendBattlePassNotes(notes, owned, equipped, context);
   appendCommunityEventNotes(notes, owned, equipped, context);
+  appendMarketplaceFragmentNotes(
+    notes,
+    equipped,
+    best,
+    discountCombo,
+    context,
+  );
 
   if (
     isActivityPending(context.siteState.caps, 'steamQuests') &&

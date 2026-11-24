@@ -4,6 +4,7 @@ import type { WatchTwitchProgress } from './caps';
 import type { CommunityEventState } from './communityEvent';
 import type { DailyQuestsState } from './dailyQuests';
 import type { GameVaultItem } from './gameVault';
+import type { MarketplaceFragmentOffer } from './marketplaceFragments';
 import type { SteamQuestsState } from './steamQuests';
 
 export type ActivityKey =
@@ -36,6 +37,14 @@ export interface SiteState {
   */
   capsScrapedAt?: string;
   gameVault: GameVaultItem[];
+  /**
+  Artifacts/Fragments marketplace listings (`/marketplace/?type=fragment`).
+  */
+  marketplaceFragments?: MarketplaceFragmentOffer[];
+  /**
+  When fragment marketplace cards were last scraped.
+  */
+  marketplaceFragmentsScrapedAt?: string;
   /**
   Next Game Vault open time from `#game-vault-timer` while claims are closed.
   */

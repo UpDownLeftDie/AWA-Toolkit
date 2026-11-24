@@ -69,6 +69,7 @@ import {
   plannedEquipLabel,
   utcResetDeadlineLabel,
 } from './loadoutPlan';
+import { formatArpLossBreakdownLines } from './render';
 
 export type ActionTone = 'default' | 'muted' | 'warn';
 
@@ -2858,6 +2859,30 @@ function pushAfterSwapTodos(
   }
 }
 
+function pushMarketplaceDiscountPriorityCaution(
+  todos: ActionTodo[],
+  result: OptimizerResult,
+): void {
+  const marketPriority = result.marketplaceDiscountPriority;
+  if (!marketPriority?.pending || marketPriority.arpDelta <= 0) {
+    return;
+  }
+  const lossReasons = formatArpLossBreakdownLines(
+    (marketPriority.arpLossLines ?? []).filter((line) => line.delta > 0).slice(0, 5),
+  ).map((text) => ({ text }));
+  todos.push({
+    kind: 'caution',
+    tone: 'warn',
+    text: `Marketplace discount prioritization: ~${String(marketPriority.arpDelta)} ARP left on the table vs ARP-optimal gear this lock`,
+    reasons: [
+      ...lossReasons,
+      {
+        text: 'Delay Steam Quests until after discount gear is on when possible; finish non-delayable dailies listed before the swap',
+      },
+    ],
+  });
+}
+
 /**
 Maximize ARP under cooldowns: finish current-set strengths first only when
 the next equip would drop that activity's ARP. Fill free slots now (sooner
@@ -2889,6 +2914,8 @@ export function buildActionPlan(
       reasons: [{ text: STUCK_SLOT_LOCK_HINT }],
     });
   }
+
+  pushMarketplaceDiscountPriorityCaution(todos, result);
 
   const hasAllArpEquipped =
     result.hasAllArpEquipped === true || (current?.allArpPct ?? 0) > 0;

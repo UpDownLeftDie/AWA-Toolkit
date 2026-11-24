@@ -41,9 +41,36 @@ function closeAoDialog(isConfirmed: boolean): void {
   resolve?.(isConfirmed);
 }
 
+export interface AoDialogDetailBox {
+  title?: string;
+  lines: string[];
+}
+
+function renderDialogDetailBox(box: AoDialogDetailBox | undefined): string {
+  if (!box || box.lines.length === 0) {
+    return '';
+  }
+  const title = box.title
+    ? `<div class="ao-dialog-box-title">${escapeHtml(box.title)}</div>`
+    : '';
+  const lines = box.lines
+    .map(
+      (line) =>
+        `<div class="ao-dialog-box-line">${escapeHtml(line)}</div>`,
+    )
+    .join('');
+  return `<div class="ao-dialog-box">${title}${lines}</div>`;
+}
+
 export function showAoDialog(options: {
   title?: string;
   message: string;
+  /**
+  Optional inset panel between `message` and `afterMessage` (e.g. ARP loss
+  breakdown).
+  */
+  detailBox?: AoDialogDetailBox;
+  afterMessage?: string;
   confirmLabel?: string;
   cancelLabel?: string;
   isDanger?: boolean;
@@ -61,11 +88,16 @@ export function showAoDialog(options: {
     ? `<button type="button" class="ao-secondary" data-ao-dialog="cancel">${escapeHtml(options.cancelLabel)}</button>`
     : '';
   const confirmClass = options.isDanger === true ? 'ao-danger' : '';
+  const afterMessage = options.afterMessage
+    ? `<div class="ao-dialog-message">${escapeHtml(options.afterMessage)}</div>`
+    : '';
   root.innerHTML = `
     <div class="ao-dialog-scrim" data-ao-dialog="cancel"></div>
     <div class="ao-dialog">
       <div class="ao-dialog-title">${escapeHtml(title)}</div>
       <div class="ao-dialog-message">${escapeHtml(options.message)}</div>
+      ${renderDialogDetailBox(options.detailBox)}
+      ${afterMessage}
       <div class="ao-dialog-actions">
         ${cancelButton}
         <button type="button" class="${confirmClass}" data-ao-dialog="ok">${escapeHtml(options.confirmLabel ?? 'OK')}</button>
@@ -114,7 +146,13 @@ export async function showAoAlert(
 
 export async function didConfirmAoDialog(
   message: string,
-  options: { title?: string; confirmLabel?: string; isDanger?: boolean } = {},
+  options: {
+    title?: string;
+    confirmLabel?: string;
+    isDanger?: boolean;
+    detailBox?: AoDialogDetailBox;
+    afterMessage?: string;
+  } = {},
 ): Promise<boolean> {
   return showAoDialog({
     message,
@@ -122,6 +160,8 @@ export async function didConfirmAoDialog(
     confirmLabel: options.confirmLabel ?? 'Confirm',
     ...(options.title && { title: options.title }),
     ...(options.isDanger === true && { isDanger: true }),
+    ...(options.detailBox && { detailBox: options.detailBox }),
+    ...(options.afterMessage && { afterMessage: options.afterMessage }),
   });
 }
 

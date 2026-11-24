@@ -13,9 +13,18 @@ import {
   willMissDiscountEquipBeforeOpen,
 } from '../siteState';
 import { isSameLoadout } from './context';
-import { comboMarketDiscountPct, projectedRedeemableArp } from './scoring';
+import {
+  comboMarketDiscountPct,
+  lockWindowArpLossLines,
+  projectedRedeemableArp,
+} from './scoring';
 import { hasMarketDiscount, VAULT_PRIORITY_DISCOUNT_PCT } from './search';
-import type { OptimizerContext, OptimizerResult, ScoredCombo } from './types';
+import type {
+  ArpLossLine,
+  OptimizerContext,
+  OptimizerResult,
+  ScoredCombo,
+} from './types';
 
 export function earliestSlotUnlockMs(
   context: OptimizerContext,
@@ -37,10 +46,11 @@ export function earliestSlotUnlockMs(
   return now + Math.min(...remaining);
 }
 
-interface VaultDiscountGuard {
+export interface VaultDiscountGuard {
   best: ScoredCombo | undefined;
   marketDiscountLoadout?: ScoredCombo;
   vaultDiscount?: OptimizerResult['vaultDiscount'];
+  marketplaceDiscountPriority?: OptimizerResult['marketplaceDiscountPriority'];
 }
 
 function dismissedVaultGuard(
@@ -219,4 +229,105 @@ export function resolveVaultDiscountBest(
       cycleId ?? context.siteState.gameVaultOpensAt ?? 'upcoming',
       now,
     ) : { best: arpBest };
+}
+
+/**
+One-shot marketplace discount prioritization: while the user switch is pending,
+promote a ≥10% market-discount loadout as `best` (with ARP-loss warning) until
+equip succeeds and the UI clears the flag. Soft fragment notes stay in
+`collectNotes` and never force `best` on their own.
+*/
+export function applyMarketplaceDiscountPriority(
+  guarded: VaultDiscountGuard,
+  arpBest: ScoredCombo | undefined,
+  current: ScoredCombo | undefined,
+  discountCombo: ScoredCombo | undefined,
+  context: OptimizerContext,
+  now = Date.now(),
+): VaultDiscountGuard {
+  const qualifyingDiscount = hasMarketDiscount(discountCombo)
+    ? discountCombo
+    : undefined;
+  const marketDiscountLoadout =
+    qualifyingDiscount ?? guarded.marketDiscountLoadout;
+  const withLoadout: VaultDiscountGuard = marketDiscountLoadout
+    ? { ...guarded, marketDiscountLoadout }
+    : { ...guarded };
+
+  if (!context.settings.marketplaceDiscountPriorityPending) {
+    return withLoadout;
+  }
+
+  if (!qualifyingDiscount) {
+    return {
+      ...withLoadout,
+      marketplaceDiscountPriority: {
+        pending: true,
+        note: 'Marketplace discount prioritization needs a ≥10% discount set (e.g. Stanley Excavation or Light Warping Platinum).',
+        arpDelta: 0,
+      },
+    };
+  }
+
+  const arpDelta = Math.max(
+    0,
+    (arpBest?.weeklyArp ?? 0) - qualifyingDiscount.weeklyArp,
+  );
+  const arpLossLines: ArpLossLine[] =
+    arpBest && arpDelta > 0
+      ? lockWindowArpLossLines(arpBest, qualifyingDiscount)
+      : [];
+  const discountPct = Math.round(
+    comboMarketDiscountPct(qualifyingDiscount) * 100,
+  );
+  const deltaNote =
+    arpDelta > 0
+      ? ` About ${String(arpDelta)} ARP less than your ARP-optimal set over the next 24h lock — see activity breakdown. Finish non-delayable dailies first when marked, and delay Steam Quests until after the swap when possible.`
+      : ' Lock-window ARP is similar to your best set.';
+
+  if (current && hasMarketDiscount(current)) {
+    const wornPct = Math.round(comboMarketDiscountPct(current) * 100);
+    return {
+      ...withLoadout,
+      best: current,
+      marketDiscountLoadout: qualifyingDiscount,
+      marketplaceDiscountPriority: {
+        pending: true,
+        note: `${String(wornPct)}% market-discount already equipped — you have ~24h to buy. Prioritization will clear.`,
+        arpDelta,
+        ...(arpLossLines.length > 0 && { arpLossLines }),
+        alreadyEquipped: true,
+      },
+    };
+  }
+
+  const unlockAt = earliestSlotUnlockMs(context, now);
+  const canEquipNow = unlockAt <= now;
+  if (!canEquipNow) {
+    const unlockEta = formatCommunityEta(unlockAt - now);
+    return {
+      ...withLoadout,
+      best: qualifyingDiscount,
+      marketDiscountLoadout: qualifyingDiscount,
+      marketplaceDiscountPriority: {
+        pending: true,
+        note: `Marketplace discount prioritization armed — equip ${String(discountPct)}% discount when slots unlock (${unlockEta}).${deltaNote}`,
+        arpDelta,
+        ...(arpLossLines.length > 0 && { arpLossLines }),
+        slotsLocked: true,
+      },
+    };
+  }
+
+  return {
+    ...withLoadout,
+    best: qualifyingDiscount,
+    marketDiscountLoadout: qualifyingDiscount,
+    marketplaceDiscountPriority: {
+      pending: true,
+      note: `Equip ${String(discountPct)}% market-discount now to shop — switch clears after equip; then you have 24h to buy.${deltaNote}`,
+      arpDelta,
+      ...(arpLossLines.length > 0 && { arpLossLines }),
+    },
+  };
 }

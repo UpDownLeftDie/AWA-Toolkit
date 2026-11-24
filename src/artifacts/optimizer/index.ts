@@ -27,7 +27,10 @@ import {
   scoreCombo,
 } from './scoring';
 import type { OptimizerContext, OptimizerResult, ScoredCombo } from './types';
-import { resolveVaultDiscountBest } from './vaultDiscount';
+import {
+  applyMarketplaceDiscountPriority,
+  resolveVaultDiscountBest,
+} from './vaultDiscount';
 
 function withPreloadNextUtcDay(
   result: OptimizerResult,
@@ -80,12 +83,21 @@ export function optimize(context: OptimizerContext): OptimizerResult {
   const preloaded = resolvePreloadNextUtcDayBest(owned, context, arpBest);
   const allArpLoadout = findBestAllArpCombo(owned, context);
   const discountCombo = findBestMarketDiscountCombo(owned, context);
-  const guarded = resolveVaultDiscountBest(
+  const now = resolveNow(context);
+  const vaultGuarded = resolveVaultDiscountBest(
     preloaded ?? arpBest,
     current,
     discountCombo,
     context,
-    resolveNow(context),
+    now,
+  );
+  const guarded = applyMarketplaceDiscountPriority(
+    vaultGuarded,
+    arpBest,
+    current,
+    discountCombo,
+    context,
+    now,
   );
   const best = guarded.best;
   const monthlyMetaLoadout = findMonthlyMetaCombo(owned, context);
@@ -123,7 +135,7 @@ export function optimize(context: OptimizerContext): OptimizerResult {
     battlePassClaimableArp(context.siteState.battlePass),
   );
 
-  const notes = collectNotes(owned, equipped, best, context);
+  const notes = collectNotes(owned, equipped, best, context, discountCombo);
 
   const result: OptimizerResult = {
     best,
@@ -160,6 +172,9 @@ export function optimize(context: OptimizerContext): OptimizerResult {
   if (guarded.vaultDiscount) {
     result.vaultDiscount = guarded.vaultDiscount;
   }
+  if (guarded.marketplaceDiscountPriority) {
+    result.marketplaceDiscountPriority = guarded.marketplaceDiscountPriority;
+  }
   return withPreloadNextUtcDay(result, preloaded);
 }
 
@@ -176,9 +191,14 @@ export {
   UTC_DAILY_END_BUFFER_MS,
 } from './context';
 export { describeArtifact } from './notes';
-export { VAULT_PRIORITY_DISCOUNT_PCT } from './search';
-export { scoreCombo } from './scoring';
+export { hasMarketDiscount, VAULT_PRIORITY_DISCOUNT_PCT } from './search';
+export {
+  lockWindowArpLossLines,
+  pickHighestWeeklyArpCombo,
+  scoreCombo,
+} from './scoring';
 export type {
+  ArpLossLine,
   BreakdownLine,
   OptimizerContext,
   OptimizerResult,
