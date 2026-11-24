@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         AWA Toolkit
 // @namespace    https://github.com/UpDownLeftDie/AWA-Toolkit
-// @version      2.5.1
+// @version      2.5.2
 // @author       jaredcat
 // @description  Artifact Optimizer, Control Center tasks, giveaway/vault filters, and UCF reading mode
 // @license      AGPL-3.0-or-later
@@ -3809,6 +3809,35 @@
 		const { readyToClaim, readyToClaimArp } = countBattlePassClaims(document_);
 		return `${readyToClaim}:${readyToClaimArp}`;
 	}
+	var BP_LIVE_SCRAPE_KEY = "ao-bp-live-scrape";
+	function isBattlePassState(value) {
+		return typeof value === "object" && value !== null && typeof value.url === "string" && typeof value.scrapedAt === "string" && typeof value.readyToClaim === "number" && typeof value.readyToClaimArp === "number";
+	}
+	function stashBattlePassLiveScrape(document_ = document, pageUrl = location.pathname) {
+		if (!pageUrl.includes("/battle-pass")) return;
+		if (!isBattlePassDocumentReady(document_)) return;
+		const scraped = scrapeBattlePassFromDocument(document_, pageUrl);
+		if (!scraped) return;
+		try {
+			sessionStorage.setItem(BP_LIVE_SCRAPE_KEY, JSON.stringify(scraped));
+		} catch {}
+	}
+	function takeBattlePassLiveScrape() {
+		try {
+			const raw = sessionStorage.getItem(BP_LIVE_SCRAPE_KEY);
+			if (!raw) return;
+			sessionStorage.removeItem(BP_LIVE_SCRAPE_KEY);
+			const parsed = JSON.parse(raw);
+			return isBattlePassState(parsed) ? parsed : void 0;
+		} catch {
+			return;
+		}
+	}
+	function clearBattlePassLiveScrape() {
+		try {
+			sessionStorage.removeItem(BP_LIVE_SCRAPE_KEY);
+		} catch {}
+	}
 	var MS_PER_MINUTE = 6e4;
 	var MS_PER_HOUR = 36e5;
 	var MS_PER_DAY = 864e5;
@@ -4488,17 +4517,32 @@
 	}
 	async function loadSiteState() {
 		const raw = await _GM.getValue(SITE_STATE_KEY);
-		if (!raw) return;
+		const liveScrape = location.pathname.includes("/battle-pass") ? void 0 : takeBattlePassLiveScrape();
+		if (!raw) return liveScrape ? {
+			...emptySiteState(),
+			battlePass: liveScrape
+		} : void 0;
 		try {
 			const parsed = typeof raw === "string" ? JSON.parse(raw) : raw;
-			if (!isSiteState(parsed)) return;
+			if (!isSiteState(parsed)) return liveScrape ? {
+				...emptySiteState(),
+				battlePass: liveScrape
+			} : void 0;
 			const cleaned = withoutLegacyUpdatedAt(parsed);
-			return {
+			const withCaps = {
 				...cleaned,
 				caps: normalizeCaps(cleaned.caps)
 			};
+			if (!liveScrape) return withCaps;
+			return {
+				...withCaps,
+				battlePass: mergeBattlePassScrape(liveScrape, withCaps.battlePass, { source: "visit" })
+			};
 		} catch {
-			return;
+			return liveScrape ? {
+				...emptySiteState(),
+				battlePass: liveScrape
+			} : void 0;
 		}
 	}
 	async function saveSiteState(state) {
@@ -4584,9 +4628,11 @@
 			}
 			isPersisting = true;
 			try {
+				if (options.datasetFlag === "aoBpWatch") stashBattlePassLiveScrape();
 				const state = await refreshSiteStateFromPage();
 				lastSignature = signature;
 				await options.onPersist?.(state);
+				if (options.datasetFlag === "aoBpWatch") clearBattlePassLiveScrape();
 			} finally {
 				isPersisting = false;
 				if (isPendingAfterPersist) {
@@ -4602,15 +4648,17 @@
 				persistIfChanged();
 			}, 250);
 		};
-		const flushPendingPersist = () => {
-			if (debounceTimer === void 0) return;
-			clearTimeout(debounceTimer);
-			debounceTimer = void 0;
+		const flushOnLeave = () => {
+			if (options.datasetFlag === "aoBpWatch") stashBattlePassLiveScrape();
+			if (debounceTimer !== void 0) {
+				clearTimeout(debounceTimer);
+				debounceTimer = void 0;
+			}
 			persistIfChanged();
 		};
-		window.addEventListener("pagehide", flushPendingPersist);
+		window.addEventListener("pagehide", flushOnLeave);
 		document.addEventListener("visibilitychange", () => {
-			if (document.visibilityState === "hidden") flushPendingPersist();
+			if (document.visibilityState === "hidden") flushOnLeave();
 		});
 		(async () => {
 			await options.waitForReady();
@@ -4625,7 +4673,22 @@
 			document.addEventListener("click", (event) => {
 				const target = event.target;
 				if (!(target instanceof Element)) return;
-				if (target.closest(clickSelector)) schedule();
+				if (!target.closest(clickSelector)) return;
+				(async () => {
+					const before = options.signature(document);
+					const startedAt = Date.now();
+					while (Date.now() - startedAt < 5e3) {
+						await new Promise((resolve) => {
+							setTimeout(resolve, 100);
+						});
+						if (options.signature(document) !== before) {
+							if (options.datasetFlag === "aoBpWatch") stashBattlePassLiveScrape();
+							await persistIfChanged();
+							return;
+						}
+					}
+					schedule();
+				})();
 			}, { capture: true });
 		})();
 	}

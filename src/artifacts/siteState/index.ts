@@ -12,9 +12,12 @@ import {
   applyBattlePassEndFromDocument,
   applyBattlePassStartHintFromDocument,
   battlePassClaimSignature,
+  clearBattlePassLiveScrape,
   isBattlePassDocumentReady,
   mergeBattlePassScrape,
   scrapeBattlePass,
+  stashBattlePassLiveScrape,
+  takeBattlePassLiveScrape,
   waitForBattlePassDocument,
 } from "./battlePass";
 import {
@@ -92,21 +95,42 @@ function withoutLegacyUpdatedAt(state: SiteState): SiteState {
 
 export async function loadSiteState(): Promise<SiteState | undefined> {
   const raw: string | SiteState | undefined = await GM.getValue(SITE_STATE_KEY);
+  // Claim → navigate often loses the async GM write. Only consume the sync
+  // bridge after leaving the BP page — on-page loads must not steal it before
+  // setValue finishes.
+  const liveScrape = location.pathname.includes("/battle-pass")
+    ? undefined
+    : takeBattlePassLiveScrape();
   if (!raw) {
-    return undefined;
+    return liveScrape
+      ? { ...emptySiteState(), battlePass: liveScrape }
+      : undefined;
   }
   try {
     const parsed: unknown = typeof raw === "string" ? JSON.parse(raw) : raw;
     if (!isSiteState(parsed)) {
-      return undefined;
+      return liveScrape
+        ? { ...emptySiteState(), battlePass: liveScrape }
+        : undefined;
     }
     const cleaned = withoutLegacyUpdatedAt(parsed);
-    return {
+    const withCaps: SiteState = {
       ...cleaned,
       caps: normalizeCaps(cleaned.caps),
     };
+    if (!liveScrape) {
+      return withCaps;
+    }
+    return {
+      ...withCaps,
+      battlePass: mergeBattlePassScrape(liveScrape, withCaps.battlePass, {
+        source: "visit",
+      }),
+    };
   } catch {
-    return undefined;
+    return liveScrape
+      ? { ...emptySiteState(), battlePass: liveScrape }
+      : undefined;
   }
 }
 
@@ -297,9 +321,16 @@ function watchLiveSiteStatePage(options: {
     }
     isPersisting = true;
     try {
+      // Sync backup before the async GM write — unload often aborts setValue.
+      if (options.datasetFlag === "aoBpWatch") {
+        stashBattlePassLiveScrape();
+      }
       const state = await refreshSiteStateFromPage();
       lastSignature = signature;
       await options.onPersist?.(state);
+      if (options.datasetFlag === "aoBpWatch") {
+        clearBattlePassLiveScrape();
+      }
     } finally {
       isPersisting = false;
       if (isPendingAfterPersist) {
@@ -319,21 +350,22 @@ function watchLiveSiteStatePage(options: {
     }, 250);
   };
 
-  const flushPendingPersist = (): void => {
-    if (debounceTimer === undefined) {
-      return;
+  const flushOnLeave = (): void => {
+    if (options.datasetFlag === "aoBpWatch") {
+      stashBattlePassLiveScrape();
     }
-    clearTimeout(debounceTimer);
-    debounceTimer = undefined;
+    if (debounceTimer !== undefined) {
+      clearTimeout(debounceTimer);
+      debounceTimer = undefined;
+    }
     void persistIfChanged();
   };
 
-  // Claim buttons can appear and then navigate away within the 250ms
-  // debounce — flush so CC sees the visit scrape.
-  window.addEventListener("pagehide", flushPendingPersist);
+  // Claim → navigate: debounce/async GM often lose the race; stash is sync.
+  window.addEventListener("pagehide", flushOnLeave);
   document.addEventListener("visibilitychange", () => {
     if (document.visibilityState === "hidden") {
-      flushPendingPersist();
+      flushOnLeave();
     }
   });
 
@@ -357,9 +389,28 @@ function watchLiveSiteStatePage(options: {
         if (!(target instanceof Element)) {
           return;
         }
-        if (target.closest(clickSelector)) {
-          schedule();
+        if (!target.closest(clickSelector)) {
+          return;
         }
+        // Wait for the claim AJAX to remove the button, then persist — the
+        // 250ms debounce alone often fires before the DOM updates.
+        void (async () => {
+          const before = options.signature(document);
+          const startedAt = Date.now();
+          while (Date.now() - startedAt < 5000) {
+            await new Promise<void>((resolve) => {
+              setTimeout(resolve, 100);
+            });
+            if (options.signature(document) !== before) {
+              if (options.datasetFlag === "aoBpWatch") {
+                stashBattlePassLiveScrape();
+              }
+              await persistIfChanged();
+              return;
+            }
+          }
+          schedule();
+        })();
       },
       { capture: true },
     );
@@ -631,6 +682,9 @@ export {
   claimAllBattlePassRewards,
   startBattlePassEnrollment,
   hasBattlePassStartUi,
+  stashBattlePassLiveScrape,
+  takeBattlePassLiveScrape,
+  clearBattlePassLiveScrape,
 } from "./battlePass";
 export type { ArpLogEntry, ArpLogState } from "./arpLog";
 export {

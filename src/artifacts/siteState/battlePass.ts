@@ -1575,3 +1575,63 @@ export function battlePassClaimSignature(document_: Document): string {
   const { readyToClaim, readyToClaimArp } = countBattlePassClaims(document_);
   return `${readyToClaim}:${readyToClaimArp}`;
 }
+
+/**
+Sync bridge for claim → navigate-away. `GM.setValue` is async and often loses
+the unload race; sessionStorage is applied on the next `loadSiteState`.
+*/
+const BP_LIVE_SCRAPE_KEY = 'ao-bp-live-scrape';
+
+function isBattlePassState(value: unknown): value is BattlePassState {
+  return (
+    typeof value === 'object' &&
+    value !== null &&
+    typeof (value as BattlePassState).url === 'string' &&
+    typeof (value as BattlePassState).scrapedAt === 'string' &&
+    typeof (value as BattlePassState).readyToClaim === 'number' &&
+    typeof (value as BattlePassState).readyToClaimArp === 'number'
+  );
+}
+
+export function stashBattlePassLiveScrape(
+  document_: Document = document,
+  pageUrl: string = location.pathname,
+): void {
+  if (!pageUrl.includes('/battle-pass')) {
+    return;
+  }
+  if (!isBattlePassDocumentReady(document_)) {
+    return;
+  }
+  const scraped = scrapeBattlePassFromDocument(document_, pageUrl);
+  if (!scraped) {
+    return;
+  }
+  try {
+    sessionStorage.setItem(BP_LIVE_SCRAPE_KEY, JSON.stringify(scraped));
+  } catch {
+    // Private mode / quota — GM persist is best-effort only.
+  }
+}
+
+export function takeBattlePassLiveScrape(): BattlePassState | undefined {
+  try {
+    const raw = sessionStorage.getItem(BP_LIVE_SCRAPE_KEY);
+    if (!raw) {
+      return undefined;
+    }
+    sessionStorage.removeItem(BP_LIVE_SCRAPE_KEY);
+    const parsed: unknown = JSON.parse(raw);
+    return isBattlePassState(parsed) ? parsed : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+export function clearBattlePassLiveScrape(): void {
+  try {
+    sessionStorage.removeItem(BP_LIVE_SCRAPE_KEY);
+  } catch {
+    // ignore
+  }
+}
