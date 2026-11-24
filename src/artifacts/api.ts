@@ -178,6 +178,16 @@ export async function claimBattlePassReward(
 }
 
 /**
+POST the scraped Start Battle Pass form (`action` + `_csrf_token`).
+*/
+export async function startBattlePassReward(
+  path: string,
+  body: Record<string, unknown> = {},
+): Promise<ApiResult> {
+  return postForm(path, body);
+}
+
+/**
 Pick a free "upgrade" target for AWA's stuck 24h lock bug (Megumin FAQ):
 posting Upgrade on a maxed card spends 0 fragments and refreshes slot locks.
 Prefer H`erkow Warrior Script when owned.

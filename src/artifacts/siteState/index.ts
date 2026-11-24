@@ -10,6 +10,7 @@ import {
 } from "./arpLog";
 import {
   applyBattlePassEndFromDocument,
+  applyBattlePassStartHintFromDocument,
   battlePassClaimSignature,
   isBattlePassDocumentReady,
   mergeBattlePassScrape,
@@ -128,6 +129,7 @@ function applyControlCenterPage(next: SiteState): void {
   applyDailyQuestsFromDocument(next, document);
   applyWatchTwitchFromDocument(next);
   applyBattlePassEndFromDocument(next, document);
+  applyBattlePassStartHintFromDocument(next, document);
   // Caps TTL must not advance on BP / ARP Log / vault visits — only here.
   next.capsScrapedAt = new Date().toISOString();
   const banner = scrapeLiveCommunityEventBanner(document);
@@ -591,6 +593,7 @@ export {
   isPublicBattlePassSeasonPage,
   mergeBattlePassScrape,
   applyBattlePassEndFromDocument,
+  applyBattlePassStartHintFromDocument,
   battlePassClaimableArp,
   battlePassReadyNonArp,
   shouldShowBattlePassClaimAll,
@@ -601,6 +604,8 @@ export {
   waitForBattlePassDocument,
   listBattlePassClaimButtons,
   claimAllBattlePassRewards,
+  startBattlePassEnrollment,
+  hasBattlePassStartUi,
 } from "./battlePass";
 export type { ArpLogEntry, ArpLogState } from "./arpLog";
 export {

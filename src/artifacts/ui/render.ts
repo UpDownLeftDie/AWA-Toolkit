@@ -381,7 +381,11 @@ function renderBattlePassBlock(
   const lines: string[] = [
     `<div><strong>Battle Pass</strong> · ${bp.tokens ?? '?'} / ${bp.tokensMax ?? '?'} tokens${endsPart}</div>`,
   ];
-  if (bp.readyToClaim > 0) {
+  if (bp.needsStart === true) {
+    lines.push(
+      '<div><strong>Not started</strong> — Start required before ARP progresses this season</div>',
+    );
+  } else if (bp.readyToClaim > 0) {
     const arpBoostPart =
       bp.readyToClaimArp > 0 ? ` (${bp.readyToClaimArp} ARP Boost)` : '';
     lines.push(

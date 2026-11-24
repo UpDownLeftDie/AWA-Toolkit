@@ -6,6 +6,7 @@ import {
   battlePassPathFromDocument,
   battlePassSeasonId,
   discoverBattlePassPath,
+  hasBattlePassStartUi,
   isBattlePassDocumentReady,
   isPublicBattlePassSeasonPage,
   mergeBattlePassScrape,
@@ -326,6 +327,47 @@ describe('scrapeBattlePassFromDocument', () => {
         '/control-center/battle-pass/2',
       ),
     ).toBeUndefined();
+  });
+
+  it('detects Start Battle Pass before enrollment', () => {
+    const csrf = element('input', '', {
+      attrs: { name: '_csrf_token' },
+      value: 'start-token',
+    });
+    const button = element('button', 'bp-header__start-btn', {
+      text: 'Start Battle Pass',
+    });
+    const form = element('form', '', {
+      attrs: { action: '/battle-pass/start/3' },
+      children: [csrf, button],
+    });
+    const root = element('div', 'bp-landing bp-landing--personal', {
+      children: [form],
+    });
+    const document_ = asDocument(root);
+    expect(hasBattlePassStartUi(document_)).toBe(true);
+    expect(isBattlePassDocumentReady(document_)).toBe(true);
+    const state = scrapeBattlePassFromDocument(
+      document_,
+      '/control-center/battle-pass/3',
+    );
+    expect(state?.needsStart).toBe(true);
+    expect(state?.readyToClaim).toBe(0);
+    expect(state?.startTarget?.startPath).toBe('/battle-pass/start/3');
+    expect(state?.startTarget?.csrfToken).toBe('start-token');
+  });
+
+  it('lets a newer season needsStart replace the previous season', () => {
+    const previous = passState('/control-center/battle-pass/2', 3);
+    const nextSeason: BattlePassState = {
+      ...passState('/control-center/battle-pass/3', 0),
+      needsStart: true,
+      startTarget: { startPath: '/battle-pass/start/3', csrfToken: 'x' },
+    };
+    expect(mergeBattlePassScrape(nextSeason, previous).needsStart).toBe(true);
+    expect(mergeBattlePassScrape(nextSeason, previous).url).toBe(
+      '/control-center/battle-pass/3',
+    );
   });
 
   it('is ready when claimed markers exist even with zero CLAIM buttons', () => {

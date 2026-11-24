@@ -181,6 +181,10 @@ export interface ActionTodo {
   */
   claimBattlePassSkipArp?: boolean;
   /**
+  Enroll in the current Battle Pass (Start) — ARP progress only counts after.
+  */
+  startBattlePass?: boolean;
+  /**
   Watch Twitch step — renders an Open stream button that picks a live channel.
   */
   openTwitchStream?: boolean;
@@ -254,14 +258,20 @@ function defaultTodoUrgency(todo: ActionTodo): ActionTodoUrgency {
 
 /**
 Global order for numbered steps. Cautions stay pinned above via render.
+Start Battle Pass stays first — ARP before enroll may not progress the season.
 */
 function sortActionTodosByUrgency(todos: ActionTodo[]): ActionTodo[] {
-  return todos.toSorted((left, right) =>
-    compareActionTodoUrgency(
+  return todos.toSorted((left, right) => {
+    const leftStart = left.startBattlePass === true ? 0 : 1;
+    const rightStart = right.startBattlePass === true ? 0 : 1;
+    if (leftStart !== rightStart) {
+      return leftStart - rightStart;
+    }
+    return compareActionTodoUrgency(
       left.urgency ?? defaultTodoUrgency(left),
       right.urgency ?? defaultTodoUrgency(right),
-    ),
-  );
+    );
+  });
 }
 
 function phaseChain(phase: ActivityPhase): ActionTodoChain {
@@ -530,6 +540,40 @@ function pushHeldArpBattlePassTodos(
   }
 }
 
+/**
+ARP earned before Start may not progress the pass — surface ASAP.
+*/
+function pushStartBattlePassTodo(
+  todos: ActionTodo[],
+  siteState: SiteState,
+): void {
+  const battlePass = siteState.battlePass;
+  if (battlePass?.needsStart !== true) {
+    return;
+  }
+  const todo: ActionTodo = {
+    tone: 'warn',
+    text: 'Start Battle Pass — new season (ARP only counts after Start)',
+    reasons: [
+      {
+        text: 'Select Start Battle Pass on the track before farming ARP this season',
+      },
+    ],
+    startBattlePass: true,
+    urgency: {
+      kind: 'action',
+      readyAtMs: 0,
+      durationMs: 0,
+      chain: 'before',
+    },
+  };
+  if (battlePass.url) {
+    todo.openHref = battlePass.url;
+    todo.openHrefLabel = 'Open Battle Pass';
+  }
+  todos.push(todo);
+}
+
 function pushBattlePassTodo(
   todos: ActionTodo[],
   siteState: SiteState,
@@ -550,6 +594,9 @@ function pushBattlePassTodo(
     seasonEndsBeforeAllArp?: boolean;
   },
 ): void {
+  if (siteState.battlePass?.needsStart === true) {
+    return;
+  }
   const readyAll = siteState.battlePass?.readyToClaim ?? 0;
   if (readyAll <= 0) {
     return;
@@ -2881,6 +2928,9 @@ export function buildActionPlan(
     waitMs,
   });
 
+  // 0) Enroll before anything else — ARP before Start may not progress BP.
+  pushStartBattlePassTodo(todos, siteState);
+
   // 1) UTC-reset work that would lose ARP if we equipped first.
   todos.push(...sequenced.beforeSwap);
   if (discord?.slot === 'before') {
@@ -3024,6 +3074,9 @@ function renderAccountTodoButton(todo: ActionTodo): string {
   if (todo.upgradeInstanceId !== undefined) {
     return `<button type="button" class="ao-upgrade-btn" data-id="${String(todo.upgradeInstanceId)}">Upgrade</button>`;
   }
+  if (todo.startBattlePass === true) {
+    return '<button type="button" class="ao-start-bp-btn">Start Battle Pass</button>';
+  }
   if (todo.claimBattlePass === true) {
     const skipArp =
       todo.claimBattlePassSkipArp === true ? ' data-skip-arp="1"' : '';
@@ -3038,6 +3091,13 @@ function renderTodoActionButton(
 ): string {
   if (todo.openTwitchStream === true) {
     return '<button type="button" class="ao-twitch-btn">Open stream</button>';
+  }
+  // Prefer Start when account actions are on; otherwise Open the BP page.
+  if (
+    todo.startBattlePass === true &&
+    options.allowAccountActions === true
+  ) {
+    return renderAccountTodoButton(todo);
   }
   if (todo.openHref) {
     const visit = todo.visitInBackground === true ? ' data-visit="1"' : '';

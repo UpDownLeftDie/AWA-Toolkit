@@ -1,4 +1,4 @@
-import { claimBattlePassReward } from '../api';
+import { claimBattlePassReward, startBattlePassReward } from '../api';
 import { documentBody, firstNonEmpty } from '../../pageGlobals';
 import { pageText } from './shared';
 import type { SiteState } from './types';
@@ -11,6 +11,15 @@ export interface BattlePassReadyClaim {
   per-user claim instance, not `milestoneId`.
   */
   claimPath?: string;
+  csrfToken?: string;
+  body?: Record<string, unknown>;
+}
+
+export interface BattlePassStartTarget {
+  /**
+  Form `action` for Start Battle Pass (scraped — not a guessed URL).
+  */
+  startPath: string;
   csrfToken?: string;
   body?: Record<string, unknown>;
 }
@@ -30,6 +39,15 @@ export interface BattlePassState {
   Ready CLAIM targets scraped from the track (form action + csrf for POSTs).
   */
   readyClaims?: BattlePassReadyClaim[];
+  /**
+  Personal track not enrolled yet — Start Battle Pass is required before ARP
+  progresses the season.
+  */
+  needsStart?: boolean;
+  /**
+  Start form target when `needsStart` (POST via account actions).
+  */
+  startTarget?: BattlePassStartTarget;
   endsInText?: string;
   /**
   Absolute end from the on-page countdown at scrape time (not a 24h slot lock).
@@ -260,13 +278,143 @@ function hasBattlePassClaimUi(document_: Document): boolean {
   );
 }
 
+/**
+AWA: "To begin the Battle Pass, you must select Start Battle Pass."
+Header button on the personal track; homepage / CC widget uses a start form.
+*/
+export function hasBattlePassStartUi(document_: Document): boolean {
+  return Boolean(
+    document_.querySelector(
+      '.bp-header__start-btn, .bp-widget__start-form, .bp-widget__recap--start',
+    ),
+  );
+}
+
+function isFormElement(node: Element | null | undefined): node is HTMLFormElement {
+  if (!node) {
+    return false;
+  }
+  const tag =
+    'tag' in node && typeof (node as { tag?: unknown }).tag === 'string'
+      ? (node as { tag: string }).tag
+      : node.tagName;
+  return tag.toLowerCase() === 'form';
+}
+
+function battlePassStartForm(document_: Document): HTMLFormElement | undefined {
+  const fromWidget = document_.querySelector('.bp-widget__start-form');
+  if (isFormElement(fromWidget)) {
+    return fromWidget;
+  }
+  const button = document_.querySelector('.bp-header__start-btn');
+  const fromButton = button?.closest('form');
+  return isFormElement(fromButton) ? fromButton : undefined;
+}
+
+export function scrapeBattlePassStartTarget(
+  document_: Document,
+): BattlePassStartTarget | undefined {
+  const form = battlePassStartForm(document_);
+  if (!form) {
+    return undefined;
+  }
+  const trimmedPath = form.getAttribute('action')?.trim();
+  if (!trimmedPath) {
+    return undefined;
+  }
+  const csrfToken = form
+    .querySelector<HTMLInputElement>('input[name="_csrf_token"]')
+    ?.value;
+  const target: BattlePassStartTarget = { startPath: trimmedPath };
+  if (csrfToken) {
+    target.csrfToken = csrfToken;
+  }
+  const body: Record<string, unknown> = {};
+  for (const input of form.querySelectorAll('input[name]')) {
+    const name =
+      input.getAttribute('name')?.trim() ??
+      ('name' in input && typeof input.name === 'string' ? input.name.trim() : '');
+    if (!name || name === '_csrf_token') {
+      continue;
+    }
+    const value =
+      'value' in input && (typeof input.value === 'string' || typeof input.value === 'number')
+        ? String(input.value)
+        : '';
+    body[name] = value;
+  }
+  if (Object.keys(body).length > 0) {
+    target.body = body;
+  }
+  return target;
+}
+
+function resolveBattlePassUrl(
+  document_: Document,
+  pageUrl?: string,
+): string | undefined {
+  return (
+    battlePassControlCenterPath(pageUrl) ??
+    battlePassPathFromDocument(document_) ??
+    battlePassControlCenterPath(location.pathname)
+  );
+}
+
+function scrapeBattlePassTokens(
+  state: BattlePassState,
+  document_: Document,
+  body: string,
+): void {
+  const tokensMatch = /BATTLE TOKENS\s*([\d,]+)\s*\/\s*([\d,]+)/i.exec(body);
+  if (tokensMatch?.[1] && tokensMatch[2]) {
+    state.tokens = Number(tokensMatch[1].replaceAll(',', ''));
+    state.tokensMax = Number(tokensMatch[2].replaceAll(',', ''));
+  }
+  const tokenCount = numberFromElement(document_, '.bp-header__token-count');
+  const tokenTotal = numberFromElement(document_, '.bp-header__token-total');
+  if (tokenCount !== undefined) {
+    state.tokens = tokenCount;
+  }
+  if (tokenTotal !== undefined) {
+    state.tokensMax = tokenTotal;
+  }
+}
+
 export function scrapeBattlePassFromDocument(
   document_: Document,
   pageUrl?: string,
 ): BattlePassState | undefined {
+  // `/battle-pass/{id}` is a logged-out rewards map (every milestone locked).
+  // Caching that as 0 ready would wipe the personal track.
+  if (isStaticBattlePassPreview(document_)) {
+    return undefined;
+  }
+
+  const url = resolveBattlePassUrl(document_, pageUrl);
+  if (!url) {
+    return undefined;
+  }
+
+  // Not enrolled yet — persist so CC can todo / auto-start. No claim UI yet.
+  if (hasBattlePassStartUi(document_)) {
+    const state: BattlePassState = {
+      readyToClaim: 0,
+      readyToClaimArp: 0,
+      needsStart: true,
+      url,
+      scrapedAt: new Date().toISOString(),
+    };
+    const startTarget = scrapeBattlePassStartTarget(document_);
+    if (startTarget) {
+      state.startTarget = startTarget;
+    }
+    scrapeBattlePassTokens(state, document_, pageText(document_));
+    applyBattlePassEnd(state, document_);
+    return state;
+  }
+
   const body = pageText(document_);
   const popups = document_.querySelectorAll('.bp-popup[data-milestone-id]');
-  const tokensMatch = /BATTLE TOKENS\s*([\d,]+)\s*\/\s*([\d,]+)/i.exec(body);
   const legacyClaims = (body.match(/Ready to claim/gi) ?? []).length;
   // Tokens can be in the fetch HTML while claim popups are client-rendered.
   // Treat that as "not loaded" so we don't cache 0 ready over real boosts.
@@ -276,19 +424,6 @@ export function scrapeBattlePassFromDocument(
   // Popup shells alone are not a loaded track — same premature-0 risk as a
   // remote empty shell.
   if (!hasBattlePassClaimUi(document_)) {
-    return undefined;
-  }
-  // `/battle-pass/{id}` is a logged-out rewards map (every milestone locked).
-  // Caching that as 0 ready would wipe the personal track.
-  if (isStaticBattlePassPreview(document_)) {
-    return undefined;
-  }
-
-  const url =
-    battlePassControlCenterPath(pageUrl) ??
-    battlePassPathFromDocument(document_) ??
-    battlePassControlCenterPath(location.pathname);
-  if (!url) {
     return undefined;
   }
 
@@ -305,25 +440,7 @@ export function scrapeBattlePassFromDocument(
     state.readyClaims = readyClaims;
   }
 
-  if (tokensMatch?.[1] && tokensMatch[2]) {
-    state.tokens = Number(tokensMatch[1].replaceAll(',', ''));
-    state.tokensMax = Number(tokensMatch[2].replaceAll(',', ''));
-  }
-  const tokenCount = numberFromElement(
-    document_,
-    '.bp-header__token-count',
-  );
-  const tokenTotal = numberFromElement(
-    document_,
-    '.bp-header__token-total',
-  );
-  if (tokenCount !== undefined) {
-    state.tokens = tokenCount;
-  }
-  if (tokenTotal !== undefined) {
-    state.tokensMax = tokenTotal;
-  }
-
+  scrapeBattlePassTokens(state, document_, body);
   applyBattlePassEnd(state, document_);
 
   return state;
@@ -490,6 +607,29 @@ export function applyBattlePassEndFromDocument(
   const battlePass = { ...next.battlePass };
   applyBattlePassEnd(battlePass, document_);
   next.battlePass = battlePass;
+}
+
+/**
+Control Center / homepage widget can show Start before the personal track is
+opened — stamp `needsStart` so the action plan surfaces it.
+*/
+export function applyBattlePassStartHintFromDocument(
+  next: SiteState,
+  document_: Document,
+): void {
+  if (!hasBattlePassStartUi(document_)) {
+    return;
+  }
+  const scraped = scrapeBattlePassFromDocument(
+    document_,
+    next.battlePass?.url ?? location.pathname,
+  );
+  if (!scraped?.needsStart) {
+    return;
+  }
+  next.battlePass = mergeBattlePassScrape(scraped, next.battlePass, {
+    source: 'visit',
+  });
 }
 
 /**
@@ -1147,6 +1287,96 @@ async function waitForBattlePassClaimButtons(
   return listBattlePassClaimButtons(document_, options).length;
 }
 
+function startPostBody(target: BattlePassStartTarget): Record<string, unknown> {
+  const body: Record<string, unknown> = { ...target.body };
+  if (target.csrfToken) {
+    body._csrf_token = target.csrfToken;
+  }
+  return body;
+}
+
+/**
+Enroll in the current Battle Pass via the scraped Start form. ARP progress
+only counts after Start — call when account actions are enabled.
+*/
+export async function startBattlePassEnrollment(options: {
+  battlePassPath?: string;
+  startTarget?: BattlePassStartTarget;
+} = {}): Promise<{
+  started: boolean;
+  battlePass?: BattlePassState;
+  error?: string;
+}> {
+  const isOnBattlePassPage = location.pathname.includes('/battle-pass');
+  let document_: Document | undefined;
+  if (isOnBattlePassPage) {
+    await waitForBattlePassDocument();
+    document_ = document;
+  } else {
+    document_ = await fetchBattlePassDocument(options.battlePassPath);
+  }
+  if (!document_) {
+    return { started: false, error: 'Could not load Battle Pass.' };
+  }
+
+  const target =
+    options.startTarget ?? scrapeBattlePassStartTarget(document_);
+  if (!target) {
+    const alreadyStarted = scrapeBattlePassFromDocument(
+      document_,
+      options.battlePassPath ?? location.pathname,
+    );
+    if (alreadyStarted && alreadyStarted.needsStart !== true) {
+      return { started: true, battlePass: alreadyStarted };
+    }
+    return { started: false, error: 'Start Battle Pass form not found.' };
+  }
+
+  const result = await startBattlePassReward(
+    target.startPath,
+    startPostBody(target),
+  );
+  if (!result.ok) {
+    return {
+      started: false,
+      error: result.error ?? 'Start Battle Pass request failed.',
+    };
+  }
+
+  // Re-fetch so claim UI / started banners replace the Start button.
+  let after: BattlePassState | undefined;
+  if (isOnBattlePassPage) {
+    await waitForBattlePassDocument();
+    after = scrapeBattlePassFromDocument(document, location.pathname);
+  } else {
+    const refreshed =
+      (await fetchBattlePassDocument(options.battlePassPath)) ?? document_;
+    after = scrapeBattlePassFromDocument(refreshed, options.battlePassPath);
+  }
+  if (after && after.needsStart !== true) {
+    return { started: true, battlePass: after };
+  }
+  // POST succeeded but scrape still shows Start — treat as started so we
+  // do not loop; next refresh will clear needsStart once the track paints.
+  const fallback: BattlePassState = {
+    readyToClaim: 0,
+    readyToClaimArp: 0,
+    url:
+      options.battlePassPath ??
+      after?.url ??
+      battlePassControlCenterPath(location.pathname) ??
+      target.startPath,
+    scrapedAt: new Date().toISOString(),
+  };
+  if (after?.endsAt) {
+    fallback.endsAt = after.endsAt;
+  }
+  if (after?.endsInText) {
+    fallback.endsInText = after.endsInText;
+  }
+  return { started: true, battlePass: after ?? fallback };
+}
+
 /**
 Claim ready Battle Pass rewards with the site's same-origin form POST
 (`/battle-pass/claim/{instanceId}` + `_csrf_token`). From Control Center,
@@ -1302,7 +1532,8 @@ export function scrapeBattlePass(): BattlePassState | undefined {
 
 export function isBattlePassDocumentReady(document_: Document): boolean {
   // Popup shells paint before CLAIM / COMPLETE — those alone are not ready.
-  return hasBattlePassClaimUi(document_);
+  // Start UI means the personal track loaded but is not enrolled yet.
+  return hasBattlePassClaimUi(document_) || hasBattlePassStartUi(document_);
 }
 
 export async function waitForBattlePassDocument(

@@ -53,6 +53,33 @@ function midZorathianSnapshot() {
 }
 
 describe('Battle Pass action-plan order', () => {
+  it('lists Start Battle Pass when the season is not enrolled yet', () => {
+    vi.stubGlobal('location', { pathname: '/control-center' });
+    const nowMs = AFTER_POLL_POST;
+    const snapshot = midZorathianSnapshot();
+    const settings = defaultArtifactSettings;
+    const state = {
+      ...siteState(nowMs, { readyToClaim: 0, readyToClaimArp: 0 }),
+      battlePass: {
+        url: '/control-center/battle-pass/3',
+        scrapedAt: isoAt(nowMs),
+        readyToClaim: 0,
+        readyToClaimArp: 0,
+        needsStart: true,
+        startTarget: { startPath: '/battle-pass/start/3' },
+      },
+    };
+    const result = optimize(buildContext(snapshot, settings, state, nowMs));
+    const todos = buildActionPlan(result, settings, state);
+    const numbered = todos.filter((todo) => todo.kind !== 'caution');
+    const start = numbered.find((todo) => todo.startBattlePass === true);
+    expect(start?.text).toMatch(/start battle pass/i);
+    expect(start?.openHref).toBe('/control-center/battle-pass/3');
+    expect(start?.urgency?.chain).toBe('before');
+    expect(numbered[0]).toBe(start);
+    expect(todos.some((todo) => todo.claimBattlePass === true)).toBe(false);
+  });
+
   it('labels non-ARP claims clearly and holds ARP Boosts while All-ARP% is off', () => {
     vi.stubGlobal('location', { pathname: '/ucf/Giveaway' });
     const nowMs = AFTER_POLL_POST;

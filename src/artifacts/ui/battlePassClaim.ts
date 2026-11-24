@@ -4,10 +4,12 @@ import {
   battlePassReadyNonArp,
   claimAllBattlePassRewards,
   discoverBattlePassPath,
+  emptySiteState,
   listBattlePassClaimButtons,
   loadSiteState,
   refreshSiteStateFromPage,
   saveSiteState,
+  startBattlePassEnrollment,
   waitForBattlePassDocument,
 } from '../siteState';
 import {
@@ -194,6 +196,51 @@ export async function consumePendingBattlePassClaimAll(): Promise<void> {
   });
 }
 
+export async function handleStartBattlePass(): Promise<void> {
+  if (!(await didAllowAccountActions())) {
+    return;
+  }
+  const state = await loadSiteState();
+  const battlePass = state?.battlePass;
+  if (
+    battlePass?.needsStart !== true &&
+    !location.pathname.includes('/battle-pass')
+  ) {
+    await showAoAlert('Battle Pass is already started (or not detected yet).');
+    return;
+  }
+  const isOk = await didConfirmAoDialog(
+    'Start the Battle Pass now? ARP only progresses the season after Start.',
+    {
+      title: 'Start Battle Pass',
+      confirmLabel: 'Start',
+    },
+  );
+  if (!isOk) {
+    return;
+  }
+  showAoToast('Starting Battle Pass…');
+  const result = await startBattlePassEnrollment({
+    ...(battlePass?.url && { battlePassPath: battlePass.url }),
+    ...(battlePass?.startTarget && { startTarget: battlePass.startTarget }),
+  });
+  if (!result.started) {
+    await showAoAlert(result.error ?? 'Could not start Battle Pass.');
+    return;
+  }
+  const next = (await loadSiteState()) ?? emptySiteState();
+  if (result.battlePass) {
+    next.battlePass = result.battlePass;
+  } else if (next.battlePass) {
+    delete next.battlePass.needsStart;
+    delete next.battlePass.startTarget;
+  }
+  await saveSiteState(next);
+  showAoToast('Battle Pass started.');
+  const { reloadOptimizerFromCache } = await import('./panels');
+  await reloadOptimizerFromCache();
+}
+
 export function bindClaimAllButtons(root: ParentNode): void {
   for (const button of root.querySelectorAll<HTMLButtonElement>(
     '.ao-claim-btn',
@@ -202,6 +249,13 @@ export function bindClaimAllButtons(root: ParentNode): void {
       void handleClaimAllBattlePass({
         shouldSkipArpBoosts: button.dataset.skipArp === '1',
       });
+    });
+  }
+  for (const button of root.querySelectorAll<HTMLButtonElement>(
+    '.ao-start-bp-btn',
+  )) {
+    button.addEventListener('click', () => {
+      void handleStartBattlePass();
     });
   }
 }

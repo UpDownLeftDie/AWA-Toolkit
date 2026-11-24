@@ -18,6 +18,7 @@ import {
 import {
   applyArpLogActivityCaps,
   applyBattlePassEndFromDocument,
+  applyBattlePassStartHintFromDocument,
   applyDailyQuestsFromDocument,
   applyGameVaultDocument,
   applyRedeemableArpFromDocument,
@@ -394,6 +395,10 @@ function shouldRescrapeBattlePass(state: SiteState | undefined): boolean {
   }
   const bp = state?.battlePass;
   if (!bp || typeof bp.readyToClaimArp !== 'number') {
+    return true;
+  }
+  // Keep refreshing until Start succeeds / the user enrolls manually.
+  if (bp.needsStart === true) {
     return true;
   }
   const scrapedAt = Date.parse(bp.scrapedAt);
@@ -956,6 +961,7 @@ function applyControlCenterDocument(
   applyDailyQuestsFromDocument(next, controlDocument);
   applyWatchTwitchProgress(next, controlDocument);
   applyBattlePassEndFromDocument(next, controlDocument);
+  applyBattlePassStartHintFromDocument(next, controlDocument);
   next.capsScrapedAt = new Date().toISOString();
 }
 

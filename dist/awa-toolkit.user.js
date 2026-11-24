@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         AWA Toolkit
 // @namespace    https://github.com/UpDownLeftDie/AWA-Toolkit
-// @version      2.3.4
+// @version      2.4.0
 // @author       jaredcat
 // @description  Artifact Optimizer, Control Center tasks, giveaway/vault filters, and UCF reading mode
 // @license      AGPL-3.0-or-later
@@ -26,9 +26,28 @@
 
 (async function() {
 	"use strict";
-	var _GM = (() => typeof GM != "undefined" ? GM : void 0)();
-	var _GM_xmlhttpRequest = (() => typeof GM_xmlhttpRequest != "undefined" ? GM_xmlhttpRequest : void 0)();
-	var _unsafeWindow = (() => typeof unsafeWindow != "undefined" ? unsafeWindow : void 0)();
+	var __defProp = Object.defineProperty;
+	var __esmMin = (fn, res, err) => () => {
+		if (err) throw err[0];
+		try {
+			return fn && (res = fn(fn = 0)), res;
+		} catch (e) {
+			throw err = [e], e;
+		}
+	};
+	var __exportAll = (all, no_symbols) => {
+		let target = {};
+		for (var name in all) __defProp(target, name, {
+			get: all[name],
+			enumerable: true
+		});
+		if (!no_symbols) __defProp(target, Symbol.toStringTag, { value: "Module" });
+		return target;
+	};
+	var panels_CB5vbfiv_exports = __exportAll({ reloadOptimizerFromCache: () => reloadOptimizerFromCache });
+	var init_panels_CB5vbfiv = __esmMin((() => {
+		init_panels_DoCYX__L();
+	}));
 	function pageWindow() {
 		try {
 			return _unsafeWindow;
@@ -138,11 +157,6 @@
 	function giveawayKeyStatus(giveawayId) {
 		return readPageGiveawayKeys().find((entry) => entry.giveawayId === giveawayId);
 	}
-	var STEAM_FREE_CACHE_KEY = "steamAppFreeCache";
-	var STEAM_FREE_TTL_PERMANENT_MS = 6048e5;
-	var STEAM_FREE_TTL_PRICE_MS = 864e5;
-	var STEAM_FREE_TTL_ERROR_MS = 36e5;
-	var STEAM_LIBRARY_PENDING_HINT = `Free on Steam — add it and play ~${String(10)} min so it shows as owned`;
 	function parseSteamAppId(value) {
 		if (!value) return;
 		const id = Number(value);
@@ -196,7 +210,6 @@
 	async function saveSteamFreeCache(cache) {
 		await _GM.setValue(STEAM_FREE_CACHE_KEY, JSON.stringify(cache));
 	}
-	var inflightLookup$1 = {};
 	function fetchSteamAppDetailsBatch(appIds) {
 		const ids = [...new Set(appIds)].toSorted((left, right) => left - right);
 		if (ids.length === 0) return Promise.resolve({});
@@ -374,676 +387,13 @@
 		const ms = Date.parse(value);
 		return Number.isFinite(ms) ? ms : NaN;
 	}
-	var CREDIT_SOURCES = [
-		{
-			id: "megumin-tools",
-			label: "Megumin's Tools",
-			dateAccessed: "2026-08-10",
-			url: "https://docs.google.com/spreadsheets/d/1VCzq6Trwc9T_wEsvTANpL7yy8FaJ6psSsKYn4O4riw8/edit?usp=sharing",
-			links: [{
-				label: "Artifact Upgrade C/P",
-				url: "https://docs.google.com/spreadsheets/d/1VCzq6Trwc9T_wEsvTANpL7yy8FaJ6psSsKYn4O4riw8/edit?gid=1046753957#gid=1046753957"
-			}, {
-				label: "ARP Calculator",
-				url: "https://docs.google.com/spreadsheets/d/1VCzq6Trwc9T_wEsvTANpL7yy8FaJ6psSsKYn4O4riw8/edit?gid=1289162159#gid=1289162159"
-			}]
-		},
-		{
-			id: "megumin-ucf-artifacts-info",
-			label: "【Artifacts】Info",
-			dateAccessed: "2026-08-06",
-			url: "https://www.alienwarearena.com/ucf/show/2167784"
-		},
-		{
-			id: "asce",
-			label: "ASCE",
-			url: "https://github.com/MarvashMagalli/ASCE"
-		}
-	];
-	var ArtifactTier = function(ArtifactTier) {
-		ArtifactTier[ArtifactTier["Rust"] = 0] = "Rust";
-		ArtifactTier[ArtifactTier["Bronze"] = 1] = "Bronze";
-		ArtifactTier[ArtifactTier["Silver"] = 2] = "Silver";
-		ArtifactTier[ArtifactTier["Gold"] = 3] = "Gold";
-		ArtifactTier[ArtifactTier["Platinum"] = 4] = "Platinum";
-		ArtifactTier[ArtifactTier["Interstellar"] = 5] = "Interstellar";
-		return ArtifactTier;
-	}({});
-	var ARTIFACT_TIERS = [
-		0,
-		1,
-		2,
-		3,
-		4,
-		5
-	];
 	function artifactTierAt(index) {
 		return ARTIFACT_TIERS[index];
 	}
-	var TIER_LABELS = {
-		[0]: "Rust",
-		[1]: "Bronze",
-		[2]: "Silver",
-		[3]: "Gold",
-		[4]: "Platinum",
-		[5]: "Interstellar"
-	};
-	var FRAGMENT_COST_TO_TIER = {
-		[0]: 0,
-		[1]: 2,
-		[2]: 5,
-		[3]: 10,
-		[4]: 16,
-		[5]: 25
-	};
-	var ArtifactEffectType = function(ArtifactEffectType) {
-		ArtifactEffectType["SteamQuests"] = "SteamQuests";
-		ArtifactEffectType["WatchTwitch"] = "WatchTwitch";
-		ArtifactEffectType["DailyCalendar"] = "DailyCalendar";
-		ArtifactEffectType["TimeOnSite"] = "TimeOnSite";
-		ArtifactEffectType["DiscordPoll"] = "DiscordPoll";
-		ArtifactEffectType["MarketDiscountPct"] = "MarketDiscountPct";
-		ArtifactEffectType["AllArpPct"] = "AllArpPct";
-		ArtifactEffectType["CommunityPlaytimePct"] = "CommunityPlaytimePct";
-		ArtifactEffectType["UsernameColor"] = "UsernameColor";
-		ArtifactEffectType["None"] = "None";
-		return ArtifactEffectType;
-	}({});
-	var ARTIFACTS = [
-		{
-			id: "sylphin-fission-blade",
-			category: "Weapon",
-			tierNames: [
-				"Broken Sylphin Fission Blade",
-				"Basic Sylphin Fission Blade",
-				"Extended Sylphin Fission Blade",
-				"Sylphin Fission Blade Mk1",
-				"Sylphin Fission Blade Mk3",
-				"Kylorf's Sylphin Fission Blade"
-			],
-			effects: [
-				1,
-				2,
-				4,
-				6,
-				8,
-				12
-			],
-			effectType: "SteamQuests",
-			effectUnit: "flat"
-		},
-		{
-			id: "pn295",
-			category: "Tech",
-			tierNames: [
-				"Pn295 Unstable",
-				"Pn295 Controlled",
-				"Pn295 Fusion",
-				"Pn295 Alloy",
-				"Slyphin Battle Armor",
-				"Pn295 Collapsed Star"
-			],
-			effects: [
-				1,
-				2,
-				4,
-				7,
-				10,
-				15
-			],
-			effectType: "WatchTwitch",
-			effectUnit: "flat"
-		},
-		{
-			id: "light-warping",
-			category: "Language",
-			tierNames: [
-				"Rudimentary Light Warping",
-				"Simplistic Light Warping",
-				"Phase Light Warping",
-				"Bonded Phase Light Warping",
-				"PLW Conduit RX13",
-				"Light Warp Forerunners"
-			],
-			effects: [
-				-.01,
-				-.03,
-				-.05,
-				-.08,
-				-.1,
-				-.15
-			],
-			effectType: "MarketDiscountPct",
-			effectUnit: "pct"
-		},
-		{
-			id: "herkow-plasma-chamber",
-			category: "Power",
-			tierNames: [
-				void 0,
-				void 0,
-				void 0,
-				"H`erkow Plasma Chamber",
-				"H`erkow Control Center",
-				"H`erkow Orb Reactor"
-			],
-			effects: [
-				void 0,
-				void 0,
-				void 0,
-				.1,
-				.15,
-				.25
-			],
-			effectType: "AllArpPct",
-			effectUnit: "pct"
-		},
-		{
-			id: "them",
-			category: "Power",
-			tierNames: [
-				"*** THEM ***",
-				"*** THEM CONTAINED ***",
-				"*** THEM ESCAPED ***",
-				void 0,
-				void 0,
-				void 0
-			],
-			effects: [
-				-.2,
-				-.25,
-				-.25,
-				void 0,
-				void 0,
-				void 0
-			],
-			effectType: "AllArpPct",
-			effectUnit: "pct"
-		},
-		{
-			id: "herkow-warrior-script",
-			category: "Weapon",
-			tierNames: [
-				"H`erkow Warrior Script",
-				void 0,
-				void 0,
-				void 0,
-				void 0,
-				void 0
-			],
-			effects: [
-				1,
-				void 0,
-				void 0,
-				void 0,
-				void 0,
-				void 0
-			],
-			effectType: "SteamQuests",
-			effectUnit: "flat"
-		},
-		{
-			id: "scion-of-the-light",
-			category: "Tech",
-			tierNames: [
-				"Scion of the Light",
-				"Scion of the Light: 2nd Sighting",
-				void 0,
-				void 0,
-				void 0,
-				void 0
-			],
-			effects: [
-				1,
-				2,
-				void 0,
-				void 0,
-				void 0,
-				void 0
-			],
-			effectType: "WatchTwitch",
-			effectUnit: "flat"
-		},
-		{
-			id: "mysterious-text",
-			category: "Language",
-			tierNames: [
-				"Mysterious Text",
-				"Mysterious Text Decipher",
-				void 0,
-				void 0,
-				void 0,
-				void 0
-			],
-			effects: [
-				-.01,
-				-.02,
-				void 0,
-				void 0,
-				void 0,
-				void 0
-			],
-			effectType: "MarketDiscountPct",
-			effectUnit: "pct"
-		},
-		{
-			id: "chai-stones",
-			category: "Precious Gems",
-			tierNames: [
-				"Chai Stones - Raw",
-				"Chai Stones - Unprocessed",
-				"Chai Stones - Processed",
-				"The Stone of Cromcote`",
-				"H`erkow Fertility Stone",
-				"Chai Stone H`erkow Display"
-			],
-			effects: [
-				1,
-				2,
-				3,
-				4,
-				5,
-				6
-			],
-			effectType: "DailyCalendar",
-			effectUnit: "flat"
-		},
-		{
-			id: "herkow-fertility-robes",
-			category: "Clothing",
-			tierNames: [
-				void 0,
-				void 0,
-				void 0,
-				"H`erkow Fertility Robes",
-				void 0,
-				void 0
-			],
-			effects: [
-				void 0,
-				void 0,
-				void 0,
-				"Pink",
-				void 0,
-				void 0
-			],
-			effectType: "UsernameColor",
-			effectUnit: "cosmetic"
-		},
-		{
-			id: "pn295-unstable-battery",
-			category: "Weapon",
-			tierNames: [
-				"Pn 295 Unstable Battery",
-				"Pn 295 Stable Battery",
-				"Pn 295 Contained Battery",
-				"Pn 295 Battery Amplifier",
-				"Pn 295 Cruiser Class Battery Amplifier",
-				"Pn 295 Recycler"
-			],
-			effects: [
-				2,
-				4,
-				6,
-				8,
-				10,
-				15
-			],
-			effectType: "SteamQuests",
-			effectUnit: "flat"
-		},
-		{
-			id: "zorathian-cosmotheque",
-			category: "Knowledge",
-			tierNames: [
-				void 0,
-				"Zorathian Cosmotheque",
-				"Zorathian Data Mine",
-				"5th Dimensional Data",
-				"Crystalline Quantum Shelving",
-				"Zorathian Library"
-			],
-			effects: [
-				void 0,
-				1,
-				2,
-				3,
-				4,
-				5
-			],
-			effectType: "DiscordPoll",
-			effectUnit: "flat"
-		},
-		{
-			id: "flux",
-			category: "Social",
-			tierNames: [
-				"Flux",
-				"Advanced Flux",
-				"Spocot Board",
-				"Spocot Flux Epoc",
-				"Spocot Flux Final",
-				"Spocot Flux Champion"
-			],
-			effects: [
-				.05,
-				.1,
-				.2,
-				.3,
-				.4,
-				.5
-			],
-			effectType: "CommunityPlaytimePct",
-			effectUnit: "pct"
-		},
-		{
-			id: "bali-arches",
-			category: "Architecture",
-			tierNames: [
-				void 0,
-				"Ba'li Arches",
-				"Northop Arches",
-				"Golden Arches",
-				"Apotho Arches",
-				"Eye of the Night"
-			],
-			effects: [
-				void 0,
-				1,
-				2,
-				3,
-				4,
-				6
-			],
-			effectType: "TimeOnSite",
-			effectUnit: "flat"
-		},
-		{
-			id: "gamers-wanted",
-			category: "Architecture",
-			tierNames: [
-				void 0,
-				void 0,
-				"Gamers Wanted",
-				"They're Out There",
-				"Defy Boundaries",
-				"Rise"
-			],
-			effects: [
-				void 0,
-				void 0,
-				1,
-				2,
-				3,
-				4
-			],
-			effectType: "TimeOnSite",
-			effectUnit: "flat"
-		},
-		{
-			id: "omniversal-override",
-			category: "Language",
-			tierNames: [
-				void 0,
-				void 0,
-				"Omniversal Override",
-				"Planetary Tranverser",
-				"Dimensional Articulator",
-				"Multi-Planar Transmuter"
-			],
-			effects: [
-				void 0,
-				void 0,
-				-.02,
-				-.03,
-				-.04,
-				-.05
-			],
-			effectType: "MarketDiscountPct",
-			effectUnit: "pct"
-		},
-		{
-			id: "the-black-rose",
-			category: "Clothing",
-			tierNames: [
-				"The Black Rose",
-				void 0,
-				void 0,
-				void 0,
-				void 0,
-				void 0
-			],
-			effects: [
-				"Dark Gray",
-				void 0,
-				void 0,
-				void 0,
-				void 0,
-				void 0
-			],
-			effectType: "UsernameColor",
-			effectUnit: "cosmetic"
-		},
-		{
-			id: "the-fractured-lilly",
-			category: "Precious Gems",
-			tierNames: [
-				"The Fractured Lilly",
-				void 0,
-				void 0,
-				void 0,
-				void 0,
-				void 0
-			],
-			effects: [
-				0,
-				void 0,
-				void 0,
-				void 0,
-				void 0,
-				void 0
-			],
-			effectType: "None",
-			effectUnit: "flat"
-		},
-		{
-			id: "the-veiled-thorn",
-			category: "Weapon",
-			tierNames: [
-				"The Veiled Thorn",
-				void 0,
-				void 0,
-				void 0,
-				void 0,
-				void 0
-			],
-			effects: [
-				0,
-				void 0,
-				void 0,
-				void 0,
-				void 0,
-				void 0
-			],
-			effectType: "None",
-			effectUnit: "flat"
-		},
-		{
-			id: "audio-archive-stone",
-			category: "Clothing",
-			tierNames: [
-				void 0,
-				void 0,
-				void 0,
-				void 0,
-				void 0,
-				"Audio Archive Stone"
-			],
-			effects: [
-				void 0,
-				void 0,
-				void 0,
-				void 0,
-				void 0,
-				"Tomato"
-			],
-			effectType: "UsernameColor",
-			effectUnit: "cosmetic"
-		}
-	];
-	var TIER_NAME_ALIASES = {
-		"Pn295 Recycler": {
-			id: "pn295-unstable-battery",
-			tier: 5
-		},
-		"H'erkow Warrior Script": {
-			id: "herkow-warrior-script",
-			tier: 0
-		}
-	};
-	var ARTIFACT_SETS = [
-		{
-			id: "first-contact",
-			name: "First Contact",
-			memberIds: [
-				"sylphin-fission-blade",
-				"pn295",
-				"light-warping"
-			],
-			effects: [{
-				type: "DailyCalendar",
-				value: 1,
-				unit: "flat"
-			}, {
-				type: "UsernameColor",
-				value: 1,
-				unit: "cosmetic"
-			}]
-		},
-		{
-			id: "stanley-excavation",
-			name: "The Stanley Excavation",
-			memberIds: [
-				"chai-stones",
-				"herkow-fertility-robes",
-				"pn295-unstable-battery"
-			],
-			effects: [{
-				type: "SteamQuests",
-				value: 5,
-				unit: "flat"
-			}, {
-				type: "MarketDiscountPct",
-				value: -.15,
-				unit: "pct"
-			}]
-		},
-		{
-			id: "zorathian-renaissance",
-			name: "Zorathian Renaissance",
-			memberIds: [
-				"zorathian-cosmotheque",
-				"flux",
-				"bali-arches"
-			],
-			effects: [{
-				type: "AllArpPct",
-				value: .1,
-				unit: "pct"
-			}, {
-				type: "UsernameColor",
-				value: 1,
-				unit: "cosmetic"
-			}]
-		},
-		{
-			id: "braxtine-garden",
-			name: "Braxtine Garden",
-			memberIds: [
-				"the-black-rose",
-				"the-crimsom-t",
-				"the-nebula-c"
-			],
-			effects: [{
-				type: "AllArpPct",
-				value: 5,
-				unit: "pct"
-			}, {
-				type: "TimeOnSite",
-				value: 100,
-				unit: "flat"
-			}]
-		}
-	];
-	var BASE_ACTIVITY = {
-		days: 1,
-		timeOnSiteBasePerDay: 5,
-		watchTwitchBasePerDay: 15,
-		steamQuestBases: [
-			15,
-			25,
-			25
-		],
-		discordPollBase: 5,
-		discordPollsWhenPending: 2,
-		discordPollPostHourUtc: 16,
-		dailyQuestBase: 7,
-		weekendQuestBase: 5,
-		dailyCalendarBasePerDay: 5,
-		steamCommunityEventReward: 20
-	};
-	var MONTHLY_CATEGORY_USES = {
-		["WatchTwitch"]: 30,
-		["DailyCalendar"]: 30,
-		["TimeOnSite"]: 30,
-		["SteamQuests"]: 12,
-		["DiscordPoll"]: 20
-	};
-	var MONTHLY_ARP_FOR_PCT = 1800;
-	var END_GAME_HPC_UPGRADE_ORDER = [
-		"herkow-plasma-chamber",
-		"pn295",
-		"chai-stones",
-		"pn295-unstable-battery",
-		"bali-arches",
-		"sylphin-fission-blade",
-		"zorathian-cosmotheque",
-		"scion-of-the-light"
-	];
-	var END_GAME_NO_HPC_UPGRADE_ORDER = [
-		"pn295",
-		"chai-stones",
-		"pn295-unstable-battery",
-		"bali-arches",
-		"sylphin-fission-blade",
-		"zorathian-cosmotheque",
-		"scion-of-the-light"
-	];
-	var NEW_GAME_UPGRADE_ORDER = [
-		"bali-arches",
-		"zorathian-cosmotheque",
-		"flux",
-		"scion-of-the-light"
-	];
 	function upgradeFocusOrder(ownedFamilyIds) {
 		if (ownedFamilyIds.has("herkow-plasma-chamber")) return END_GAME_HPC_UPGRADE_ORDER;
 		return ownedFamilyIds.has("pn295") ? END_GAME_NO_HPC_UPGRADE_ORDER : NEW_GAME_UPGRADE_ORDER;
 	}
-	var END_GAME_HPC_STANDING = [
-		"herkow-plasma-chamber",
-		"chai-stones",
-		"pn295"
-	];
-	var END_GAME_NO_HPC_STANDING = [
-		"pn295",
-		"chai-stones",
-		"bali-arches"
-	];
-	var NEW_GAME_STANDING = [
-		"bali-arches",
-		"zorathian-cosmotheque",
-		"flux"
-	];
 	function monthlyMetaStandingFamilies(ownedFamilyIds) {
 		if (ownedFamilyIds.has("herkow-plasma-chamber")) return {
 			standing: END_GAME_HPC_STANDING,
@@ -1123,7 +473,6 @@
 	function displayNameFor(definition, tier) {
 		return definition.tierNames[tier] ?? definition.id;
 	}
-	var MS_PER_DAY$2 = 864e5;
 	function utcAtHour(date, hour) {
 		return new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate(), hour, 0, 0, 0));
 	}
@@ -1148,9 +497,6 @@
 	function msUntilNextDiscordPollPost(now = new Date()) {
 		return Math.max(0, nextDiscordPollPostAt(now).getTime() - now.getTime());
 	}
-	var STEAM_QUEST_STATUS_ID_PREFIX = "control-center__steam-quest-status-";
-	var STEAM_LIBRARY_SYNC_LABEL = /^(Check Game|Visit Steam|Sync Games)$/i;
-	var STEAM_OWNERSHIP_DENIAL = /do not own|don['’]t own|not in your steam library|not in your library|must own this game/i;
 	function hasSteamLibrarySyncControl(document_) {
 		return Boolean(document_.querySelector(".btn-check-owned-games")) || [...document_.querySelectorAll("a, button")].some((element) => STEAM_LIBRARY_SYNC_LABEL.test(controlLabel(element)));
 	}
@@ -1446,18 +792,6 @@
 			later
 		} : { text: parts.join("; ") };
 	}
-	var COMMUNITY_SAMPLE_MAX = 96;
-	var COMMUNITY_SAMPLE_VISIT_MIN_GAP_MS = 9e5;
-	var COMMUNITY_HOURS_REMOTE_SAMPLE_MIN_MS = 36e5;
-	var COMMUNITY_RATE_MIN_SPAN_MS = 9e5;
-	var COMMUNITY_RATE_WINDOW_MS = 864e5;
-	var COMMUNITY_TREND_WINDOW_MS = 1728e5;
-	var COMMUNITY_TREND_HALF_MIN_MS = 648e5;
-	var COMMUNITY_RATIO_MIN = .5;
-	var COMMUNITY_RATIO_MAX = 2;
-	var COMMUNITY_DECAY_TRUST = .5;
-	var COMMUNITY_RATIO_FLAT_EPS = .03;
-	var COMMUNITY_MAX_HOURS_PER_DAY = 8e4;
 	function markCommunityEventEnded(event) {
 		return {
 			scrapedAt: event.scrapedAt,
@@ -2015,14 +1349,6 @@
 		if (progress.communityHoursCap !== void 0) state.communityHoursCap = progress.communityHoursCap;
 		return state;
 	}
-	var ASCE_CACHE_KEY = "asceCommunityHours";
-	var ASCE_HOURS_URL = "https://raw.githubusercontent.com/MarvashMagalli/ASCE/main/stored_hours.json";
-	var ASCE_CONFIG_URL = "https://raw.githubusercontent.com/MarvashMagalli/ASCE/main/configAWA.json";
-	var ASCE_CACHE_TTL_MS = 15e5;
-	var ASCE_ERROR_TTL_MS = 18e5;
-	var ASCE_SAMPLE_MAX = 96;
-	var FETCH_TIMEOUT_MS = 8e3;
-	var inflightLookup = {};
 	function hasPendingAsceRefresh() {
 		return inflightLookup.promise !== void 0;
 	}
@@ -2302,83 +1628,6 @@
 		const next = state.communityEvent;
 		return next !== void 0 && asceEventSignature(next) !== before;
 	}
-	var SETTINGS_KEY$1 = "artifactOptimizerSettings";
-	var HOURS_PER_DAY = 24;
-	var MS_PER_HOUR$1 = 36e5;
-	var COOLDOWN_MS = HOURS_PER_DAY * MS_PER_HOUR$1;
-	var NOTIFICATION_TYPE_KEYS = [
-		"swap",
-		"community",
-		"vault",
-		"giveaways"
-	];
-	var NOTIFICATION_TYPE_COPY = {
-		swap: {
-			title: "Recommended swap",
-			hint: "When a better loadout is waiting on a 24h lock — not every unlock."
-		},
-		community: {
-			title: "Community Event",
-			hint: "When community hours unlock pending ARP."
-		},
-		vault: {
-			title: "Game Vault",
-			hint: "When the vault opens or new games appear."
-		},
-		giveaways: {
-			title: "New giveaways",
-			hint: "Official Alienware key giveaways — not community giveaways."
-		}
-	};
-	var DEFAULT_NOTIFICATION_TYPES = {
-		swap: true,
-		community: true,
-		vault: true,
-		giveaways: true
-	};
-	var DEFAULT_ACTIVITIES = {
-		timeOnSite: {
-			enabled: true,
-			frequency: 1
-		},
-		steamQuests: {
-			enabled: true,
-			frequency: 1
-		},
-		watchTwitch: {
-			enabled: true,
-			frequency: 1
-		},
-		dailyCalendar: {
-			enabled: true,
-			frequency: 1
-		},
-		discordPoll: {
-			enabled: true,
-			frequency: 1
-		},
-		dailyQuests: {
-			enabled: true,
-			frequency: 1
-		},
-		steamCommunityEvent: {
-			enabled: true,
-			frequency: 1
-		}
-	};
-	var defaultArtifactSettings = {
-		activities: { ...DEFAULT_ACTIVITIES },
-		pendingVaultPurchaseArp: 0,
-		manualArtifacts: [],
-		preferScraped: true,
-		slotCooldowns: [],
-		preferredTwitchStreamers: [],
-		utcDailyEndBufferHours: 1,
-		browserNotifications: false,
-		notificationTypes: { ...DEFAULT_NOTIFICATION_TYPES },
-		allowAccountActions: false,
-		achievementsEnabled: false
-	};
 	function isPartialSettings$1(value) {
 		return typeof value === "object" && !!value;
 	}
@@ -2512,7 +1761,6 @@
 			return slotLocks[position] === true && findCooldownEntry(settings, position) !== void 0 && cooldownRemainingMs(settings, position, now) <= 0;
 		});
 	}
-	var STUCK_SLOT_LOCK_HINT = "Still stuck after Refresh? Upgrade a maxed artifact manually (Warrior Script) — 0 fragments";
 	async function recordSlotChange(position, artifactInstanceId) {
 		const rest = (await getArtifactSettings()).slotCooldowns.filter((entry) => entry.position !== position);
 		const entry = {
@@ -2523,11 +1771,6 @@
 		rest.push(entry);
 		await saveArtifactSettings({ slotCooldowns: rest });
 	}
-	var SLOT_POSITIONS = [
-		1,
-		2,
-		3
-	];
 	function isCompleteSlotLockMap(slotLocks) {
 		return SLOT_POSITIONS.every((position) => typeof slotLocks[position] === "boolean");
 	}
@@ -2561,7 +1804,6 @@
 	function areAchievementsEnabled(settings) {
 		return false;
 	}
-	var SNAPSHOT_KEY$1 = "artifactSnapshot";
 	function isArtifactSnapshot(value) {
 		if (typeof value !== "object" || !value) return false;
 		const v = value;
@@ -2623,7 +1865,6 @@
 	function readUsername() {
 		return readUsernameFrom(document);
 	}
-	var USER_ARTIFACTS_ROOM_PATH = "/user-artifacts-room";
 	function resolveShowroomUrl(username) {
 		const name = username ?? readUsername();
 		if (name) return `/member/${encodeURIComponent(name)}/artifacts`;
@@ -2778,11 +2019,6 @@
 		const pathname = location.pathname;
 		return /\/member\/[^/]+\/artifacts\/?$/.test(pathname) || /\/user-artifacts-room\/?$/.test(pathname);
 	}
-	var ARP_LOG_ROW_SELECTOR = ".card-table-row";
-	var ARP_LOG_AFTER_ROWS_SELECTOR = "#arp-logs-per-page, #arp-log-chart";
-	var ARP_LOG_DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
-	var ARP_LOG_AMOUNT_RE = /^[+]?\d[\d,]*$/;
-	var ARP_LOG_TOGGLE_RE = /^[▼▲^▾▴]$/;
 	function parseRedeemableArpText(text) {
 		const match = /Redeemable ARP:\s*([\d,]+)/i.exec(text);
 		if (!match?.[1]) return;
@@ -2903,7 +2139,6 @@
 		state.recent = fromTable.length > 0 ? fromTable : scrapeArpLogRowsFromText(body);
 		return state;
 	}
-	var ARP_LOG_UNSEEN_SCRAPED_AT = new Date(0).toISOString();
 	function mergeArpLogScrapedAt(scraped, previous) {
 		if (scraped.recent.length > 0) return scraped.scrapedAt;
 		return previous.recent.length > 0 ? previous.scrapedAt : ARP_LOG_UNSEEN_SCRAPED_AT;
@@ -3015,6 +2250,9 @@
 	async function claimBattlePassReward(path, body = {}) {
 		return postForm(path, body);
 	}
+	async function startBattlePassReward(path, body = {}) {
+		return postForm(path, body);
+	}
 	function pickStuckLockNudgeTarget(artifacts) {
 		const maxed = artifacts.filter((artifact) => artifact.maxLevel || artifact.upgradeCost === 0);
 		if (maxed.length === 0) return;
@@ -3060,10 +2298,6 @@
 			applied
 		};
 	}
-	var BATTLE_PASS_SEASON_RE = /\/battle-pass\/(\d+)/;
-	var BATTLE_PASS_SEASON_LOOKAHEAD = 6;
-	var BATTLE_PASS_PATH_CACHE_MS = 9e5;
-	var battlePassPathCache = { at: 0 };
 	function battlePassSeasonId(href) {
 		if (!href) return;
 		const match = BATTLE_PASS_SEASON_RE.exec(href);
@@ -3158,15 +2392,72 @@
 	function hasBattlePassClaimUi(document_) {
 		return Boolean(document_.querySelector(".bp-popup__claim-btn, .bp-popup__claimed") ?? /Ready to claim/i.test(documentBody(document_)?.textContent ?? ""));
 	}
+	function hasBattlePassStartUi(document_) {
+		return Boolean(document_.querySelector(".bp-header__start-btn, .bp-widget__start-form, .bp-widget__recap--start"));
+	}
+	function isFormElement(node) {
+		if (!node) return false;
+		return ("tag" in node && typeof node.tag === "string" ? node.tag : node.tagName).toLowerCase() === "form";
+	}
+	function battlePassStartForm(document_) {
+		const fromWidget = document_.querySelector(".bp-widget__start-form");
+		if (isFormElement(fromWidget)) return fromWidget;
+		const fromButton = document_.querySelector(".bp-header__start-btn")?.closest("form");
+		return isFormElement(fromButton) ? fromButton : void 0;
+	}
+	function scrapeBattlePassStartTarget(document_) {
+		const form = battlePassStartForm(document_);
+		if (!form) return;
+		const trimmedPath = form.getAttribute("action")?.trim();
+		if (!trimmedPath) return;
+		const csrfToken = form.querySelector("input[name=\"_csrf_token\"]")?.value;
+		const target = { startPath: trimmedPath };
+		if (csrfToken) target.csrfToken = csrfToken;
+		const body = {};
+		for (const input of form.querySelectorAll("input[name]")) {
+			const name = input.getAttribute("name")?.trim() ?? ("name" in input && typeof input.name === "string" ? input.name.trim() : "");
+			if (!name || name === "_csrf_token") continue;
+			body[name] = "value" in input && (typeof input.value === "string" || typeof input.value === "number") ? String(input.value) : "";
+		}
+		if (Object.keys(body).length > 0) target.body = body;
+		return target;
+	}
+	function resolveBattlePassUrl(document_, pageUrl) {
+		return battlePassControlCenterPath(pageUrl) ?? battlePassPathFromDocument(document_) ?? battlePassControlCenterPath(location.pathname);
+	}
+	function scrapeBattlePassTokens(state, document_, body) {
+		const tokensMatch = /BATTLE TOKENS\s*([\d,]+)\s*\/\s*([\d,]+)/i.exec(body);
+		if (tokensMatch?.[1] && tokensMatch[2]) {
+			state.tokens = Number(tokensMatch[1].replaceAll(",", ""));
+			state.tokensMax = Number(tokensMatch[2].replaceAll(",", ""));
+		}
+		const tokenCount = numberFromElement(document_, ".bp-header__token-count");
+		const tokenTotal = numberFromElement(document_, ".bp-header__token-total");
+		if (tokenCount !== void 0) state.tokens = tokenCount;
+		if (tokenTotal !== void 0) state.tokensMax = tokenTotal;
+	}
 	function scrapeBattlePassFromDocument(document_, pageUrl) {
+		if (isStaticBattlePassPreview(document_)) return;
+		const url = resolveBattlePassUrl(document_, pageUrl);
+		if (!url) return;
+		if (hasBattlePassStartUi(document_)) {
+			const state = {
+				readyToClaim: 0,
+				readyToClaimArp: 0,
+				needsStart: true,
+				url,
+				scrapedAt: new Date().toISOString()
+			};
+			const startTarget = scrapeBattlePassStartTarget(document_);
+			if (startTarget) state.startTarget = startTarget;
+			scrapeBattlePassTokens(state, document_, pageText(document_));
+			applyBattlePassEnd(state, document_);
+			return state;
+		}
 		const body = pageText(document_);
 		const popups = document_.querySelectorAll(".bp-popup[data-milestone-id]");
-		const tokensMatch = /BATTLE TOKENS\s*([\d,]+)\s*\/\s*([\d,]+)/i.exec(body);
 		if ((body.match(/Ready to claim/gi) ?? []).length === 0 && popups.length === 0) return;
 		if (!hasBattlePassClaimUi(document_)) return;
-		if (isStaticBattlePassPreview(document_)) return;
-		const url = battlePassControlCenterPath(pageUrl) ?? battlePassPathFromDocument(document_) ?? battlePassControlCenterPath(location.pathname);
-		if (!url) return;
 		const readyClaims = listReadyClaimsFromDocument(document_);
 		const { readyToClaim, readyToClaimArp } = countBattlePassClaims(document_);
 		const state = {
@@ -3176,18 +2467,10 @@
 			scrapedAt: new Date().toISOString()
 		};
 		if (readyClaims.length > 0) state.readyClaims = readyClaims;
-		if (tokensMatch?.[1] && tokensMatch[2]) {
-			state.tokens = Number(tokensMatch[1].replaceAll(",", ""));
-			state.tokensMax = Number(tokensMatch[2].replaceAll(",", ""));
-		}
-		const tokenCount = numberFromElement(document_, ".bp-header__token-count");
-		const tokenTotal = numberFromElement(document_, ".bp-header__token-total");
-		if (tokenCount !== void 0) state.tokens = tokenCount;
-		if (tokenTotal !== void 0) state.tokensMax = tokenTotal;
+		scrapeBattlePassTokens(state, document_, body);
 		applyBattlePassEnd(state, document_);
 		return state;
 	}
-	var BATTLE_PASS_ENDS_RE = /battle\s*pass\s*ends?\s*in\s*(\d{1,3}(?:\s*:\s*\d{1,2}){2,3})/i;
 	function numberFromElement(document_, selector) {
 		const raw = document_.querySelector(selector)?.textContent.replaceAll(",", "").trim();
 		if (!raw || !/^\d+$/.test(raw)) return;
@@ -3257,6 +2540,12 @@
 		const battlePass = { ...next.battlePass };
 		applyBattlePassEnd(battlePass, document_);
 		next.battlePass = battlePass;
+	}
+	function applyBattlePassStartHintFromDocument(next, document_) {
+		if (!hasBattlePassStartUi(document_)) return;
+		const scraped = scrapeBattlePassFromDocument(document_, next.battlePass?.url ?? location.pathname);
+		if (!scraped?.needsStart) return;
+		next.battlePass = mergeBattlePassScrape(scraped, next.battlePass, { source: "visit" });
 	}
 	function listReadyClaimsFromDocument(document_) {
 		const claims = [];
@@ -3356,12 +2645,10 @@
 			setTimeout(resolve, ms);
 		});
 	}
-	var CLAIM_QUEUE_GAP_MS = 1500;
 	async function waitWhile(isWaiting, timeoutMs) {
 		const startedAt = Date.now();
 		while (isWaiting() && Date.now() - startedAt < timeoutMs) await delay$3(100);
 	}
-	var claimEndpointCache = {};
 	function jsonishId(value) {
 		return /^\d+$/.test(value) ? Number(value) : value;
 	}
@@ -3603,6 +2890,61 @@
 		}
 		return listBattlePassClaimButtons(document_, options).length;
 	}
+	function startPostBody(target) {
+		const body = { ...target.body };
+		if (target.csrfToken) body._csrf_token = target.csrfToken;
+		return body;
+	}
+	async function startBattlePassEnrollment(options = {}) {
+		const isOnBattlePassPage = location.pathname.includes("/battle-pass");
+		let document_;
+		if (isOnBattlePassPage) {
+			await waitForBattlePassDocument();
+			document_ = document;
+		} else document_ = await fetchBattlePassDocument(options.battlePassPath);
+		if (!document_) return {
+			started: false,
+			error: "Could not load Battle Pass."
+		};
+		const target = options.startTarget ?? scrapeBattlePassStartTarget(document_);
+		if (!target) {
+			const alreadyStarted = scrapeBattlePassFromDocument(document_, options.battlePassPath ?? location.pathname);
+			if (alreadyStarted && alreadyStarted.needsStart !== true) return {
+				started: true,
+				battlePass: alreadyStarted
+			};
+			return {
+				started: false,
+				error: "Start Battle Pass form not found."
+			};
+		}
+		const result = await startBattlePassReward(target.startPath, startPostBody(target));
+		if (!result.ok) return {
+			started: false,
+			error: result.error ?? "Start Battle Pass request failed."
+		};
+		let after;
+		if (isOnBattlePassPage) {
+			await waitForBattlePassDocument();
+			after = scrapeBattlePassFromDocument(document, location.pathname);
+		} else after = scrapeBattlePassFromDocument(await fetchBattlePassDocument(options.battlePassPath) ?? document_, options.battlePassPath);
+		if (after && after.needsStart !== true) return {
+			started: true,
+			battlePass: after
+		};
+		const fallback = {
+			readyToClaim: 0,
+			readyToClaimArp: 0,
+			url: options.battlePassPath ?? after?.url ?? battlePassControlCenterPath(location.pathname) ?? target.startPath,
+			scrapedAt: new Date().toISOString()
+		};
+		if (after?.endsAt) fallback.endsAt = after.endsAt;
+		if (after?.endsInText) fallback.endsInText = after.endsInText;
+		return {
+			started: true,
+			battlePass: after ?? fallback
+		};
+	}
 	async function claimAllBattlePassRewards(options = {}) {
 		const shouldSkipArpBoosts = options.shouldSkipArpBoosts === true;
 		const isOnBattlePassPage = location.pathname.includes("/battle-pass");
@@ -3666,7 +3008,7 @@
 		return location.pathname.includes("/battle-pass") ? scrapeBattlePassFromDocument(document, location.pathname) : void 0;
 	}
 	function isBattlePassDocumentReady(document_) {
-		return hasBattlePassClaimUi(document_);
+		return hasBattlePassClaimUi(document_) || hasBattlePassStartUi(document_);
 	}
 	async function waitForBattlePassDocument(timeoutMs = 12e3) {
 		if (isBattlePassDocumentReady(document)) return;
@@ -3693,13 +3035,6 @@
 		const { readyToClaim, readyToClaimArp } = countBattlePassClaims(document_);
 		return `${readyToClaim}:${readyToClaimArp}`;
 	}
-	var DAILY_QUEST_STATUS_SELECTORS = [
-		"[id^=\"control-center__daily-quest-status-\"]",
-		"[id^=\"control-center__daily-quests-status-\"]",
-		"[id^=\"control-center__weekend-quest-status-\"]",
-		"[id^=\"control-center__quest-status-\"]"
-	];
-	var HEADER_NAME = /^(incomplete|complete|status|game|quest|quests|reward|arp)$/i;
 	function dailyQuestStatusFromText(text) {
 		const trimmed = text.trim();
 		if (/^complete$/i.test(trimmed)) return "complete";
@@ -3815,7 +3150,6 @@
 		if (/Watch Twitch[\s\S]{0,240}Max Cap Reached/i.test(body) && !/twitch-max-reached[^>]*display:\s*none/i.test(body)) return "capped";
 		return /Watch Twitch[\s\S]{0,80}\bComplete\b/i.test(body) ? "capped" : void 0;
 	}
-	var TWITCH_MS_PER_ARP$2 = 6e4;
 	function parseDailyArpTwitchData(document_) {
 		const scripts = [...document_.querySelectorAll("script:not([src])")].map((script) => script.textContent).join("\n");
 		const assignment = /dailyArpData\s*=\s*(\{[\s\S]*?\});/.exec(scripts)?.[1];
@@ -4002,7 +3336,6 @@
 	function scrapeControlCenterCaps() {
 		return scrapeControlCenterCapsFromDocument(document);
 	}
-	var CONTROL_CENTER_WIDGET = "[id^=\"control-center__\"], a.community-event-banner";
 	function isControlCenterDocumentReady(document_) {
 		return Boolean(document_.querySelector(CONTROL_CENTER_WIDGET));
 	}
@@ -4049,15 +3382,6 @@
 			});
 		});
 	}
-	var MONTHLY_VAULT_CLAIM_USED_RE = /already claimed a game this month/i;
-	var VAULT_CLAIMED_BADGE_RE = /\bclaimed\b/i;
-	var VAULT_CLAIM_ACTION_RE = /\bclaim\b/i;
-	var VAULT_CARD_SELECTORS = [
-		".gamevault-marketplace-product[data-product-price]",
-		".marketplace-game-product[data-product-price]",
-		".pointer.marketplace-game-small",
-		".pointer.marketplace-game-large"
-	].join(", ");
 	function isListPriceVaultClaim(game) {
 		return game.isAuction !== true;
 	}
@@ -4238,16 +3562,6 @@
 		});
 		applyGameVaultSchedule(next, timerMs, vault.some((game) => isVaultStockForUser(game, next)), Date.now());
 	}
-	var SITE_STATE_KEY = "artifactSiteState";
-	var DEFAULT_CAPS = {
-		timeOnSite: "unknown",
-		steamQuests: "unknown",
-		watchTwitch: "unknown",
-		dailyCalendar: "unknown",
-		discordPoll: "unknown",
-		dailyQuests: "unknown",
-		steamCommunityEvent: "unknown"
-	};
 	function normalizeCaps(raw) {
 		const caps = raw ?? {};
 		return {
@@ -4294,6 +3608,7 @@
 		applyDailyQuestsFromDocument(next, document);
 		applyWatchTwitchFromDocument(next);
 		applyBattlePassEndFromDocument(next, document);
+		applyBattlePassStartHintFromDocument(next, document);
 		next.capsScrapedAt = new Date().toISOString();
 		const banner = scrapeLiveCommunityEventBanner(document);
 		if (banner) {
@@ -4484,8 +3799,6 @@
 	function isResetInWearWindow(delayMs, waitMs = 0, horizonMs = COOLDOWN_MS) {
 		return delayMs > waitMs && delayMs <= waitMs + horizonMs;
 	}
-	var MS_PER_DAY$1 = 864e5;
-	var UTC_DAILY_END_BUFFER_MS = 36e5;
 	function wearWindowOverlapMs(availableFromMs, availableUntilMs, waitMs = 0, horizonMs = COOLDOWN_MS) {
 		return Math.max(0, Math.min(availableUntilMs, waitMs + horizonMs) - Math.max(availableFromMs, waitMs));
 	}
@@ -4742,8 +4055,6 @@
 		}
 		return arp;
 	}
-	var TWITCH_MS_PER_ARP$1 = 6e4;
-	var TIME_ON_SITE_DURATION_MS$2 = BASE_ACTIVITY.timeOnSiteBasePerDay * 6e4;
 	function twitchArpInWearWindow(siteState, twitchFlat, waitMs, now) {
 		const midnight = msUntilNextUtcMidnight(now);
 		const todayRemaining = twitchWatchRemainingMs(siteState, twitchFlat) / 6e4;
@@ -4856,12 +4167,6 @@
 			breakdown
 		};
 	}
-	var BP_CLAIM_BUFFER_MS = 6e5;
-	var MS_PER_DAY = 864e5;
-	var TWITCH_MS_PER_ARP = 6e4;
-	var TIME_ON_SITE_DURATION_MS$1 = BASE_ACTIVITY.timeOnSiteBasePerDay * 6e4;
-	var deferBattlePassCache = new WeakMap();
-	var UPGRADE_PATH_MAX = 5;
 	function monthlyUpgradeGain(artifact, toTier) {
 		const family = getArtifactById(artifact.familyId);
 		if (!family || family.effectUnit === "cosmetic") return 0;
@@ -5759,33 +5064,6 @@
 	function escapeHtml(value) {
 		return value.replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;").replaceAll("\"", "&quot;").replaceAll("'", "&#39;");
 	}
-	var MODAL_ID = "alienware-artifact-optimizer";
-	var INLINE_ID = "alienware-artifact-optimizer-inline";
-	var CC_PANEL_ID = "alienware-artifact-optimizer-cc";
-	var ACH_PANEL_ID = "alienware-artifact-optimizer-ach";
-	var BP_CLAIM_BAR_ID = "alienware-artifact-optimizer-bp-claim";
-	var STYLE_ID$1 = "alienware-artifact-optimizer-styles";
-	var BACKDROP_ID = "alienware-artifact-optimizer-backdrop";
-	var DIALOG_ID = "alienware-artifact-optimizer-dialog";
-	var TOAST_ID = "alienware-artifact-optimizer-toast";
-	var ARTIFACT_TIP_ID = "ao-artifact-tip-float";
-	var TOAST_MS = 2200;
-	var MODAL_LAYOUT = [
-		["position", "fixed"],
-		["top", "50%"],
-		["left", "50%"],
-		["transform", "translate(-50%, -50%)"],
-		["z-index", "10001"],
-		["width", "min(560px, 94vw)"],
-		["max-height", "90vh"],
-		["overflow-y", "auto"]
-	];
-	var BACKDROP_LAYOUT = [
-		["position", "fixed"],
-		["inset", "0"],
-		["background", "rgba(0, 0, 0, 0.85)"],
-		["z-index", "10000"]
-	];
 	function cssDeclarations(layout) {
 		return layout.map(([property, value]) => `${property}: ${value};`).join("\n        ");
 	}
@@ -6123,6 +5401,7 @@
     .ao-todo-item > .ao-upgrade-btn,
     .ao-todo-item > .ao-equip-btn,
     .ao-todo-item > .ao-claim-btn,
+    .ao-todo-item > .ao-start-bp-btn,
     .ao-todo-item > .ao-twitch-btn {
       flex: 0 0 auto;
       padding: 4px 10px;
@@ -6630,7 +5909,6 @@
 		const trigger = target.closest(".ao-artifact-tip");
 		return trigger instanceof HTMLElement ? trigger : void 0;
 	}
-	var boundTipRoots = new WeakSet();
 	function bindWindowTipDismiss() {
 		if (document.documentElement.dataset.aoTipWatch === "1") return;
 		document.documentElement.dataset.aoTipWatch = "1";
@@ -6667,16 +5945,6 @@
 		if (partial.chain !== void 0) urgency.chain = partial.chain;
 		return urgency;
 	}
-	var CHAIN_RANK = {
-		before: 0,
-		equip: 1,
-		after: 2
-	};
-	var URGENCY_KIND_RANK = {
-		action: 0,
-		schedule: 1,
-		info: 2
-	};
 	function urgencyDeadlineMs(urgency) {
 		return urgency.deadlineMs ?? Number.POSITIVE_INFINITY;
 	}
@@ -6700,36 +5968,16 @@
 		};
 	}
 	function sortActionTodosByUrgency(todos) {
-		return todos.toSorted((left, right) => compareActionTodoUrgency(left.urgency ?? defaultTodoUrgency(left), right.urgency ?? defaultTodoUrgency(right)));
+		return todos.toSorted((left, right) => {
+			const leftStart = left.startBattlePass === true ? 0 : 1;
+			const rightStart = right.startBattlePass === true ? 0 : 1;
+			if (leftStart !== rightStart) return leftStart - rightStart;
+			return compareActionTodoUrgency(left.urgency ?? defaultTodoUrgency(left), right.urgency ?? defaultTodoUrgency(right));
+		});
 	}
 	function phaseChain(phase) {
 		return phase === "afterNow" || phase === "after" ? "after" : "before";
 	}
-	var ACTIVITY_TODO_RULES = [
-		{
-			key: "steamQuests",
-			isDue: (caps) => isActivityPending(caps, "steamQuests")
-		},
-		{
-			key: "dailyQuests",
-			isDue: (caps) => isActivityPending(caps, "dailyQuests")
-		},
-		{
-			key: "watchTwitch",
-			isDue: (caps) => isActivityAvailable(caps, "watchTwitch")
-		},
-		{
-			key: "timeOnSite",
-			isDue: (caps) => isActivityAvailable(caps, "timeOnSite")
-		}
-	];
-	var UTC_DAILY_KEYS = new Set([
-		"watchTwitch",
-		"dailyQuests",
-		"timeOnSite"
-	]);
-	var TIME_ON_SITE_DURATION_MS = BASE_ACTIVITY.timeOnSiteBasePerDay * 6e4;
-	var STEAM_WEEK_MS = 6048e5;
 	function isUtcDailyActivity(key) {
 		return UTC_DAILY_KEYS.has(key);
 	}
@@ -6846,7 +6094,29 @@
 			}
 		});
 	}
+	function pushStartBattlePassTodo(todos, siteState) {
+		const battlePass = siteState.battlePass;
+		if (battlePass?.needsStart !== true) return;
+		const todo = {
+			tone: "warn",
+			text: "Start Battle Pass — new season (ARP only counts after Start)",
+			reasons: [{ text: "Select Start Battle Pass on the track before farming ARP this season" }],
+			startBattlePass: true,
+			urgency: {
+				kind: "action",
+				readyAtMs: 0,
+				durationMs: 0,
+				chain: "before"
+			}
+		};
+		if (battlePass.url) {
+			todo.openHref = battlePass.url;
+			todo.openHrefLabel = "Open Battle Pass";
+		}
+		todos.push(todo);
+	}
 	function pushBattlePassTodo(todos, siteState, options) {
+		if (siteState.battlePass?.needsStart === true) return;
 		const readyAll = siteState.battlePass?.readyToClaim ?? 0;
 		if (readyAll <= 0) return;
 		const readyArp = battlePassClaimableArp(siteState.battlePass);
@@ -7897,6 +7167,7 @@
 			needsSwap: isNeedsSwap,
 			waitMs
 		});
+		pushStartBattlePassTodo(todos, siteState);
 		todos.push(...sequenced.beforeSwap);
 		if (discord?.slot === "before") todos.push(discord.todo);
 		if (best && isNeedsSwap) pushRecommendedSwapTodos({
@@ -7983,11 +7254,13 @@
 			return `<button type="button" class="ao-equip-btn" data-equip="${todo.equipCombo}">${label}</button>`;
 		}
 		if (todo.upgradeInstanceId !== void 0) return `<button type="button" class="ao-upgrade-btn" data-id="${String(todo.upgradeInstanceId)}">Upgrade</button>`;
+		if (todo.startBattlePass === true) return "<button type=\"button\" class=\"ao-start-bp-btn\">Start Battle Pass</button>";
 		if (todo.claimBattlePass === true) return `<button type="button" class="ao-claim-btn"${todo.claimBattlePassSkipArp === true ? " data-skip-arp=\"1\"" : ""}>${battlePassClaimButtonLabel(todo.claimBattlePassSkipArp === true)}</button>`;
 		return "";
 	}
 	function renderTodoActionButton(todo, options = {}) {
 		if (todo.openTwitchStream === true) return "<button type=\"button\" class=\"ao-twitch-btn\">Open stream</button>";
+		if (todo.startBattlePass === true && options.allowAccountActions === true) return renderAccountTodoButton(todo);
 		if (todo.openHref) {
 			const visit = todo.visitInBackground === true ? " data-visit=\"1\"" : "";
 			const label = todo.openHrefLabel ?? "Open";
@@ -8020,13 +7293,6 @@
 	function renderActionPlan(todos, options = {}) {
 		return `<div id="ao-action-plan">${renderActionPlanContents(todos, options)}</div>`;
 	}
-	var OFFICIAL_GIVEAWAYS_PATH = "/ucf/Giveaway";
-	var ESI_GIVEAWAY_PATH = "/esi/featured-tile-data/Giveaway";
-	var MAX_ESI_PAGES = 10;
-	var SHOW_GIVEAWAY_HREF = /\/ucf\/show\/(\d+)\/(?:[\w.-]+\/)*Giveaway\/([\w.-]+)/i;
-	var LISTING_PATH = /\/ucf\/Giveaway\/?$/i;
-	var IFRAME_WAIT_MS = 15e3;
-	var IFRAME_SETTLE_MS$1 = 600;
 	function delay$2(ms) {
 		return new Promise((resolve) => {
 			setTimeout(resolve, ms);
@@ -8199,14 +7465,6 @@
 		const framed = await openGiveawayListingFrame();
 		return mergeGiveaways([framed ? scrapeOfficialGiveawaysFromDocument(framed) : [], live]);
 	}
-	var NOTIFY_LOG_KEY = "artifactOptimizerNotifyLog";
-	var NOTIFY_ICON = "https://raw.githubusercontent.com/UpDownLeftDie/AWA-Toolkit/main/icon.png";
-	var NOTIFY_TITLE = "AWA Toolkit";
-	var FIRED_KEEP_MS = 1728e5;
-	var ZOMBIE_MS = 864e5;
-	var SHOWROOM_PATH = "/user-artifacts-room";
-	var VAULT_PATH = "/game-vault";
-	var CONTROL_CENTER_PATH$1 = "/control-center";
 	function absoluteAwaUrl(pathOrUrl) {
 		return new URL(pathOrUrl, location.origin).href;
 	}
@@ -8215,12 +7473,6 @@
 		if (kind === "vault") return absoluteAwaUrl(VAULT_PATH);
 		return absoluteAwaUrl(kind === "giveaway" ? OFFICIAL_GIVEAWAYS_PATH : CONTROL_CENTER_PATH$1);
 	}
-	var pendingTimers = new Map();
-	var notifyRuntime = {
-		syncGeneration: 0,
-		didBindWake: false,
-		shouldForceGiveawayCheck: false
-	};
 	function emptyLog() {
 		return {
 			scheduled: {},
@@ -8234,14 +7486,6 @@
 	function isRecord(value) {
 		return typeof value === "object" && value !== null;
 	}
-	var NOTIFY_KINDS = [
-		"swap",
-		"vault",
-		"community",
-		"giveaway"
-	];
-	var GIVEAWAY_CHECK_MS = 9e5;
-	var SEEN_GIVEAWAY_KEEP = 300;
 	function isNotifyKind(value) {
 		return typeof value === "string" && NOTIFY_KINDS.includes(value);
 	}
@@ -8699,20 +7943,6 @@
 		};
 		scheduleBrowserNotifications(notifyRuntime.lastSource);
 	}
-	var STALE_MS$1 = 216e5;
-	var SLOT_LOCK_STALE_MS = 3e5;
-	var ARP_LOG_STALE_MS = 216e5;
-	var FORCE_REFRESH_COOLDOWN_MS$1 = 5e3;
-	var EQUIP_CONFIRM_RETRY_MS = 750;
-	var BATTLE_PASS_STALE_MS = 36e5;
-	var COMMUNITY_EVENT_PENDING_STALE_MS = STALE_MS$1;
-	var CONTROL_CENTER_PATH = "/control-center";
-	var GAME_VAULT_PATH$1 = "/marketplace/game-vault";
-	var ARP_LOG_PATH = "/account/arp-log";
-	var QUEST_SETUP_PATH = "/steam/questsetup";
-	var ARP_LOG_MAX_ROWS = 300;
-	var ARP_LOG_DEFAULT_DAYS = 7;
-	var ARP_LOG_LIVE_EVENT_DAYS = 14;
 	function resolveArpLogPath(event) {
 		const days = event?.isLive ? ARP_LOG_LIVE_EVENT_DAYS : ARP_LOG_DEFAULT_DAYS;
 		const now = new Date();
@@ -8859,6 +8089,7 @@
 		if (advertised && advertised !== stored) return true;
 		const bp = state?.battlePass;
 		if (!bp || typeof bp.readyToClaimArp !== "number") return true;
+		if (bp.needsStart === true) return true;
 		const scrapedAt = Date.parse(bp.scrapedAt);
 		return Number.isNaN(scrapedAt) || Date.now() - scrapedAt > BATTLE_PASS_STALE_MS;
 	}
@@ -9117,6 +8348,7 @@
 		applyDailyQuestsFromDocument(next, controlDocument);
 		applyWatchTwitchProgress(next, controlDocument);
 		applyBattlePassEndFromDocument(next, controlDocument);
+		applyBattlePassStartHintFromDocument(next, controlDocument);
 		next.capsScrapedAt = new Date().toISOString();
 	}
 	async function applyRemoteBattlePass(next, battlePassPath, controlDocument, battleDocument) {
@@ -9224,7 +8456,6 @@
 		await saveSiteState(next);
 		return next;
 	}
-	var dialogState = {};
 	function onDialogKeydown(event) {
 		if (event.key === "Escape") {
 			event.preventDefault();
@@ -9319,26 +8550,11 @@
 			toast.remove();
 		}, TOAST_MS);
 	}
-	var ACCOUNT_ACTIONS_OFF_MESSAGE = "Account actions are off. Enable them in the full panel.";
 	async function didAllowAccountActions() {
 		if (areAccountActionsEnabled(await getArtifactSettings())) return true;
 		await showAoAlert(ACCOUNT_ACTIONS_OFF_MESSAGE, "Account actions off");
 		return false;
 	}
-	var ACHIEVEMENT_AUTOMATION_KEYS = [
-		"visitPages",
-		"profileCosmetics",
-		"watchVideos",
-		"readArticles",
-		"gameVault"
-	];
-	var FAQ_PATH = "/faq-contact";
-	var HIVE_PATH = "/information";
-	var NEWS_PATH = "/news";
-	var VIDEOS_PATH = "/videos";
-	var RELAY_PATH = "/ucf";
-	var GAME_VAULT_PATH = "/marketplace/game-vault";
-	var PROFILE_PATH = "/member/{username}";
 	function slug(title) {
 		return title.toLowerCase().replaceAll(/[^a-z0-9]+/g, "-").replaceAll(/^-|-$/g, "");
 	}
@@ -9359,796 +8575,9 @@
 		if (options.coveredByActionPlan === true) definition.coveredByActionPlan = true;
 		return definition;
 	}
-	var ACHIEVEMENTS = [
-		define("Verified Member", "verified", {
-			hint: "Finish email / account verification if AWA still asks for it.",
-			kind: "inform"
-		}),
-		define("Add about me", "profile", {
-			hint: "Add a short About Me on your profile.",
-			href: PROFILE_PATH,
-			hrefLabel: "Open profile",
-			aliases: ["Add about me"],
-			automation: "profileCosmetics"
-		}),
-		define("Try it on", "avatar", {
-			group: "border-use",
-			rank: 1,
-			hint: "Change your profile border once.",
-			href: PROFILE_PATH,
-			hrefLabel: "Open profile",
-			automation: "profileCosmetics"
-		}),
-		define("Use 5 different borders", "avatar", {
-			group: "border-use",
-			rank: 2,
-			hint: "Equip 5 different borders over time.",
-			href: PROFILE_PATH,
-			hrefLabel: "Open profile",
-			automation: "profileCosmetics"
-		}),
-		define("Use 10 different borders", "avatar", {
-			group: "border-use",
-			rank: 3,
-			hint: "Keep rotating borders you have not used yet.",
-			href: PROFILE_PATH,
-			hrefLabel: "Open profile",
-			automation: "profileCosmetics"
-		}),
-		define("Use 25 different borders", "avatar", {
-			group: "border-use",
-			rank: 4,
-			hint: "Calendar and marketplace borders count toward this.",
-			href: PROFILE_PATH,
-			hrefLabel: "Open profile",
-			automation: "profileCosmetics"
-		}),
-		define("Change your border once a day for a week", "avatar", {
-			group: "border-daily",
-			rank: 1,
-			hint: "Change your border each UTC day for 7 days.",
-			href: PROFILE_PATH,
-			hrefLabel: "Open profile",
-			automation: "profileCosmetics"
-		}),
-		define("Change your border once a month for a year", "avatar", {
-			group: "border-monthly",
-			rank: 1,
-			hint: "Change your border at least once each calendar month for 12 months.",
-			href: PROFILE_PATH,
-			hrefLabel: "Open profile",
-			automation: "profileCosmetics"
-		}),
-		define("Change your avatar items every day for a week", "avatar", {
-			group: "avatar-daily",
-			rank: 1,
-			hint: "Change an avatar item each day for 7 days.",
-			href: PROFILE_PATH,
-			hrefLabel: "Open profile",
-			automation: "profileCosmetics"
-		}),
-		define("Change your avatar once a month for 3 months", "avatar", {
-			group: "avatar-monthly",
-			rank: 1,
-			hint: "Change your avatar at least once a month for 3 months.",
-			href: PROFILE_PATH,
-			hrefLabel: "Open profile",
-			automation: "profileCosmetics"
-		}),
-		define("Change your avatar once a month for 6 months", "avatar", {
-			group: "avatar-monthly",
-			rank: 2,
-			hint: "Keep a monthly avatar change going for 6 months.",
-			href: PROFILE_PATH,
-			hrefLabel: "Open profile",
-			automation: "profileCosmetics"
-		}),
-		define("Change your avatar once a month for 1 year", "avatar", {
-			group: "avatar-monthly",
-			rank: 3,
-			hint: "Keep a monthly avatar change going for 12 months.",
-			href: PROFILE_PATH,
-			hrefLabel: "Open profile",
-			automation: "profileCosmetics"
-		}),
-		define("Visit the FAQ page", "visitPages", {
-			hint: "Open the FAQ / support page once.",
-			href: FAQ_PATH,
-			hrefLabel: "Visit FAQ",
-			automation: "visitPages"
-		}),
-		define("Visit the Hive page", "visitPages", {
-			hint: "Open the Hive / information page once.",
-			href: HIVE_PATH,
-			hrefLabel: "Visit Hive",
-			automation: "visitPages"
-		}),
-		define("Watch 10 Videos", "watchVideos", {
-			group: "watch-videos",
-			rank: 1,
-			hint: "Watch 10 videos on Alienware Arena.",
-			href: VIDEOS_PATH,
-			hrefLabel: "Open videos",
-			automation: "watchVideos"
-		}),
-		define("Watch 100 Videos", "watchVideos", {
-			group: "watch-videos",
-			rank: 2,
-			hint: "Keep watching Arena videos toward 100.",
-			href: VIDEOS_PATH,
-			hrefLabel: "Open videos",
-			automation: "watchVideos"
-		}),
-		define("Watch 1000 Videos", "watchVideos", {
-			group: "watch-videos",
-			rank: 3,
-			hint: "Long-run video-watch achievement.",
-			href: VIDEOS_PATH,
-			hrefLabel: "Open videos",
-			kind: "inform"
-		}),
-		define("Read 10 News Articles", "readArticles", {
-			group: "read-articles",
-			rank: 1,
-			hint: "Open 10 Pulse / news articles.",
-			href: NEWS_PATH,
-			hrefLabel: "Open news",
-			automation: "readArticles"
-		}),
-		define("Read 100 News Articles", "readArticles", {
-			group: "read-articles",
-			rank: 2,
-			hint: "Keep reading Arena news toward 100.",
-			href: NEWS_PATH,
-			hrefLabel: "Open news",
-			automation: "readArticles"
-		}),
-		define("Read 1000 News Articles", "readArticles", {
-			group: "read-articles",
-			rank: 3,
-			hint: "Long-run article-read achievement.",
-			href: NEWS_PATH,
-			hrefLabel: "Open news",
-			kind: "inform"
-		}),
-		define("Enter Game-Vault", "gameVault", {
-			group: "vault-enter",
-			rank: 1,
-			hint: "Open the Game Vault page once.",
-			href: GAME_VAULT_PATH,
-			hrefLabel: "Open vault",
-			automation: "gameVault"
-		}),
-		define("Enter Game-Vault 5 times", "gameVault", {
-			group: "vault-enter",
-			rank: 2,
-			hint: "Visit Game Vault on 5 different days / entries.",
-			href: GAME_VAULT_PATH,
-			hrefLabel: "Open vault",
-			automation: "gameVault"
-		}),
-		define("Enter Game-Vault 12 times", "gameVault", {
-			group: "vault-enter",
-			rank: 3,
-			hint: "Keep entering Game Vault toward 12 visits.",
-			href: GAME_VAULT_PATH,
-			hrefLabel: "Open vault",
-			automation: "gameVault"
-		}),
-		define("Enter Game-Vault 24 times", "gameVault", {
-			group: "vault-enter",
-			rank: 4,
-			hint: "Keep entering Game Vault toward 24 visits.",
-			href: GAME_VAULT_PATH,
-			hrefLabel: "Open vault",
-			automation: "gameVault"
-		}),
-		define("Get 1 game from game vault", "gameVault", {
-			group: "vault-claim",
-			rank: 1,
-			hint: "Claim one Game Vault title when you have enough ARP.",
-			href: GAME_VAULT_PATH,
-			hrefLabel: "Open vault",
-			kind: "inform"
-		}),
-		define("Get 5 games from game vault", "gameVault", {
-			group: "vault-claim",
-			rank: 2,
-			hint: "Claim 5 Game Vault titles over time.",
-			href: GAME_VAULT_PATH,
-			hrefLabel: "Open vault",
-			kind: "inform"
-		}),
-		define("Get 10 games from game vault", "gameVault", {
-			group: "vault-claim",
-			rank: 3,
-			hint: "Claim 10 Game Vault titles over time.",
-			href: GAME_VAULT_PATH,
-			hrefLabel: "Open vault",
-			kind: "inform"
-		}),
-		define("Post a relay", "relay", {
-			group: "relay-post",
-			rank: 1,
-			hint: "Post one Relay (community post).",
-			href: RELAY_PATH,
-			hrefLabel: "Open Relay",
-			aliases: ["Post a Relay"]
-		}),
-		define("Post 10 Relays", "relay", {
-			group: "relay-post",
-			rank: 2,
-			hint: "Post 10 Relays.",
-			href: RELAY_PATH,
-			hrefLabel: "Open Relay"
-		}),
-		define("Post 50 relays", "relay", {
-			group: "relay-post",
-			rank: 3,
-			hint: "Post 50 Relays.",
-			href: RELAY_PATH,
-			hrefLabel: "Open Relay"
-		}),
-		define("Comment on a relay", "relay", {
-			group: "relay-comment",
-			rank: 1,
-			hint: "Leave a comment on someone else's Relay.",
-			href: RELAY_PATH,
-			hrefLabel: "Open Relay"
-		}),
-		define("React to a relay", "relay", {
-			group: "relay-react",
-			rank: 1,
-			hint: "React to one Relay.",
-			href: RELAY_PATH,
-			hrefLabel: "Open Relay"
-		}),
-		define("React to 10 relays", "relay", {
-			group: "relay-react",
-			rank: 2,
-			hint: "React to 10 Relays.",
-			href: RELAY_PATH,
-			hrefLabel: "Open Relay"
-		}),
-		define("React to 50 relays", "relay", {
-			group: "relay-react",
-			rank: 3,
-			hint: "React to 50 Relays.",
-			href: RELAY_PATH,
-			hrefLabel: "Open Relay"
-		}),
-		define("React to 100 relays", "relay", {
-			group: "relay-react",
-			rank: 4,
-			hint: "React to 100 Relays.",
-			href: RELAY_PATH,
-			hrefLabel: "Open Relay"
-		}),
-		define("Vote on your first Arena Connect Poll", "discord", {
-			group: "discord-poll",
-			rank: 1,
-			hint: "Vote on the current Discord / Arena Connect poll (also in What to do).",
-			coveredByActionPlan: true
-		}),
-		define("Vote on 10 Arena Connect polls", "discord", {
-			group: "discord-poll",
-			rank: 2,
-			hint: "Keep voting on weekday Discord polls.",
-			coveredByActionPlan: true
-		}),
-		define("Vote on 50 Arena Connect polls", "discord", {
-			group: "discord-poll",
-			rank: 3,
-			hint: "Long-run Discord poll votes.",
-			coveredByActionPlan: true,
-			kind: "inform"
-		}),
-		define("Vote on 100 Arena Connect polls", "discord", {
-			group: "discord-poll",
-			rank: 4,
-			hint: "Long-run Discord poll votes.",
-			coveredByActionPlan: true,
-			kind: "inform"
-		}),
-		define("Vote on 500 Arena Connect polls", "discord", {
-			group: "discord-poll",
-			rank: 5,
-			hint: "Long-run Discord poll votes.",
-			coveredByActionPlan: true,
-			kind: "inform"
-		}),
-		define("Play all 3 Steam quests", "steamQuests", {
-			group: "steam-all-three",
-			rank: 1,
-			hint: "Finish all three weekly Steam quests (also in What to do).",
-			coveredByActionPlan: true
-		}),
-		define("Play all 3 Steam quests 5 times", "steamQuests", {
-			group: "steam-all-three",
-			rank: 2,
-			hint: "Clear all three Steam quests for 5 weeks.",
-			coveredByActionPlan: true,
-			kind: "inform"
-		}),
-		define("Play all 3 Steam quests 10 times", "steamQuests", {
-			group: "steam-all-three",
-			rank: 3,
-			hint: "Clear all three Steam quests for 10 weeks.",
-			coveredByActionPlan: true,
-			kind: "inform"
-		}),
-		define("Play all 3 Steam quests 20 times", "steamQuests", {
-			group: "steam-all-three",
-			rank: 4,
-			hint: "Clear all three Steam quests for 20 weeks.",
-			coveredByActionPlan: true,
-			kind: "inform"
-		}),
-		define("Play all 3 Steam quests 50 times", "steamQuests", {
-			group: "steam-all-three",
-			rank: 5,
-			hint: "Clear all three Steam quests for 50 weeks.",
-			coveredByActionPlan: true,
-			kind: "inform"
-		}),
-		define("Steam: Play 10 Steam Quests", "steamQuests", {
-			group: "steam-quest-count",
-			rank: 1,
-			hint: "Complete 10 Steam quests over time.",
-			coveredByActionPlan: true
-		}),
-		define("Steam: Play 25 Steam Quests", "steamQuests", {
-			group: "steam-quest-count",
-			rank: 2,
-			hint: "Complete 25 Steam quests over time.",
-			coveredByActionPlan: true,
-			kind: "inform"
-		}),
-		define("Steam: Play 50 Steam Quests", "steamQuests", {
-			group: "steam-quest-count",
-			rank: 3,
-			hint: "Complete 50 Steam quests over time.",
-			coveredByActionPlan: true,
-			kind: "inform"
-		}),
-		define("Steam: Play 100 Steam Quests", "steamQuests", {
-			group: "steam-quest-count",
-			rank: 4,
-			hint: "Complete 100 Steam quests over time.",
-			coveredByActionPlan: true,
-			kind: "inform"
-		}),
-		define("Steam: Play 365 Steam Quests", "steamQuests", {
-			group: "steam-quest-count",
-			rank: 5,
-			hint: "Complete 365 Steam quests over time.",
-			coveredByActionPlan: true,
-			kind: "inform"
-		}),
-		define("Steam: Play 10 hours", "steamHours", {
-			group: "steam-hours",
-			rank: 1,
-			hint: "Play tracked Steam hours through Arena quests.",
-			coveredByActionPlan: true
-		}),
-		define("Steam: Play 50 hours", "steamHours", {
-			group: "steam-hours",
-			rank: 2,
-			hint: "Keep playing Steam quests toward 50 hours.",
-			coveredByActionPlan: true,
-			kind: "inform"
-		}),
-		define("Steam: Play 125 hours", "steamHours", {
-			group: "steam-hours",
-			rank: 3,
-			hint: "Keep playing Steam quests toward 125 hours.",
-			coveredByActionPlan: true,
-			kind: "inform"
-		}),
-		define("Steam: Play 500 hours", "steamHours", {
-			group: "steam-hours",
-			rank: 4,
-			hint: "Long-run Steam hours.",
-			coveredByActionPlan: true,
-			kind: "inform"
-		}),
-		define("Steam: Play 1000 hours", "steamHours", {
-			group: "steam-hours",
-			rank: 5,
-			hint: "Long-run Steam hours.",
-			coveredByActionPlan: true,
-			kind: "inform"
-		}),
-		define("Steam: Play 2500 hours", "steamHours", {
-			group: "steam-hours",
-			rank: 6,
-			hint: "Long-run Steam hours.",
-			coveredByActionPlan: true,
-			kind: "inform"
-		}),
-		define("Steam: Play 10000 hours", "steamHours", {
-			group: "steam-hours",
-			rank: 7,
-			hint: "Long-run Steam hours.",
-			coveredByActionPlan: true,
-			kind: "inform"
-		}),
-		define("Watch 10 hours of Twitch on Nexus channels", "twitchNexus", {
-			group: "twitch-nexus",
-			rank: 1,
-			hint: "Watch Twitch via Arena on Nexus channels (also in What to do).",
-			coveredByActionPlan: true
-		}),
-		define("Watch 100 hours of Twitch on Nexus channels", "twitchNexus", {
-			group: "twitch-nexus",
-			rank: 2,
-			hint: "Long-run Nexus Twitch hours.",
-			coveredByActionPlan: true,
-			kind: "inform"
-		}),
-		define("Watch 1000 Hours of Twitch.tv on Nexus channels", "twitchNexus", {
-			group: "twitch-nexus",
-			rank: 3,
-			hint: "Long-run Nexus Twitch hours.",
-			coveredByActionPlan: true,
-			kind: "inform"
-		}),
-		define("Watch 10 hours of Twitch.tv on Hive channels", "twitchHive", {
-			group: "twitch-hive",
-			rank: 1,
-			hint: "Watch Twitch via Arena on Hive channels.",
-			coveredByActionPlan: true
-		}),
-		define("Watch 100 Hours of Twitch.tv on Hive channels", "twitchHive", {
-			group: "twitch-hive",
-			rank: 2,
-			hint: "Long-run Hive Twitch hours.",
-			coveredByActionPlan: true,
-			kind: "inform"
-		}),
-		define("Watch 1000 Hours of Twitch.tv on Hive channels", "twitchHive", {
-			group: "twitch-hive",
-			rank: 3,
-			hint: "Long-run Hive Twitch hours.",
-			coveredByActionPlan: true,
-			kind: "inform"
-		}),
-		define("Get your first border from Calendar rewards", "calendarBorders", {
-			group: "calendar-borders",
-			rank: 1,
-			hint: "Claim Daily Calendar until a border drops (also in What to do).",
-			coveredByActionPlan: true
-		}),
-		define("Get all the borders from a monthly calendar", "calendarBorders", {
-			group: "calendar-borders",
-			rank: 2,
-			hint: "Do not miss Daily Calendar days this month.",
-			coveredByActionPlan: true
-		}),
-		define("Get all borders from calendar for 3 months", "calendarBorders", {
-			group: "calendar-borders",
-			rank: 3,
-			hint: "Perfect calendar months stack.",
-			coveredByActionPlan: true,
-			kind: "inform"
-		}),
-		define("Get all borders from calendar for 6 months", "calendarBorders", {
-			group: "calendar-borders",
-			rank: 4,
-			hint: "Perfect calendar months stack.",
-			coveredByActionPlan: true,
-			kind: "inform"
-		}),
-		define("Get all borders from calendar for 1 year", "calendarBorders", {
-			group: "calendar-borders",
-			rank: 5,
-			hint: "Perfect calendar months stack.",
-			coveredByActionPlan: true,
-			kind: "inform"
-		}),
-		define("Receive all 28-day rewards in a single month", "streaks", {
-			group: "streaks-28",
-			rank: 1,
-			hint: "Claim every Daily Calendar day in the 28-day track.",
-			coveredByActionPlan: true
-		}),
-		define("Receive all 28-day rewards for 3 months", "streaks", {
-			group: "streaks-28",
-			rank: 2,
-			hint: "Keep a perfect 28-day calendar streak for 3 months.",
-			coveredByActionPlan: true,
-			kind: "inform"
-		}),
-		define("Receive all 28-day rewards for 6 months", "streaks", {
-			group: "streaks-28",
-			rank: 3,
-			hint: "Keep a perfect 28-day calendar streak for 6 months.",
-			coveredByActionPlan: true,
-			kind: "inform"
-		}),
-		define("Receive all 28-day rewards for 1 year", "streaks", {
-			group: "streaks-28",
-			rank: 4,
-			hint: "Keep a perfect 28-day calendar streak for 12 months.",
-			coveredByActionPlan: true,
-			kind: "inform"
-		}),
-		define("Be a member for 1 year", "years", {
-			group: "years",
-			rank: 1,
-			hint: "Passive — wait for the anniversary.",
-			kind: "inform"
-		}),
-		define("Be a member for 2 years", "years", {
-			group: "years",
-			rank: 2,
-			hint: "Passive — wait for the anniversary.",
-			kind: "inform"
-		}),
-		define("Be a member for 3 years", "years", {
-			group: "years",
-			rank: 3,
-			hint: "Passive — wait for the anniversary.",
-			kind: "inform"
-		}),
-		define("Be a member for 4 years", "years", {
-			group: "years",
-			rank: 4,
-			hint: "Passive — wait for the anniversary.",
-			kind: "inform"
-		}),
-		define("Be a member for 5 years", "years", {
-			group: "years",
-			rank: 5,
-			hint: "Passive — wait for the anniversary.",
-			kind: "inform"
-		}),
-		define("Be a member for 6 years", "years", {
-			group: "years",
-			rank: 6,
-			hint: "Passive — wait for the anniversary.",
-			kind: "inform"
-		}),
-		define("Be a member for 7 years", "years", {
-			group: "years",
-			rank: 7,
-			hint: "Passive — wait for the anniversary.",
-			kind: "inform"
-		}),
-		define("Be a member for 8 years", "years", {
-			group: "years",
-			rank: 8,
-			hint: "Passive — wait for the anniversary.",
-			kind: "inform"
-		}),
-		define("Be a member for 9 years", "years", {
-			group: "years",
-			rank: 9,
-			hint: "Passive — wait for the anniversary.",
-			kind: "inform"
-		}),
-		define("Be a member for 10 years", "years", {
-			group: "years",
-			rank: 10,
-			hint: "Passive — wait for the anniversary.",
-			kind: "inform"
-		}),
-		define("Reach Tier 2", "tiers", {
-			group: "tiers",
-			rank: 1,
-			hint: "Earn lifetime ARP to raise your Arena tier.",
-			kind: "inform"
-		}),
-		define("Reach Tier 3", "tiers", {
-			group: "tiers",
-			rank: 2,
-			hint: "Earn lifetime ARP to raise your Arena tier.",
-			kind: "inform"
-		}),
-		define("Reach Tier 4", "tiers", {
-			group: "tiers",
-			rank: 3,
-			hint: "Earn lifetime ARP to raise your Arena tier.",
-			kind: "inform"
-		}),
-		define("Reach Tier 5", "tiers", {
-			group: "tiers",
-			rank: 4,
-			hint: "Earn lifetime ARP to raise your Arena tier.",
-			kind: "inform"
-		}),
-		define("Participate in a Community Event", "communityEvents", {
-			group: "community-events",
-			rank: 1,
-			hint: "Play required hours in a live Community Event (also in What to do).",
-			coveredByActionPlan: true
-		}),
-		define("Participate in 2 Community Events", "communityEvents", {
-			group: "community-events",
-			rank: 2,
-			hint: "Join the next live Community Event.",
-			coveredByActionPlan: true,
-			kind: "inform"
-		}),
-		define("Participate in 5 Community Events", "communityEvents", {
-			group: "community-events",
-			rank: 3,
-			hint: "Join live Community Events as they appear.",
-			coveredByActionPlan: true,
-			kind: "inform"
-		}),
-		define("Participate in 10 Community Events", "communityEvents", {
-			group: "community-events",
-			rank: 4,
-			hint: "Join live Community Events as they appear.",
-			coveredByActionPlan: true,
-			kind: "inform"
-		}),
-		define("Participate in 20 Community Events", "communityEvents", {
-			group: "community-events",
-			rank: 5,
-			hint: "Join live Community Events as they appear.",
-			coveredByActionPlan: true,
-			kind: "inform"
-		}),
-		define("Finish all required personal hours for a community event", "communityHours", {
-			group: "community-hours",
-			rank: 1,
-			hint: "Finish the personal-hours track on a live event.",
-			coveredByActionPlan: true
-		}),
-		define("Finish 20 personal hours for community events", "communityHours", {
-			group: "community-hours",
-			rank: 2,
-			hint: "Keep playing Community Event hours.",
-			coveredByActionPlan: true,
-			kind: "inform"
-		}),
-		define("Finish 50 personal hours for community events", "communityHours", {
-			group: "community-hours",
-			rank: 3,
-			hint: "Keep playing Community Event hours.",
-			coveredByActionPlan: true,
-			kind: "inform"
-		}),
-		define("Finish 100 personal hours for community events", "communityHours", {
-			group: "community-hours",
-			rank: 4,
-			hint: "Keep playing Community Event hours.",
-			coveredByActionPlan: true,
-			kind: "inform"
-		}),
-		define("Equip an artifact", "artifacts", {
-			group: "artifact-equip",
-			rank: 1,
-			hint: "Equip any artifact in the Showroom (also in What to do).",
-			coveredByActionPlan: true
-		}),
-		define("Equip 5 artifacts", "artifacts", {
-			group: "artifact-equip",
-			rank: 2,
-			hint: "Equip 5 different artifacts over time.",
-			coveredByActionPlan: true
-		}),
-		define("Equip 15 artifacts", "artifacts", {
-			group: "artifact-equip",
-			rank: 3,
-			hint: "Equip 15 different artifacts over time.",
-			coveredByActionPlan: true,
-			kind: "inform"
-		}),
-		define("Upgrade an artifact", "artifacts", {
-			group: "artifact-upgrade",
-			rank: 1,
-			hint: "Spend fragments to upgrade any artifact.",
-			coveredByActionPlan: true
-		}),
-		define("Upgrade 3 artifacts", "artifacts", {
-			group: "artifact-upgrade",
-			rank: 2,
-			hint: "Upgrade 3 different artifacts.",
-			coveredByActionPlan: true
-		}),
-		define("Upgrade 7 Artifacts", "artifacts", {
-			group: "artifact-upgrade",
-			rank: 3,
-			hint: "Upgrade 7 different artifacts.",
-			coveredByActionPlan: true,
-			kind: "inform"
-		}),
-		define("Fully Upgrade an artifact", "artifacts", {
-			group: "artifact-max",
-			rank: 1,
-			hint: "Take one artifact to max tier.",
-			coveredByActionPlan: true
-		}),
-		define("Fully Upgrade 3 artifacts", "artifacts", {
-			group: "artifact-max",
-			rank: 2,
-			hint: "Max 3 artifacts.",
-			coveredByActionPlan: true,
-			kind: "inform"
-		}),
-		define("Fully Upgrade 5 artifacts", "artifacts", {
-			group: "artifact-max",
-			rank: 3,
-			hint: "Max 5 artifacts.",
-			coveredByActionPlan: true,
-			kind: "inform"
-		}),
-		define("Spend 100 ARP", "spendArp", {
-			group: "spend-arp",
-			rank: 1,
-			hint: "Spend ARP in Game Vault or the marketplace.",
-			href: GAME_VAULT_PATH,
-			hrefLabel: "Open vault",
-			kind: "inform"
-		}),
-		define("Spend 1000 ARP", "spendArp", {
-			group: "spend-arp",
-			rank: 2,
-			hint: "Keep claiming vault / marketplace spends.",
-			href: GAME_VAULT_PATH,
-			hrefLabel: "Open vault",
-			kind: "inform"
-		}),
-		define("Spend 5000 ARP", "spendArp", {
-			group: "spend-arp",
-			rank: 3,
-			hint: "Keep claiming vault / marketplace spends.",
-			href: GAME_VAULT_PATH,
-			hrefLabel: "Open vault",
-			kind: "inform"
-		}),
-		define("Spend 10000 ARP", "spendArp", {
-			group: "spend-arp",
-			rank: 4,
-			hint: "Keep claiming vault / marketplace spends.",
-			href: GAME_VAULT_PATH,
-			hrefLabel: "Open vault",
-			kind: "inform"
-		}),
-		define("Earn 5 fragments", "fragments", {
-			group: "fragments",
-			rank: 1,
-			hint: "Fragments drop from daily play and Battle Pass — already covered by daily ARP work.",
-			coveredByActionPlan: true,
-			kind: "inform"
-		}),
-		define("Earn 15 fragments", "fragments", {
-			group: "fragments",
-			rank: 2,
-			hint: "Keep doing daily ARP sources.",
-			coveredByActionPlan: true,
-			kind: "inform"
-		}),
-		define("Earn 30 fragments", "fragments", {
-			group: "fragments",
-			rank: 3,
-			hint: "Keep doing daily ARP sources.",
-			coveredByActionPlan: true,
-			kind: "inform"
-		}),
-		define("Earn 50 fragments", "fragments", {
-			group: "fragments",
-			rank: 4,
-			hint: "Keep doing daily ARP sources.",
-			coveredByActionPlan: true,
-			kind: "inform"
-		})
-	];
 	function normalizeAchievementTitle(value) {
 		return value.replaceAll(/\s+/g, " ").trim().toLowerCase();
 	}
-	new Map(ACHIEVEMENTS.map((achievement) => [achievement.id, achievement]));
-	var ACHIEVEMENT_BY_TITLE = new Map();
-	for (const achievement of ACHIEVEMENTS) {
-		ACHIEVEMENT_BY_TITLE.set(normalizeAchievementTitle(achievement.title), achievement);
-		const aliases = achievement.aliases ?? [];
-		for (const alias of aliases) ACHIEVEMENT_BY_TITLE.set(normalizeAchievementTitle(alias), achievement);
-	}
-	var SETTINGS_KEY = "achievementSettings";
-	var COOLDOWNS_KEY = "achievementCooldowns";
 	function utcDateString(now = new Date()) {
 		return now.toISOString().slice(0, 10);
 	}
@@ -10172,17 +8601,6 @@
 			return {};
 		}
 	}
-	var DEFAULT_AUTOMATIONS = {
-		visitPages: false,
-		profileCosmetics: false,
-		watchVideos: false,
-		readArticles: false,
-		gameVault: false
-	};
-	var defaultAchievementSettings = {
-		runAutomatically: false,
-		automations: { ...DEFAULT_AUTOMATIONS }
-	};
 	function isPartialSettings(value) {
 		return typeof value === "object" && !!value;
 	}
@@ -10224,14 +8642,6 @@
 	function isAchievementAutomationEnabled(settings, key) {
 		return settings.runAutomatically && settings.automations[key];
 	}
-	var MAX_ACTION_TODOS = 8;
-	var MAX_INFORM_TODOS = 3;
-	var BORDER_GROUPS = new Set([
-		"border-use",
-		"border-daily",
-		"border-monthly"
-	]);
-	var AVATAR_GROUPS = new Set(["avatar-daily", "avatar-monthly"]);
 	function isAchievementEarned(snapshot, id) {
 		return snapshot?.items[id]?.isEarned === true;
 	}
@@ -10391,8 +8801,6 @@
 	async function saveAutomation(key, isEnabled) {
 		await saveAchievementSettings({ automations: { [key]: isEnabled } });
 	}
-	var BP_CLAIM_ALL_PENDING_KEY = "ao-bp-claim-all";
-	var BP_CLAIM_SKIP_ARP_VALUE = "skip-arp";
 	async function persistBattlePassAfterClaim(options) {
 		const state = await refreshSiteStateFromPage();
 		const battlePass = state.battlePass;
@@ -10501,19 +8909,45 @@
 		await waitForBattlePassDocument();
 		await runBattlePassClaims({ shouldSkipArpBoosts: pending === BP_CLAIM_SKIP_ARP_VALUE });
 	}
+	async function handleStartBattlePass() {
+		if (!await didAllowAccountActions()) return;
+		const battlePass = (await loadSiteState())?.battlePass;
+		if (battlePass?.needsStart !== true && !location.pathname.includes("/battle-pass")) {
+			await showAoAlert("Battle Pass is already started (or not detected yet).");
+			return;
+		}
+		if (!await didConfirmAoDialog("Start the Battle Pass now? ARP only progresses the season after Start.", {
+			title: "Start Battle Pass",
+			confirmLabel: "Start"
+		})) return;
+		showAoToast("Starting Battle Pass…");
+		const result = await startBattlePassEnrollment({
+			...battlePass?.url && { battlePassPath: battlePass.url },
+			...battlePass?.startTarget && { startTarget: battlePass.startTarget }
+		});
+		if (!result.started) {
+			await showAoAlert(result.error ?? "Could not start Battle Pass.");
+			return;
+		}
+		const next = await loadSiteState() ?? emptySiteState();
+		if (result.battlePass) next.battlePass = result.battlePass;
+		else if (next.battlePass) {
+			delete next.battlePass.needsStart;
+			delete next.battlePass.startTarget;
+		}
+		await saveSiteState(next);
+		showAoToast("Battle Pass started.");
+		const { reloadOptimizerFromCache } = await Promise.resolve().then(() => (init_panels_CB5vbfiv(), panels_CB5vbfiv_exports));
+		await reloadOptimizerFromCache();
+	}
 	function bindClaimAllButtons(root) {
 		for (const button of root.querySelectorAll(".ao-claim-btn")) button.addEventListener("click", () => {
 			handleClaimAllBattlePass({ shouldSkipArpBoosts: button.dataset.skipArp === "1" });
 		});
+		for (const button of root.querySelectorAll(".ao-start-bp-btn")) button.addEventListener("click", () => {
+			handleStartBattlePass();
+		});
 	}
-	var COUNT_MARKER = " achievements";
-	[
-		".achievement-card",
-		".achievement",
-		".achievements-item",
-		".member-achievement",
-		".achievement-item"
-	].join(", ");
 	function isAchievementsPage(path = location.pathname) {
 		return /\/member\/[^/]+\/achievements\/?$/i.test(path);
 	}
@@ -10676,7 +9110,6 @@
 			achievementCooldowns
 		});
 	}
-	var gatheredCache = {};
 	function rememberGathered(data) {
 		attachLoadoutDisplayOrder(data.result, data.settings);
 		gatheredCache.current = data;
@@ -10757,12 +9190,6 @@
         ${switches}
       </div>`;
 	}
-	var SKELETON_BAR_WIDTHS = [
-		"88%",
-		"72%",
-		"64%",
-		"48%"
-	];
 	function renderHydrateBanner(message) {
 		return `<div class="ao-hydrate" role="status" aria-live="polite"><span class="ao-spinner" aria-hidden="true"></span><span>${escapeHtml(message)}</span></div>`;
 	}
@@ -10810,21 +9237,6 @@
 			return artifact.slotLocked === true ? `${artifact.displayName} (locked)` : artifact.displayName;
 		}).join(" + ");
 	}
-	var ACTIVITY_LABELS = {
-		timeOnSite: "Time on Site",
-		steamQuests: "Steam Quests",
-		watchTwitch: "Watch Twitch",
-		dailyCalendar: "Daily Calendar",
-		discordPoll: "Discord Poll",
-		dailyQuests: "Daily / weekend quests",
-		steamCommunityEvent: "Steam Community Event"
-	};
-	var BREAKDOWN_LABELS = {
-		...ACTIVITY_LABELS,
-		dailyQuests: "Daily quests",
-		weekendQuests: "Weekend quests",
-		battlePassClaims: "Battle Pass claims"
-	};
 	function breakdownLabel(key) {
 		return BREAKDOWN_LABELS[key] ?? key;
 	}
@@ -10926,7 +9338,8 @@
 		if (remaining !== void 0) endsPart = ` · ends in ${formatMs(remaining)}`;
 		else if (bp.endsInText) endsPart = ` · ends in ${escapeHtml(bp.endsInText)}`;
 		const lines = [`<div><strong>Battle Pass</strong> · ${bp.tokens ?? "?"} / ${bp.tokensMax ?? "?"} tokens${endsPart}</div>`];
-		if (bp.readyToClaim > 0) {
+		if (bp.needsStart === true) lines.push("<div><strong>Not started</strong> — Start required before ARP progresses this season</div>");
+		else if (bp.readyToClaim > 0) {
 			const arpBoostPart = bp.readyToClaimArp > 0 ? ` (${bp.readyToClaimArp} ARP Boost)` : "";
 			lines.push(`<div><strong>${bp.readyToClaim} ready to claim</strong>${arpBoostPart}</div>`);
 		}
@@ -11149,8 +9562,6 @@
     </details>
   `;
 	}
-	var QUESTS_PATH = "/quests";
-	var TWITCH_HOST = /(^|\.)twitch\.tv$/i;
 	function twitchLoginFromHref(href) {
 		try {
 			const url = new URL(href, location.origin);
@@ -11221,11 +9632,6 @@
 	function hasDropsInTitle(stream) {
 		return /drops/i.test(stream.title);
 	}
-	var DOUBLE_ARP_GROUPS = new Set([
-		"featured",
-		"hive",
-		"nexus"
-	]);
 	function isDoubleArp(stream) {
 		return DOUBLE_ARP_GROUPS.has(stream.group);
 	}
@@ -12201,10 +10607,6 @@
 		await injectAchievementsPanel();
 		await document.querySelector(`#${MODAL_ID}`)?.__aoRefresh?.({ remote: true });
 	}
-	var DEFAULT_INLINE_PANEL_IDS = {
-		equipId: "ao-inline-equip",
-		openId: "ao-inline-open"
-	};
 	function bindShowroomPanelActions(panel, data) {
 		const tree = panelTree(panel);
 		const areActionsEnabled = areAccountActionsEnabled(data.settings);
@@ -12320,6 +10722,1813 @@
 		createOptimizerModal();
 		warmNotificationSchedule();
 	}
+	var _GM, _GM_xmlhttpRequest, _unsafeWindow, STEAM_FREE_CACHE_KEY, STEAM_FREE_TTL_PERMANENT_MS, STEAM_FREE_TTL_PRICE_MS, STEAM_FREE_TTL_ERROR_MS, STEAM_LIBRARY_PENDING_HINT, inflightLookup$1, CREDIT_SOURCES, ArtifactTier, ARTIFACT_TIERS, TIER_LABELS, FRAGMENT_COST_TO_TIER, ArtifactEffectType, ARTIFACTS, TIER_NAME_ALIASES, ARTIFACT_SETS, BASE_ACTIVITY, MONTHLY_CATEGORY_USES, MONTHLY_ARP_FOR_PCT, END_GAME_HPC_UPGRADE_ORDER, END_GAME_NO_HPC_UPGRADE_ORDER, NEW_GAME_UPGRADE_ORDER, END_GAME_HPC_STANDING, END_GAME_NO_HPC_STANDING, NEW_GAME_STANDING, MS_PER_DAY$2, STEAM_QUEST_STATUS_ID_PREFIX, STEAM_LIBRARY_SYNC_LABEL, STEAM_OWNERSHIP_DENIAL, COMMUNITY_SAMPLE_MAX, COMMUNITY_SAMPLE_VISIT_MIN_GAP_MS, COMMUNITY_HOURS_REMOTE_SAMPLE_MIN_MS, COMMUNITY_RATE_MIN_SPAN_MS, COMMUNITY_RATE_WINDOW_MS, COMMUNITY_TREND_WINDOW_MS, COMMUNITY_TREND_HALF_MIN_MS, COMMUNITY_RATIO_MIN, COMMUNITY_RATIO_MAX, COMMUNITY_DECAY_TRUST, COMMUNITY_RATIO_FLAT_EPS, COMMUNITY_MAX_HOURS_PER_DAY, ASCE_CACHE_KEY, ASCE_HOURS_URL, ASCE_CONFIG_URL, ASCE_CACHE_TTL_MS, ASCE_ERROR_TTL_MS, ASCE_SAMPLE_MAX, FETCH_TIMEOUT_MS, inflightLookup, SETTINGS_KEY$1, HOURS_PER_DAY, MS_PER_HOUR$1, COOLDOWN_MS, NOTIFICATION_TYPE_KEYS, NOTIFICATION_TYPE_COPY, DEFAULT_NOTIFICATION_TYPES, DEFAULT_ACTIVITIES, defaultArtifactSettings, STUCK_SLOT_LOCK_HINT, SLOT_POSITIONS, SNAPSHOT_KEY$1, USER_ARTIFACTS_ROOM_PATH, ARP_LOG_ROW_SELECTOR, ARP_LOG_AFTER_ROWS_SELECTOR, ARP_LOG_DATE_RE, ARP_LOG_AMOUNT_RE, ARP_LOG_TOGGLE_RE, ARP_LOG_UNSEEN_SCRAPED_AT, BATTLE_PASS_SEASON_RE, BATTLE_PASS_SEASON_LOOKAHEAD, BATTLE_PASS_PATH_CACHE_MS, battlePassPathCache, BATTLE_PASS_ENDS_RE, CLAIM_QUEUE_GAP_MS, claimEndpointCache, DAILY_QUEST_STATUS_SELECTORS, HEADER_NAME, TWITCH_MS_PER_ARP$2, CONTROL_CENTER_WIDGET, MONTHLY_VAULT_CLAIM_USED_RE, VAULT_CLAIMED_BADGE_RE, VAULT_CLAIM_ACTION_RE, VAULT_CARD_SELECTORS, SITE_STATE_KEY, DEFAULT_CAPS, MS_PER_DAY$1, UTC_DAILY_END_BUFFER_MS, TWITCH_MS_PER_ARP$1, TIME_ON_SITE_DURATION_MS$2, BP_CLAIM_BUFFER_MS, MS_PER_DAY, TWITCH_MS_PER_ARP, TIME_ON_SITE_DURATION_MS$1, deferBattlePassCache, UPGRADE_PATH_MAX, MODAL_ID, INLINE_ID, CC_PANEL_ID, ACH_PANEL_ID, BP_CLAIM_BAR_ID, STYLE_ID$1, BACKDROP_ID, DIALOG_ID, TOAST_ID, ARTIFACT_TIP_ID, TOAST_MS, MODAL_LAYOUT, BACKDROP_LAYOUT, boundTipRoots, CHAIN_RANK, URGENCY_KIND_RANK, ACTIVITY_TODO_RULES, UTC_DAILY_KEYS, TIME_ON_SITE_DURATION_MS, STEAM_WEEK_MS, OFFICIAL_GIVEAWAYS_PATH, ESI_GIVEAWAY_PATH, MAX_ESI_PAGES, SHOW_GIVEAWAY_HREF, LISTING_PATH, IFRAME_WAIT_MS, IFRAME_SETTLE_MS$1, NOTIFY_LOG_KEY, NOTIFY_ICON, NOTIFY_TITLE, FIRED_KEEP_MS, ZOMBIE_MS, SHOWROOM_PATH, VAULT_PATH, CONTROL_CENTER_PATH$1, pendingTimers, notifyRuntime, NOTIFY_KINDS, GIVEAWAY_CHECK_MS, SEEN_GIVEAWAY_KEEP, STALE_MS$1, SLOT_LOCK_STALE_MS, ARP_LOG_STALE_MS, FORCE_REFRESH_COOLDOWN_MS$1, EQUIP_CONFIRM_RETRY_MS, BATTLE_PASS_STALE_MS, COMMUNITY_EVENT_PENDING_STALE_MS, CONTROL_CENTER_PATH, GAME_VAULT_PATH$1, ARP_LOG_PATH, QUEST_SETUP_PATH, ARP_LOG_MAX_ROWS, ARP_LOG_DEFAULT_DAYS, ARP_LOG_LIVE_EVENT_DAYS, dialogState, ACCOUNT_ACTIONS_OFF_MESSAGE, ACHIEVEMENT_AUTOMATION_KEYS, FAQ_PATH, HIVE_PATH, NEWS_PATH, VIDEOS_PATH, RELAY_PATH, GAME_VAULT_PATH, PROFILE_PATH, ACHIEVEMENTS, ACHIEVEMENT_BY_TITLE, SETTINGS_KEY, COOLDOWNS_KEY, DEFAULT_AUTOMATIONS, defaultAchievementSettings, MAX_ACTION_TODOS, MAX_INFORM_TODOS, BORDER_GROUPS, AVATAR_GROUPS, BP_CLAIM_ALL_PENDING_KEY, BP_CLAIM_SKIP_ARP_VALUE, COUNT_MARKER, gatheredCache, SKELETON_BAR_WIDTHS, ACTIVITY_LABELS, BREAKDOWN_LABELS, QUESTS_PATH, TWITCH_HOST, DOUBLE_ARP_GROUPS, DEFAULT_INLINE_PANEL_IDS;
+	var init_panels_DoCYX__L = __esmMin((() => {
+		_GM = (() => typeof GM != "undefined" ? GM : void 0)();
+		_GM_xmlhttpRequest = (() => typeof GM_xmlhttpRequest != "undefined" ? GM_xmlhttpRequest : void 0)();
+		_unsafeWindow = (() => typeof unsafeWindow != "undefined" ? unsafeWindow : void 0)();
+		STEAM_FREE_CACHE_KEY = "steamAppFreeCache";
+		STEAM_FREE_TTL_PERMANENT_MS = 6048e5;
+		STEAM_FREE_TTL_PRICE_MS = 864e5;
+		STEAM_FREE_TTL_ERROR_MS = 36e5;
+		STEAM_LIBRARY_PENDING_HINT = `Free on Steam — add it and play ~${String(10)} min so it shows as owned`;
+		inflightLookup$1 = {};
+		CREDIT_SOURCES = [
+			{
+				id: "megumin-tools",
+				label: "Megumin's Tools",
+				dateAccessed: "2026-08-10",
+				url: "https://docs.google.com/spreadsheets/d/1VCzq6Trwc9T_wEsvTANpL7yy8FaJ6psSsKYn4O4riw8/edit?usp=sharing",
+				links: [{
+					label: "Artifact Upgrade C/P",
+					url: "https://docs.google.com/spreadsheets/d/1VCzq6Trwc9T_wEsvTANpL7yy8FaJ6psSsKYn4O4riw8/edit?gid=1046753957#gid=1046753957"
+				}, {
+					label: "ARP Calculator",
+					url: "https://docs.google.com/spreadsheets/d/1VCzq6Trwc9T_wEsvTANpL7yy8FaJ6psSsKYn4O4riw8/edit?gid=1289162159#gid=1289162159"
+				}]
+			},
+			{
+				id: "megumin-ucf-artifacts-info",
+				label: "【Artifacts】Info",
+				dateAccessed: "2026-08-06",
+				url: "https://www.alienwarearena.com/ucf/show/2167784"
+			},
+			{
+				id: "asce",
+				label: "ASCE",
+				url: "https://github.com/MarvashMagalli/ASCE"
+			}
+		];
+		ArtifactTier = function(ArtifactTier) {
+			ArtifactTier[ArtifactTier["Rust"] = 0] = "Rust";
+			ArtifactTier[ArtifactTier["Bronze"] = 1] = "Bronze";
+			ArtifactTier[ArtifactTier["Silver"] = 2] = "Silver";
+			ArtifactTier[ArtifactTier["Gold"] = 3] = "Gold";
+			ArtifactTier[ArtifactTier["Platinum"] = 4] = "Platinum";
+			ArtifactTier[ArtifactTier["Interstellar"] = 5] = "Interstellar";
+			return ArtifactTier;
+		}({});
+		ARTIFACT_TIERS = [
+			0,
+			1,
+			2,
+			3,
+			4,
+			5
+		];
+		TIER_LABELS = {
+			[0]: "Rust",
+			[1]: "Bronze",
+			[2]: "Silver",
+			[3]: "Gold",
+			[4]: "Platinum",
+			[5]: "Interstellar"
+		};
+		FRAGMENT_COST_TO_TIER = {
+			[0]: 0,
+			[1]: 2,
+			[2]: 5,
+			[3]: 10,
+			[4]: 16,
+			[5]: 25
+		};
+		ArtifactEffectType = function(ArtifactEffectType) {
+			ArtifactEffectType["SteamQuests"] = "SteamQuests";
+			ArtifactEffectType["WatchTwitch"] = "WatchTwitch";
+			ArtifactEffectType["DailyCalendar"] = "DailyCalendar";
+			ArtifactEffectType["TimeOnSite"] = "TimeOnSite";
+			ArtifactEffectType["DiscordPoll"] = "DiscordPoll";
+			ArtifactEffectType["MarketDiscountPct"] = "MarketDiscountPct";
+			ArtifactEffectType["AllArpPct"] = "AllArpPct";
+			ArtifactEffectType["CommunityPlaytimePct"] = "CommunityPlaytimePct";
+			ArtifactEffectType["UsernameColor"] = "UsernameColor";
+			ArtifactEffectType["None"] = "None";
+			return ArtifactEffectType;
+		}({});
+		ARTIFACTS = [
+			{
+				id: "sylphin-fission-blade",
+				category: "Weapon",
+				tierNames: [
+					"Broken Sylphin Fission Blade",
+					"Basic Sylphin Fission Blade",
+					"Extended Sylphin Fission Blade",
+					"Sylphin Fission Blade Mk1",
+					"Sylphin Fission Blade Mk3",
+					"Kylorf's Sylphin Fission Blade"
+				],
+				effects: [
+					1,
+					2,
+					4,
+					6,
+					8,
+					12
+				],
+				effectType: "SteamQuests",
+				effectUnit: "flat"
+			},
+			{
+				id: "pn295",
+				category: "Tech",
+				tierNames: [
+					"Pn295 Unstable",
+					"Pn295 Controlled",
+					"Pn295 Fusion",
+					"Pn295 Alloy",
+					"Slyphin Battle Armor",
+					"Pn295 Collapsed Star"
+				],
+				effects: [
+					1,
+					2,
+					4,
+					7,
+					10,
+					15
+				],
+				effectType: "WatchTwitch",
+				effectUnit: "flat"
+			},
+			{
+				id: "light-warping",
+				category: "Language",
+				tierNames: [
+					"Rudimentary Light Warping",
+					"Simplistic Light Warping",
+					"Phase Light Warping",
+					"Bonded Phase Light Warping",
+					"PLW Conduit RX13",
+					"Light Warp Forerunners"
+				],
+				effects: [
+					-.01,
+					-.03,
+					-.05,
+					-.08,
+					-.1,
+					-.15
+				],
+				effectType: "MarketDiscountPct",
+				effectUnit: "pct"
+			},
+			{
+				id: "herkow-plasma-chamber",
+				category: "Power",
+				tierNames: [
+					void 0,
+					void 0,
+					void 0,
+					"H`erkow Plasma Chamber",
+					"H`erkow Control Center",
+					"H`erkow Orb Reactor"
+				],
+				effects: [
+					void 0,
+					void 0,
+					void 0,
+					.1,
+					.15,
+					.25
+				],
+				effectType: "AllArpPct",
+				effectUnit: "pct"
+			},
+			{
+				id: "them",
+				category: "Power",
+				tierNames: [
+					"*** THEM ***",
+					"*** THEM CONTAINED ***",
+					"*** THEM ESCAPED ***",
+					void 0,
+					void 0,
+					void 0
+				],
+				effects: [
+					-.2,
+					-.25,
+					-.25,
+					void 0,
+					void 0,
+					void 0
+				],
+				effectType: "AllArpPct",
+				effectUnit: "pct"
+			},
+			{
+				id: "herkow-warrior-script",
+				category: "Weapon",
+				tierNames: [
+					"H`erkow Warrior Script",
+					void 0,
+					void 0,
+					void 0,
+					void 0,
+					void 0
+				],
+				effects: [
+					1,
+					void 0,
+					void 0,
+					void 0,
+					void 0,
+					void 0
+				],
+				effectType: "SteamQuests",
+				effectUnit: "flat"
+			},
+			{
+				id: "scion-of-the-light",
+				category: "Tech",
+				tierNames: [
+					"Scion of the Light",
+					"Scion of the Light: 2nd Sighting",
+					void 0,
+					void 0,
+					void 0,
+					void 0
+				],
+				effects: [
+					1,
+					2,
+					void 0,
+					void 0,
+					void 0,
+					void 0
+				],
+				effectType: "WatchTwitch",
+				effectUnit: "flat"
+			},
+			{
+				id: "mysterious-text",
+				category: "Language",
+				tierNames: [
+					"Mysterious Text",
+					"Mysterious Text Decipher",
+					void 0,
+					void 0,
+					void 0,
+					void 0
+				],
+				effects: [
+					-.01,
+					-.02,
+					void 0,
+					void 0,
+					void 0,
+					void 0
+				],
+				effectType: "MarketDiscountPct",
+				effectUnit: "pct"
+			},
+			{
+				id: "chai-stones",
+				category: "Precious Gems",
+				tierNames: [
+					"Chai Stones - Raw",
+					"Chai Stones - Unprocessed",
+					"Chai Stones - Processed",
+					"The Stone of Cromcote`",
+					"H`erkow Fertility Stone",
+					"Chai Stone H`erkow Display"
+				],
+				effects: [
+					1,
+					2,
+					3,
+					4,
+					5,
+					6
+				],
+				effectType: "DailyCalendar",
+				effectUnit: "flat"
+			},
+			{
+				id: "herkow-fertility-robes",
+				category: "Clothing",
+				tierNames: [
+					void 0,
+					void 0,
+					void 0,
+					"H`erkow Fertility Robes",
+					void 0,
+					void 0
+				],
+				effects: [
+					void 0,
+					void 0,
+					void 0,
+					"Pink",
+					void 0,
+					void 0
+				],
+				effectType: "UsernameColor",
+				effectUnit: "cosmetic"
+			},
+			{
+				id: "pn295-unstable-battery",
+				category: "Weapon",
+				tierNames: [
+					"Pn 295 Unstable Battery",
+					"Pn 295 Stable Battery",
+					"Pn 295 Contained Battery",
+					"Pn 295 Battery Amplifier",
+					"Pn 295 Cruiser Class Battery Amplifier",
+					"Pn 295 Recycler"
+				],
+				effects: [
+					2,
+					4,
+					6,
+					8,
+					10,
+					15
+				],
+				effectType: "SteamQuests",
+				effectUnit: "flat"
+			},
+			{
+				id: "zorathian-cosmotheque",
+				category: "Knowledge",
+				tierNames: [
+					void 0,
+					"Zorathian Cosmotheque",
+					"Zorathian Data Mine",
+					"5th Dimensional Data",
+					"Crystalline Quantum Shelving",
+					"Zorathian Library"
+				],
+				effects: [
+					void 0,
+					1,
+					2,
+					3,
+					4,
+					5
+				],
+				effectType: "DiscordPoll",
+				effectUnit: "flat"
+			},
+			{
+				id: "flux",
+				category: "Social",
+				tierNames: [
+					"Flux",
+					"Advanced Flux",
+					"Spocot Board",
+					"Spocot Flux Epoc",
+					"Spocot Flux Final",
+					"Spocot Flux Champion"
+				],
+				effects: [
+					.05,
+					.1,
+					.2,
+					.3,
+					.4,
+					.5
+				],
+				effectType: "CommunityPlaytimePct",
+				effectUnit: "pct"
+			},
+			{
+				id: "bali-arches",
+				category: "Architecture",
+				tierNames: [
+					void 0,
+					"Ba'li Arches",
+					"Northop Arches",
+					"Golden Arches",
+					"Apotho Arches",
+					"Eye of the Night"
+				],
+				effects: [
+					void 0,
+					1,
+					2,
+					3,
+					4,
+					6
+				],
+				effectType: "TimeOnSite",
+				effectUnit: "flat"
+			},
+			{
+				id: "gamers-wanted",
+				category: "Architecture",
+				tierNames: [
+					void 0,
+					void 0,
+					"Gamers Wanted",
+					"They're Out There",
+					"Defy Boundaries",
+					"Rise"
+				],
+				effects: [
+					void 0,
+					void 0,
+					1,
+					2,
+					3,
+					4
+				],
+				effectType: "TimeOnSite",
+				effectUnit: "flat"
+			},
+			{
+				id: "omniversal-override",
+				category: "Language",
+				tierNames: [
+					void 0,
+					void 0,
+					"Omniversal Override",
+					"Planetary Tranverser",
+					"Dimensional Articulator",
+					"Multi-Planar Transmuter"
+				],
+				effects: [
+					void 0,
+					void 0,
+					-.02,
+					-.03,
+					-.04,
+					-.05
+				],
+				effectType: "MarketDiscountPct",
+				effectUnit: "pct"
+			},
+			{
+				id: "the-black-rose",
+				category: "Clothing",
+				tierNames: [
+					"The Black Rose",
+					void 0,
+					void 0,
+					void 0,
+					void 0,
+					void 0
+				],
+				effects: [
+					"Dark Gray",
+					void 0,
+					void 0,
+					void 0,
+					void 0,
+					void 0
+				],
+				effectType: "UsernameColor",
+				effectUnit: "cosmetic"
+			},
+			{
+				id: "the-fractured-lilly",
+				category: "Precious Gems",
+				tierNames: [
+					"The Fractured Lilly",
+					void 0,
+					void 0,
+					void 0,
+					void 0,
+					void 0
+				],
+				effects: [
+					0,
+					void 0,
+					void 0,
+					void 0,
+					void 0,
+					void 0
+				],
+				effectType: "None",
+				effectUnit: "flat"
+			},
+			{
+				id: "the-veiled-thorn",
+				category: "Weapon",
+				tierNames: [
+					"The Veiled Thorn",
+					void 0,
+					void 0,
+					void 0,
+					void 0,
+					void 0
+				],
+				effects: [
+					0,
+					void 0,
+					void 0,
+					void 0,
+					void 0,
+					void 0
+				],
+				effectType: "None",
+				effectUnit: "flat"
+			},
+			{
+				id: "audio-archive-stone",
+				category: "Clothing",
+				tierNames: [
+					void 0,
+					void 0,
+					void 0,
+					void 0,
+					void 0,
+					"Audio Archive Stone"
+				],
+				effects: [
+					void 0,
+					void 0,
+					void 0,
+					void 0,
+					void 0,
+					"Tomato"
+				],
+				effectType: "UsernameColor",
+				effectUnit: "cosmetic"
+			}
+		];
+		TIER_NAME_ALIASES = {
+			"Pn295 Recycler": {
+				id: "pn295-unstable-battery",
+				tier: 5
+			},
+			"H'erkow Warrior Script": {
+				id: "herkow-warrior-script",
+				tier: 0
+			}
+		};
+		ARTIFACT_SETS = [
+			{
+				id: "first-contact",
+				name: "First Contact",
+				memberIds: [
+					"sylphin-fission-blade",
+					"pn295",
+					"light-warping"
+				],
+				effects: [{
+					type: "DailyCalendar",
+					value: 1,
+					unit: "flat"
+				}, {
+					type: "UsernameColor",
+					value: 1,
+					unit: "cosmetic"
+				}]
+			},
+			{
+				id: "stanley-excavation",
+				name: "The Stanley Excavation",
+				memberIds: [
+					"chai-stones",
+					"herkow-fertility-robes",
+					"pn295-unstable-battery"
+				],
+				effects: [{
+					type: "SteamQuests",
+					value: 5,
+					unit: "flat"
+				}, {
+					type: "MarketDiscountPct",
+					value: -.15,
+					unit: "pct"
+				}]
+			},
+			{
+				id: "zorathian-renaissance",
+				name: "Zorathian Renaissance",
+				memberIds: [
+					"zorathian-cosmotheque",
+					"flux",
+					"bali-arches"
+				],
+				effects: [{
+					type: "AllArpPct",
+					value: .1,
+					unit: "pct"
+				}, {
+					type: "UsernameColor",
+					value: 1,
+					unit: "cosmetic"
+				}]
+			},
+			{
+				id: "braxtine-garden",
+				name: "Braxtine Garden",
+				memberIds: [
+					"the-black-rose",
+					"the-crimsom-t",
+					"the-nebula-c"
+				],
+				effects: [{
+					type: "AllArpPct",
+					value: 5,
+					unit: "pct"
+				}, {
+					type: "TimeOnSite",
+					value: 100,
+					unit: "flat"
+				}]
+			}
+		];
+		BASE_ACTIVITY = {
+			days: 1,
+			timeOnSiteBasePerDay: 5,
+			watchTwitchBasePerDay: 15,
+			steamQuestBases: [
+				15,
+				25,
+				25
+			],
+			discordPollBase: 5,
+			discordPollsWhenPending: 2,
+			discordPollPostHourUtc: 16,
+			dailyQuestBase: 7,
+			weekendQuestBase: 5,
+			dailyCalendarBasePerDay: 5,
+			steamCommunityEventReward: 20
+		};
+		MONTHLY_CATEGORY_USES = {
+			["WatchTwitch"]: 30,
+			["DailyCalendar"]: 30,
+			["TimeOnSite"]: 30,
+			["SteamQuests"]: 12,
+			["DiscordPoll"]: 20
+		};
+		MONTHLY_ARP_FOR_PCT = 1800;
+		END_GAME_HPC_UPGRADE_ORDER = [
+			"herkow-plasma-chamber",
+			"pn295",
+			"chai-stones",
+			"pn295-unstable-battery",
+			"bali-arches",
+			"sylphin-fission-blade",
+			"zorathian-cosmotheque",
+			"scion-of-the-light"
+		];
+		END_GAME_NO_HPC_UPGRADE_ORDER = [
+			"pn295",
+			"chai-stones",
+			"pn295-unstable-battery",
+			"bali-arches",
+			"sylphin-fission-blade",
+			"zorathian-cosmotheque",
+			"scion-of-the-light"
+		];
+		NEW_GAME_UPGRADE_ORDER = [
+			"bali-arches",
+			"zorathian-cosmotheque",
+			"flux",
+			"scion-of-the-light"
+		];
+		END_GAME_HPC_STANDING = [
+			"herkow-plasma-chamber",
+			"chai-stones",
+			"pn295"
+		];
+		END_GAME_NO_HPC_STANDING = [
+			"pn295",
+			"chai-stones",
+			"bali-arches"
+		];
+		NEW_GAME_STANDING = [
+			"bali-arches",
+			"zorathian-cosmotheque",
+			"flux"
+		];
+		MS_PER_DAY$2 = 864e5;
+		STEAM_QUEST_STATUS_ID_PREFIX = "control-center__steam-quest-status-";
+		STEAM_LIBRARY_SYNC_LABEL = /^(Check Game|Visit Steam|Sync Games)$/i;
+		STEAM_OWNERSHIP_DENIAL = /do not own|don['’]t own|not in your steam library|not in your library|must own this game/i;
+		COMMUNITY_SAMPLE_MAX = 96;
+		COMMUNITY_SAMPLE_VISIT_MIN_GAP_MS = 9e5;
+		COMMUNITY_HOURS_REMOTE_SAMPLE_MIN_MS = 36e5;
+		COMMUNITY_RATE_MIN_SPAN_MS = 9e5;
+		COMMUNITY_RATE_WINDOW_MS = 864e5;
+		COMMUNITY_TREND_WINDOW_MS = 1728e5;
+		COMMUNITY_TREND_HALF_MIN_MS = 648e5;
+		COMMUNITY_RATIO_MIN = .5;
+		COMMUNITY_RATIO_MAX = 2;
+		COMMUNITY_DECAY_TRUST = .5;
+		COMMUNITY_RATIO_FLAT_EPS = .03;
+		COMMUNITY_MAX_HOURS_PER_DAY = 8e4;
+		ASCE_CACHE_KEY = "asceCommunityHours";
+		ASCE_HOURS_URL = "https://raw.githubusercontent.com/MarvashMagalli/ASCE/main/stored_hours.json";
+		ASCE_CONFIG_URL = "https://raw.githubusercontent.com/MarvashMagalli/ASCE/main/configAWA.json";
+		ASCE_CACHE_TTL_MS = 15e5;
+		ASCE_ERROR_TTL_MS = 18e5;
+		ASCE_SAMPLE_MAX = 96;
+		FETCH_TIMEOUT_MS = 8e3;
+		inflightLookup = {};
+		SETTINGS_KEY$1 = "artifactOptimizerSettings";
+		HOURS_PER_DAY = 24;
+		MS_PER_HOUR$1 = 36e5;
+		COOLDOWN_MS = HOURS_PER_DAY * MS_PER_HOUR$1;
+		NOTIFICATION_TYPE_KEYS = [
+			"swap",
+			"community",
+			"vault",
+			"giveaways"
+		];
+		NOTIFICATION_TYPE_COPY = {
+			swap: {
+				title: "Recommended swap",
+				hint: "When a better loadout is waiting on a 24h lock — not every unlock."
+			},
+			community: {
+				title: "Community Event",
+				hint: "When community hours unlock pending ARP."
+			},
+			vault: {
+				title: "Game Vault",
+				hint: "When the vault opens or new games appear."
+			},
+			giveaways: {
+				title: "New giveaways",
+				hint: "Official Alienware key giveaways — not community giveaways."
+			}
+		};
+		DEFAULT_NOTIFICATION_TYPES = {
+			swap: true,
+			community: true,
+			vault: true,
+			giveaways: true
+		};
+		DEFAULT_ACTIVITIES = {
+			timeOnSite: {
+				enabled: true,
+				frequency: 1
+			},
+			steamQuests: {
+				enabled: true,
+				frequency: 1
+			},
+			watchTwitch: {
+				enabled: true,
+				frequency: 1
+			},
+			dailyCalendar: {
+				enabled: true,
+				frequency: 1
+			},
+			discordPoll: {
+				enabled: true,
+				frequency: 1
+			},
+			dailyQuests: {
+				enabled: true,
+				frequency: 1
+			},
+			steamCommunityEvent: {
+				enabled: true,
+				frequency: 1
+			}
+		};
+		defaultArtifactSettings = {
+			activities: { ...DEFAULT_ACTIVITIES },
+			pendingVaultPurchaseArp: 0,
+			manualArtifacts: [],
+			preferScraped: true,
+			slotCooldowns: [],
+			preferredTwitchStreamers: [],
+			utcDailyEndBufferHours: 1,
+			browserNotifications: false,
+			notificationTypes: { ...DEFAULT_NOTIFICATION_TYPES },
+			allowAccountActions: false,
+			achievementsEnabled: false
+		};
+		STUCK_SLOT_LOCK_HINT = "Still stuck after Refresh? Upgrade a maxed artifact manually (Warrior Script) — 0 fragments";
+		SLOT_POSITIONS = [
+			1,
+			2,
+			3
+		];
+		SNAPSHOT_KEY$1 = "artifactSnapshot";
+		USER_ARTIFACTS_ROOM_PATH = "/user-artifacts-room";
+		ARP_LOG_ROW_SELECTOR = ".card-table-row";
+		ARP_LOG_AFTER_ROWS_SELECTOR = "#arp-logs-per-page, #arp-log-chart";
+		ARP_LOG_DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
+		ARP_LOG_AMOUNT_RE = /^[+]?\d[\d,]*$/;
+		ARP_LOG_TOGGLE_RE = /^[▼▲^▾▴]$/;
+		ARP_LOG_UNSEEN_SCRAPED_AT = new Date(0).toISOString();
+		BATTLE_PASS_SEASON_RE = /\/battle-pass\/(\d+)/;
+		BATTLE_PASS_SEASON_LOOKAHEAD = 6;
+		BATTLE_PASS_PATH_CACHE_MS = 9e5;
+		battlePassPathCache = { at: 0 };
+		BATTLE_PASS_ENDS_RE = /battle\s*pass\s*ends?\s*in\s*(\d{1,3}(?:\s*:\s*\d{1,2}){2,3})/i;
+		CLAIM_QUEUE_GAP_MS = 1500;
+		claimEndpointCache = {};
+		DAILY_QUEST_STATUS_SELECTORS = [
+			"[id^=\"control-center__daily-quest-status-\"]",
+			"[id^=\"control-center__daily-quests-status-\"]",
+			"[id^=\"control-center__weekend-quest-status-\"]",
+			"[id^=\"control-center__quest-status-\"]"
+		];
+		HEADER_NAME = /^(incomplete|complete|status|game|quest|quests|reward|arp)$/i;
+		TWITCH_MS_PER_ARP$2 = 6e4;
+		CONTROL_CENTER_WIDGET = "[id^=\"control-center__\"], a.community-event-banner";
+		MONTHLY_VAULT_CLAIM_USED_RE = /already claimed a game this month/i;
+		VAULT_CLAIMED_BADGE_RE = /\bclaimed\b/i;
+		VAULT_CLAIM_ACTION_RE = /\bclaim\b/i;
+		VAULT_CARD_SELECTORS = [
+			".gamevault-marketplace-product[data-product-price]",
+			".marketplace-game-product[data-product-price]",
+			".pointer.marketplace-game-small",
+			".pointer.marketplace-game-large"
+		].join(", ");
+		SITE_STATE_KEY = "artifactSiteState";
+		DEFAULT_CAPS = {
+			timeOnSite: "unknown",
+			steamQuests: "unknown",
+			watchTwitch: "unknown",
+			dailyCalendar: "unknown",
+			discordPoll: "unknown",
+			dailyQuests: "unknown",
+			steamCommunityEvent: "unknown"
+		};
+		MS_PER_DAY$1 = 864e5;
+		UTC_DAILY_END_BUFFER_MS = 36e5;
+		TWITCH_MS_PER_ARP$1 = 6e4;
+		TIME_ON_SITE_DURATION_MS$2 = BASE_ACTIVITY.timeOnSiteBasePerDay * 6e4;
+		BP_CLAIM_BUFFER_MS = 6e5;
+		MS_PER_DAY = 864e5;
+		TWITCH_MS_PER_ARP = 6e4;
+		TIME_ON_SITE_DURATION_MS$1 = BASE_ACTIVITY.timeOnSiteBasePerDay * 6e4;
+		deferBattlePassCache = new WeakMap();
+		UPGRADE_PATH_MAX = 5;
+		MODAL_ID = "alienware-artifact-optimizer";
+		INLINE_ID = "alienware-artifact-optimizer-inline";
+		CC_PANEL_ID = "alienware-artifact-optimizer-cc";
+		ACH_PANEL_ID = "alienware-artifact-optimizer-ach";
+		BP_CLAIM_BAR_ID = "alienware-artifact-optimizer-bp-claim";
+		STYLE_ID$1 = "alienware-artifact-optimizer-styles";
+		BACKDROP_ID = "alienware-artifact-optimizer-backdrop";
+		DIALOG_ID = "alienware-artifact-optimizer-dialog";
+		TOAST_ID = "alienware-artifact-optimizer-toast";
+		ARTIFACT_TIP_ID = "ao-artifact-tip-float";
+		TOAST_MS = 2200;
+		MODAL_LAYOUT = [
+			["position", "fixed"],
+			["top", "50%"],
+			["left", "50%"],
+			["transform", "translate(-50%, -50%)"],
+			["z-index", "10001"],
+			["width", "min(560px, 94vw)"],
+			["max-height", "90vh"],
+			["overflow-y", "auto"]
+		];
+		BACKDROP_LAYOUT = [
+			["position", "fixed"],
+			["inset", "0"],
+			["background", "rgba(0, 0, 0, 0.85)"],
+			["z-index", "10000"]
+		];
+		boundTipRoots = new WeakSet();
+		CHAIN_RANK = {
+			before: 0,
+			equip: 1,
+			after: 2
+		};
+		URGENCY_KIND_RANK = {
+			action: 0,
+			schedule: 1,
+			info: 2
+		};
+		ACTIVITY_TODO_RULES = [
+			{
+				key: "steamQuests",
+				isDue: (caps) => isActivityPending(caps, "steamQuests")
+			},
+			{
+				key: "dailyQuests",
+				isDue: (caps) => isActivityPending(caps, "dailyQuests")
+			},
+			{
+				key: "watchTwitch",
+				isDue: (caps) => isActivityAvailable(caps, "watchTwitch")
+			},
+			{
+				key: "timeOnSite",
+				isDue: (caps) => isActivityAvailable(caps, "timeOnSite")
+			}
+		];
+		UTC_DAILY_KEYS = new Set([
+			"watchTwitch",
+			"dailyQuests",
+			"timeOnSite"
+		]);
+		TIME_ON_SITE_DURATION_MS = BASE_ACTIVITY.timeOnSiteBasePerDay * 6e4;
+		STEAM_WEEK_MS = 6048e5;
+		OFFICIAL_GIVEAWAYS_PATH = "/ucf/Giveaway";
+		ESI_GIVEAWAY_PATH = "/esi/featured-tile-data/Giveaway";
+		MAX_ESI_PAGES = 10;
+		SHOW_GIVEAWAY_HREF = /\/ucf\/show\/(\d+)\/(?:[\w.-]+\/)*Giveaway\/([\w.-]+)/i;
+		LISTING_PATH = /\/ucf\/Giveaway\/?$/i;
+		IFRAME_WAIT_MS = 15e3;
+		IFRAME_SETTLE_MS$1 = 600;
+		NOTIFY_LOG_KEY = "artifactOptimizerNotifyLog";
+		NOTIFY_ICON = "https://raw.githubusercontent.com/UpDownLeftDie/AWA-Toolkit/main/icon.png";
+		NOTIFY_TITLE = "AWA Toolkit";
+		FIRED_KEEP_MS = 1728e5;
+		ZOMBIE_MS = 864e5;
+		SHOWROOM_PATH = "/user-artifacts-room";
+		VAULT_PATH = "/game-vault";
+		CONTROL_CENTER_PATH$1 = "/control-center";
+		pendingTimers = new Map();
+		notifyRuntime = {
+			syncGeneration: 0,
+			didBindWake: false,
+			shouldForceGiveawayCheck: false
+		};
+		NOTIFY_KINDS = [
+			"swap",
+			"vault",
+			"community",
+			"giveaway"
+		];
+		GIVEAWAY_CHECK_MS = 9e5;
+		SEEN_GIVEAWAY_KEEP = 300;
+		STALE_MS$1 = 216e5;
+		SLOT_LOCK_STALE_MS = 3e5;
+		ARP_LOG_STALE_MS = 216e5;
+		FORCE_REFRESH_COOLDOWN_MS$1 = 5e3;
+		EQUIP_CONFIRM_RETRY_MS = 750;
+		BATTLE_PASS_STALE_MS = 36e5;
+		COMMUNITY_EVENT_PENDING_STALE_MS = STALE_MS$1;
+		CONTROL_CENTER_PATH = "/control-center";
+		GAME_VAULT_PATH$1 = "/marketplace/game-vault";
+		ARP_LOG_PATH = "/account/arp-log";
+		QUEST_SETUP_PATH = "/steam/questsetup";
+		ARP_LOG_MAX_ROWS = 300;
+		ARP_LOG_DEFAULT_DAYS = 7;
+		ARP_LOG_LIVE_EVENT_DAYS = 14;
+		dialogState = {};
+		ACCOUNT_ACTIONS_OFF_MESSAGE = "Account actions are off. Enable them in the full panel.";
+		ACHIEVEMENT_AUTOMATION_KEYS = [
+			"visitPages",
+			"profileCosmetics",
+			"watchVideos",
+			"readArticles",
+			"gameVault"
+		];
+		FAQ_PATH = "/faq-contact";
+		HIVE_PATH = "/information";
+		NEWS_PATH = "/news";
+		VIDEOS_PATH = "/videos";
+		RELAY_PATH = "/ucf";
+		GAME_VAULT_PATH = "/marketplace/game-vault";
+		PROFILE_PATH = "/member/{username}";
+		ACHIEVEMENTS = [
+			define("Verified Member", "verified", {
+				hint: "Finish email / account verification if AWA still asks for it.",
+				kind: "inform"
+			}),
+			define("Add about me", "profile", {
+				hint: "Add a short About Me on your profile.",
+				href: PROFILE_PATH,
+				hrefLabel: "Open profile",
+				aliases: ["Add about me"],
+				automation: "profileCosmetics"
+			}),
+			define("Try it on", "avatar", {
+				group: "border-use",
+				rank: 1,
+				hint: "Change your profile border once.",
+				href: PROFILE_PATH,
+				hrefLabel: "Open profile",
+				automation: "profileCosmetics"
+			}),
+			define("Use 5 different borders", "avatar", {
+				group: "border-use",
+				rank: 2,
+				hint: "Equip 5 different borders over time.",
+				href: PROFILE_PATH,
+				hrefLabel: "Open profile",
+				automation: "profileCosmetics"
+			}),
+			define("Use 10 different borders", "avatar", {
+				group: "border-use",
+				rank: 3,
+				hint: "Keep rotating borders you have not used yet.",
+				href: PROFILE_PATH,
+				hrefLabel: "Open profile",
+				automation: "profileCosmetics"
+			}),
+			define("Use 25 different borders", "avatar", {
+				group: "border-use",
+				rank: 4,
+				hint: "Calendar and marketplace borders count toward this.",
+				href: PROFILE_PATH,
+				hrefLabel: "Open profile",
+				automation: "profileCosmetics"
+			}),
+			define("Change your border once a day for a week", "avatar", {
+				group: "border-daily",
+				rank: 1,
+				hint: "Change your border each UTC day for 7 days.",
+				href: PROFILE_PATH,
+				hrefLabel: "Open profile",
+				automation: "profileCosmetics"
+			}),
+			define("Change your border once a month for a year", "avatar", {
+				group: "border-monthly",
+				rank: 1,
+				hint: "Change your border at least once each calendar month for 12 months.",
+				href: PROFILE_PATH,
+				hrefLabel: "Open profile",
+				automation: "profileCosmetics"
+			}),
+			define("Change your avatar items every day for a week", "avatar", {
+				group: "avatar-daily",
+				rank: 1,
+				hint: "Change an avatar item each day for 7 days.",
+				href: PROFILE_PATH,
+				hrefLabel: "Open profile",
+				automation: "profileCosmetics"
+			}),
+			define("Change your avatar once a month for 3 months", "avatar", {
+				group: "avatar-monthly",
+				rank: 1,
+				hint: "Change your avatar at least once a month for 3 months.",
+				href: PROFILE_PATH,
+				hrefLabel: "Open profile",
+				automation: "profileCosmetics"
+			}),
+			define("Change your avatar once a month for 6 months", "avatar", {
+				group: "avatar-monthly",
+				rank: 2,
+				hint: "Keep a monthly avatar change going for 6 months.",
+				href: PROFILE_PATH,
+				hrefLabel: "Open profile",
+				automation: "profileCosmetics"
+			}),
+			define("Change your avatar once a month for 1 year", "avatar", {
+				group: "avatar-monthly",
+				rank: 3,
+				hint: "Keep a monthly avatar change going for 12 months.",
+				href: PROFILE_PATH,
+				hrefLabel: "Open profile",
+				automation: "profileCosmetics"
+			}),
+			define("Visit the FAQ page", "visitPages", {
+				hint: "Open the FAQ / support page once.",
+				href: FAQ_PATH,
+				hrefLabel: "Visit FAQ",
+				automation: "visitPages"
+			}),
+			define("Visit the Hive page", "visitPages", {
+				hint: "Open the Hive / information page once.",
+				href: HIVE_PATH,
+				hrefLabel: "Visit Hive",
+				automation: "visitPages"
+			}),
+			define("Watch 10 Videos", "watchVideos", {
+				group: "watch-videos",
+				rank: 1,
+				hint: "Watch 10 videos on Alienware Arena.",
+				href: VIDEOS_PATH,
+				hrefLabel: "Open videos",
+				automation: "watchVideos"
+			}),
+			define("Watch 100 Videos", "watchVideos", {
+				group: "watch-videos",
+				rank: 2,
+				hint: "Keep watching Arena videos toward 100.",
+				href: VIDEOS_PATH,
+				hrefLabel: "Open videos",
+				automation: "watchVideos"
+			}),
+			define("Watch 1000 Videos", "watchVideos", {
+				group: "watch-videos",
+				rank: 3,
+				hint: "Long-run video-watch achievement.",
+				href: VIDEOS_PATH,
+				hrefLabel: "Open videos",
+				kind: "inform"
+			}),
+			define("Read 10 News Articles", "readArticles", {
+				group: "read-articles",
+				rank: 1,
+				hint: "Open 10 Pulse / news articles.",
+				href: NEWS_PATH,
+				hrefLabel: "Open news",
+				automation: "readArticles"
+			}),
+			define("Read 100 News Articles", "readArticles", {
+				group: "read-articles",
+				rank: 2,
+				hint: "Keep reading Arena news toward 100.",
+				href: NEWS_PATH,
+				hrefLabel: "Open news",
+				automation: "readArticles"
+			}),
+			define("Read 1000 News Articles", "readArticles", {
+				group: "read-articles",
+				rank: 3,
+				hint: "Long-run article-read achievement.",
+				href: NEWS_PATH,
+				hrefLabel: "Open news",
+				kind: "inform"
+			}),
+			define("Enter Game-Vault", "gameVault", {
+				group: "vault-enter",
+				rank: 1,
+				hint: "Open the Game Vault page once.",
+				href: GAME_VAULT_PATH,
+				hrefLabel: "Open vault",
+				automation: "gameVault"
+			}),
+			define("Enter Game-Vault 5 times", "gameVault", {
+				group: "vault-enter",
+				rank: 2,
+				hint: "Visit Game Vault on 5 different days / entries.",
+				href: GAME_VAULT_PATH,
+				hrefLabel: "Open vault",
+				automation: "gameVault"
+			}),
+			define("Enter Game-Vault 12 times", "gameVault", {
+				group: "vault-enter",
+				rank: 3,
+				hint: "Keep entering Game Vault toward 12 visits.",
+				href: GAME_VAULT_PATH,
+				hrefLabel: "Open vault",
+				automation: "gameVault"
+			}),
+			define("Enter Game-Vault 24 times", "gameVault", {
+				group: "vault-enter",
+				rank: 4,
+				hint: "Keep entering Game Vault toward 24 visits.",
+				href: GAME_VAULT_PATH,
+				hrefLabel: "Open vault",
+				automation: "gameVault"
+			}),
+			define("Get 1 game from game vault", "gameVault", {
+				group: "vault-claim",
+				rank: 1,
+				hint: "Claim one Game Vault title when you have enough ARP.",
+				href: GAME_VAULT_PATH,
+				hrefLabel: "Open vault",
+				kind: "inform"
+			}),
+			define("Get 5 games from game vault", "gameVault", {
+				group: "vault-claim",
+				rank: 2,
+				hint: "Claim 5 Game Vault titles over time.",
+				href: GAME_VAULT_PATH,
+				hrefLabel: "Open vault",
+				kind: "inform"
+			}),
+			define("Get 10 games from game vault", "gameVault", {
+				group: "vault-claim",
+				rank: 3,
+				hint: "Claim 10 Game Vault titles over time.",
+				href: GAME_VAULT_PATH,
+				hrefLabel: "Open vault",
+				kind: "inform"
+			}),
+			define("Post a relay", "relay", {
+				group: "relay-post",
+				rank: 1,
+				hint: "Post one Relay (community post).",
+				href: RELAY_PATH,
+				hrefLabel: "Open Relay",
+				aliases: ["Post a Relay"]
+			}),
+			define("Post 10 Relays", "relay", {
+				group: "relay-post",
+				rank: 2,
+				hint: "Post 10 Relays.",
+				href: RELAY_PATH,
+				hrefLabel: "Open Relay"
+			}),
+			define("Post 50 relays", "relay", {
+				group: "relay-post",
+				rank: 3,
+				hint: "Post 50 Relays.",
+				href: RELAY_PATH,
+				hrefLabel: "Open Relay"
+			}),
+			define("Comment on a relay", "relay", {
+				group: "relay-comment",
+				rank: 1,
+				hint: "Leave a comment on someone else's Relay.",
+				href: RELAY_PATH,
+				hrefLabel: "Open Relay"
+			}),
+			define("React to a relay", "relay", {
+				group: "relay-react",
+				rank: 1,
+				hint: "React to one Relay.",
+				href: RELAY_PATH,
+				hrefLabel: "Open Relay"
+			}),
+			define("React to 10 relays", "relay", {
+				group: "relay-react",
+				rank: 2,
+				hint: "React to 10 Relays.",
+				href: RELAY_PATH,
+				hrefLabel: "Open Relay"
+			}),
+			define("React to 50 relays", "relay", {
+				group: "relay-react",
+				rank: 3,
+				hint: "React to 50 Relays.",
+				href: RELAY_PATH,
+				hrefLabel: "Open Relay"
+			}),
+			define("React to 100 relays", "relay", {
+				group: "relay-react",
+				rank: 4,
+				hint: "React to 100 Relays.",
+				href: RELAY_PATH,
+				hrefLabel: "Open Relay"
+			}),
+			define("Vote on your first Arena Connect Poll", "discord", {
+				group: "discord-poll",
+				rank: 1,
+				hint: "Vote on the current Discord / Arena Connect poll (also in What to do).",
+				coveredByActionPlan: true
+			}),
+			define("Vote on 10 Arena Connect polls", "discord", {
+				group: "discord-poll",
+				rank: 2,
+				hint: "Keep voting on weekday Discord polls.",
+				coveredByActionPlan: true
+			}),
+			define("Vote on 50 Arena Connect polls", "discord", {
+				group: "discord-poll",
+				rank: 3,
+				hint: "Long-run Discord poll votes.",
+				coveredByActionPlan: true,
+				kind: "inform"
+			}),
+			define("Vote on 100 Arena Connect polls", "discord", {
+				group: "discord-poll",
+				rank: 4,
+				hint: "Long-run Discord poll votes.",
+				coveredByActionPlan: true,
+				kind: "inform"
+			}),
+			define("Vote on 500 Arena Connect polls", "discord", {
+				group: "discord-poll",
+				rank: 5,
+				hint: "Long-run Discord poll votes.",
+				coveredByActionPlan: true,
+				kind: "inform"
+			}),
+			define("Play all 3 Steam quests", "steamQuests", {
+				group: "steam-all-three",
+				rank: 1,
+				hint: "Finish all three weekly Steam quests (also in What to do).",
+				coveredByActionPlan: true
+			}),
+			define("Play all 3 Steam quests 5 times", "steamQuests", {
+				group: "steam-all-three",
+				rank: 2,
+				hint: "Clear all three Steam quests for 5 weeks.",
+				coveredByActionPlan: true,
+				kind: "inform"
+			}),
+			define("Play all 3 Steam quests 10 times", "steamQuests", {
+				group: "steam-all-three",
+				rank: 3,
+				hint: "Clear all three Steam quests for 10 weeks.",
+				coveredByActionPlan: true,
+				kind: "inform"
+			}),
+			define("Play all 3 Steam quests 20 times", "steamQuests", {
+				group: "steam-all-three",
+				rank: 4,
+				hint: "Clear all three Steam quests for 20 weeks.",
+				coveredByActionPlan: true,
+				kind: "inform"
+			}),
+			define("Play all 3 Steam quests 50 times", "steamQuests", {
+				group: "steam-all-three",
+				rank: 5,
+				hint: "Clear all three Steam quests for 50 weeks.",
+				coveredByActionPlan: true,
+				kind: "inform"
+			}),
+			define("Steam: Play 10 Steam Quests", "steamQuests", {
+				group: "steam-quest-count",
+				rank: 1,
+				hint: "Complete 10 Steam quests over time.",
+				coveredByActionPlan: true
+			}),
+			define("Steam: Play 25 Steam Quests", "steamQuests", {
+				group: "steam-quest-count",
+				rank: 2,
+				hint: "Complete 25 Steam quests over time.",
+				coveredByActionPlan: true,
+				kind: "inform"
+			}),
+			define("Steam: Play 50 Steam Quests", "steamQuests", {
+				group: "steam-quest-count",
+				rank: 3,
+				hint: "Complete 50 Steam quests over time.",
+				coveredByActionPlan: true,
+				kind: "inform"
+			}),
+			define("Steam: Play 100 Steam Quests", "steamQuests", {
+				group: "steam-quest-count",
+				rank: 4,
+				hint: "Complete 100 Steam quests over time.",
+				coveredByActionPlan: true,
+				kind: "inform"
+			}),
+			define("Steam: Play 365 Steam Quests", "steamQuests", {
+				group: "steam-quest-count",
+				rank: 5,
+				hint: "Complete 365 Steam quests over time.",
+				coveredByActionPlan: true,
+				kind: "inform"
+			}),
+			define("Steam: Play 10 hours", "steamHours", {
+				group: "steam-hours",
+				rank: 1,
+				hint: "Play tracked Steam hours through Arena quests.",
+				coveredByActionPlan: true
+			}),
+			define("Steam: Play 50 hours", "steamHours", {
+				group: "steam-hours",
+				rank: 2,
+				hint: "Keep playing Steam quests toward 50 hours.",
+				coveredByActionPlan: true,
+				kind: "inform"
+			}),
+			define("Steam: Play 125 hours", "steamHours", {
+				group: "steam-hours",
+				rank: 3,
+				hint: "Keep playing Steam quests toward 125 hours.",
+				coveredByActionPlan: true,
+				kind: "inform"
+			}),
+			define("Steam: Play 500 hours", "steamHours", {
+				group: "steam-hours",
+				rank: 4,
+				hint: "Long-run Steam hours.",
+				coveredByActionPlan: true,
+				kind: "inform"
+			}),
+			define("Steam: Play 1000 hours", "steamHours", {
+				group: "steam-hours",
+				rank: 5,
+				hint: "Long-run Steam hours.",
+				coveredByActionPlan: true,
+				kind: "inform"
+			}),
+			define("Steam: Play 2500 hours", "steamHours", {
+				group: "steam-hours",
+				rank: 6,
+				hint: "Long-run Steam hours.",
+				coveredByActionPlan: true,
+				kind: "inform"
+			}),
+			define("Steam: Play 10000 hours", "steamHours", {
+				group: "steam-hours",
+				rank: 7,
+				hint: "Long-run Steam hours.",
+				coveredByActionPlan: true,
+				kind: "inform"
+			}),
+			define("Watch 10 hours of Twitch on Nexus channels", "twitchNexus", {
+				group: "twitch-nexus",
+				rank: 1,
+				hint: "Watch Twitch via Arena on Nexus channels (also in What to do).",
+				coveredByActionPlan: true
+			}),
+			define("Watch 100 hours of Twitch on Nexus channels", "twitchNexus", {
+				group: "twitch-nexus",
+				rank: 2,
+				hint: "Long-run Nexus Twitch hours.",
+				coveredByActionPlan: true,
+				kind: "inform"
+			}),
+			define("Watch 1000 Hours of Twitch.tv on Nexus channels", "twitchNexus", {
+				group: "twitch-nexus",
+				rank: 3,
+				hint: "Long-run Nexus Twitch hours.",
+				coveredByActionPlan: true,
+				kind: "inform"
+			}),
+			define("Watch 10 hours of Twitch.tv on Hive channels", "twitchHive", {
+				group: "twitch-hive",
+				rank: 1,
+				hint: "Watch Twitch via Arena on Hive channels.",
+				coveredByActionPlan: true
+			}),
+			define("Watch 100 Hours of Twitch.tv on Hive channels", "twitchHive", {
+				group: "twitch-hive",
+				rank: 2,
+				hint: "Long-run Hive Twitch hours.",
+				coveredByActionPlan: true,
+				kind: "inform"
+			}),
+			define("Watch 1000 Hours of Twitch.tv on Hive channels", "twitchHive", {
+				group: "twitch-hive",
+				rank: 3,
+				hint: "Long-run Hive Twitch hours.",
+				coveredByActionPlan: true,
+				kind: "inform"
+			}),
+			define("Get your first border from Calendar rewards", "calendarBorders", {
+				group: "calendar-borders",
+				rank: 1,
+				hint: "Claim Daily Calendar until a border drops (also in What to do).",
+				coveredByActionPlan: true
+			}),
+			define("Get all the borders from a monthly calendar", "calendarBorders", {
+				group: "calendar-borders",
+				rank: 2,
+				hint: "Do not miss Daily Calendar days this month.",
+				coveredByActionPlan: true
+			}),
+			define("Get all borders from calendar for 3 months", "calendarBorders", {
+				group: "calendar-borders",
+				rank: 3,
+				hint: "Perfect calendar months stack.",
+				coveredByActionPlan: true,
+				kind: "inform"
+			}),
+			define("Get all borders from calendar for 6 months", "calendarBorders", {
+				group: "calendar-borders",
+				rank: 4,
+				hint: "Perfect calendar months stack.",
+				coveredByActionPlan: true,
+				kind: "inform"
+			}),
+			define("Get all borders from calendar for 1 year", "calendarBorders", {
+				group: "calendar-borders",
+				rank: 5,
+				hint: "Perfect calendar months stack.",
+				coveredByActionPlan: true,
+				kind: "inform"
+			}),
+			define("Receive all 28-day rewards in a single month", "streaks", {
+				group: "streaks-28",
+				rank: 1,
+				hint: "Claim every Daily Calendar day in the 28-day track.",
+				coveredByActionPlan: true
+			}),
+			define("Receive all 28-day rewards for 3 months", "streaks", {
+				group: "streaks-28",
+				rank: 2,
+				hint: "Keep a perfect 28-day calendar streak for 3 months.",
+				coveredByActionPlan: true,
+				kind: "inform"
+			}),
+			define("Receive all 28-day rewards for 6 months", "streaks", {
+				group: "streaks-28",
+				rank: 3,
+				hint: "Keep a perfect 28-day calendar streak for 6 months.",
+				coveredByActionPlan: true,
+				kind: "inform"
+			}),
+			define("Receive all 28-day rewards for 1 year", "streaks", {
+				group: "streaks-28",
+				rank: 4,
+				hint: "Keep a perfect 28-day calendar streak for 12 months.",
+				coveredByActionPlan: true,
+				kind: "inform"
+			}),
+			define("Be a member for 1 year", "years", {
+				group: "years",
+				rank: 1,
+				hint: "Passive — wait for the anniversary.",
+				kind: "inform"
+			}),
+			define("Be a member for 2 years", "years", {
+				group: "years",
+				rank: 2,
+				hint: "Passive — wait for the anniversary.",
+				kind: "inform"
+			}),
+			define("Be a member for 3 years", "years", {
+				group: "years",
+				rank: 3,
+				hint: "Passive — wait for the anniversary.",
+				kind: "inform"
+			}),
+			define("Be a member for 4 years", "years", {
+				group: "years",
+				rank: 4,
+				hint: "Passive — wait for the anniversary.",
+				kind: "inform"
+			}),
+			define("Be a member for 5 years", "years", {
+				group: "years",
+				rank: 5,
+				hint: "Passive — wait for the anniversary.",
+				kind: "inform"
+			}),
+			define("Be a member for 6 years", "years", {
+				group: "years",
+				rank: 6,
+				hint: "Passive — wait for the anniversary.",
+				kind: "inform"
+			}),
+			define("Be a member for 7 years", "years", {
+				group: "years",
+				rank: 7,
+				hint: "Passive — wait for the anniversary.",
+				kind: "inform"
+			}),
+			define("Be a member for 8 years", "years", {
+				group: "years",
+				rank: 8,
+				hint: "Passive — wait for the anniversary.",
+				kind: "inform"
+			}),
+			define("Be a member for 9 years", "years", {
+				group: "years",
+				rank: 9,
+				hint: "Passive — wait for the anniversary.",
+				kind: "inform"
+			}),
+			define("Be a member for 10 years", "years", {
+				group: "years",
+				rank: 10,
+				hint: "Passive — wait for the anniversary.",
+				kind: "inform"
+			}),
+			define("Reach Tier 2", "tiers", {
+				group: "tiers",
+				rank: 1,
+				hint: "Earn lifetime ARP to raise your Arena tier.",
+				kind: "inform"
+			}),
+			define("Reach Tier 3", "tiers", {
+				group: "tiers",
+				rank: 2,
+				hint: "Earn lifetime ARP to raise your Arena tier.",
+				kind: "inform"
+			}),
+			define("Reach Tier 4", "tiers", {
+				group: "tiers",
+				rank: 3,
+				hint: "Earn lifetime ARP to raise your Arena tier.",
+				kind: "inform"
+			}),
+			define("Reach Tier 5", "tiers", {
+				group: "tiers",
+				rank: 4,
+				hint: "Earn lifetime ARP to raise your Arena tier.",
+				kind: "inform"
+			}),
+			define("Participate in a Community Event", "communityEvents", {
+				group: "community-events",
+				rank: 1,
+				hint: "Play required hours in a live Community Event (also in What to do).",
+				coveredByActionPlan: true
+			}),
+			define("Participate in 2 Community Events", "communityEvents", {
+				group: "community-events",
+				rank: 2,
+				hint: "Join the next live Community Event.",
+				coveredByActionPlan: true,
+				kind: "inform"
+			}),
+			define("Participate in 5 Community Events", "communityEvents", {
+				group: "community-events",
+				rank: 3,
+				hint: "Join live Community Events as they appear.",
+				coveredByActionPlan: true,
+				kind: "inform"
+			}),
+			define("Participate in 10 Community Events", "communityEvents", {
+				group: "community-events",
+				rank: 4,
+				hint: "Join live Community Events as they appear.",
+				coveredByActionPlan: true,
+				kind: "inform"
+			}),
+			define("Participate in 20 Community Events", "communityEvents", {
+				group: "community-events",
+				rank: 5,
+				hint: "Join live Community Events as they appear.",
+				coveredByActionPlan: true,
+				kind: "inform"
+			}),
+			define("Finish all required personal hours for a community event", "communityHours", {
+				group: "community-hours",
+				rank: 1,
+				hint: "Finish the personal-hours track on a live event.",
+				coveredByActionPlan: true
+			}),
+			define("Finish 20 personal hours for community events", "communityHours", {
+				group: "community-hours",
+				rank: 2,
+				hint: "Keep playing Community Event hours.",
+				coveredByActionPlan: true,
+				kind: "inform"
+			}),
+			define("Finish 50 personal hours for community events", "communityHours", {
+				group: "community-hours",
+				rank: 3,
+				hint: "Keep playing Community Event hours.",
+				coveredByActionPlan: true,
+				kind: "inform"
+			}),
+			define("Finish 100 personal hours for community events", "communityHours", {
+				group: "community-hours",
+				rank: 4,
+				hint: "Keep playing Community Event hours.",
+				coveredByActionPlan: true,
+				kind: "inform"
+			}),
+			define("Equip an artifact", "artifacts", {
+				group: "artifact-equip",
+				rank: 1,
+				hint: "Equip any artifact in the Showroom (also in What to do).",
+				coveredByActionPlan: true
+			}),
+			define("Equip 5 artifacts", "artifacts", {
+				group: "artifact-equip",
+				rank: 2,
+				hint: "Equip 5 different artifacts over time.",
+				coveredByActionPlan: true
+			}),
+			define("Equip 15 artifacts", "artifacts", {
+				group: "artifact-equip",
+				rank: 3,
+				hint: "Equip 15 different artifacts over time.",
+				coveredByActionPlan: true,
+				kind: "inform"
+			}),
+			define("Upgrade an artifact", "artifacts", {
+				group: "artifact-upgrade",
+				rank: 1,
+				hint: "Spend fragments to upgrade any artifact.",
+				coveredByActionPlan: true
+			}),
+			define("Upgrade 3 artifacts", "artifacts", {
+				group: "artifact-upgrade",
+				rank: 2,
+				hint: "Upgrade 3 different artifacts.",
+				coveredByActionPlan: true
+			}),
+			define("Upgrade 7 Artifacts", "artifacts", {
+				group: "artifact-upgrade",
+				rank: 3,
+				hint: "Upgrade 7 different artifacts.",
+				coveredByActionPlan: true,
+				kind: "inform"
+			}),
+			define("Fully Upgrade an artifact", "artifacts", {
+				group: "artifact-max",
+				rank: 1,
+				hint: "Take one artifact to max tier.",
+				coveredByActionPlan: true
+			}),
+			define("Fully Upgrade 3 artifacts", "artifacts", {
+				group: "artifact-max",
+				rank: 2,
+				hint: "Max 3 artifacts.",
+				coveredByActionPlan: true,
+				kind: "inform"
+			}),
+			define("Fully Upgrade 5 artifacts", "artifacts", {
+				group: "artifact-max",
+				rank: 3,
+				hint: "Max 5 artifacts.",
+				coveredByActionPlan: true,
+				kind: "inform"
+			}),
+			define("Spend 100 ARP", "spendArp", {
+				group: "spend-arp",
+				rank: 1,
+				hint: "Spend ARP in Game Vault or the marketplace.",
+				href: GAME_VAULT_PATH,
+				hrefLabel: "Open vault",
+				kind: "inform"
+			}),
+			define("Spend 1000 ARP", "spendArp", {
+				group: "spend-arp",
+				rank: 2,
+				hint: "Keep claiming vault / marketplace spends.",
+				href: GAME_VAULT_PATH,
+				hrefLabel: "Open vault",
+				kind: "inform"
+			}),
+			define("Spend 5000 ARP", "spendArp", {
+				group: "spend-arp",
+				rank: 3,
+				hint: "Keep claiming vault / marketplace spends.",
+				href: GAME_VAULT_PATH,
+				hrefLabel: "Open vault",
+				kind: "inform"
+			}),
+			define("Spend 10000 ARP", "spendArp", {
+				group: "spend-arp",
+				rank: 4,
+				hint: "Keep claiming vault / marketplace spends.",
+				href: GAME_VAULT_PATH,
+				hrefLabel: "Open vault",
+				kind: "inform"
+			}),
+			define("Earn 5 fragments", "fragments", {
+				group: "fragments",
+				rank: 1,
+				hint: "Fragments drop from daily play and Battle Pass — already covered by daily ARP work.",
+				coveredByActionPlan: true,
+				kind: "inform"
+			}),
+			define("Earn 15 fragments", "fragments", {
+				group: "fragments",
+				rank: 2,
+				hint: "Keep doing daily ARP sources.",
+				coveredByActionPlan: true,
+				kind: "inform"
+			}),
+			define("Earn 30 fragments", "fragments", {
+				group: "fragments",
+				rank: 3,
+				hint: "Keep doing daily ARP sources.",
+				coveredByActionPlan: true,
+				kind: "inform"
+			}),
+			define("Earn 50 fragments", "fragments", {
+				group: "fragments",
+				rank: 4,
+				hint: "Keep doing daily ARP sources.",
+				coveredByActionPlan: true,
+				kind: "inform"
+			})
+		];
+		new Map(ACHIEVEMENTS.map((achievement) => [achievement.id, achievement]));
+		ACHIEVEMENT_BY_TITLE = new Map();
+		for (const achievement of ACHIEVEMENTS) {
+			ACHIEVEMENT_BY_TITLE.set(normalizeAchievementTitle(achievement.title), achievement);
+			const aliases = achievement.aliases ?? [];
+			for (const alias of aliases) ACHIEVEMENT_BY_TITLE.set(normalizeAchievementTitle(alias), achievement);
+		}
+		SETTINGS_KEY = "achievementSettings";
+		COOLDOWNS_KEY = "achievementCooldowns";
+		DEFAULT_AUTOMATIONS = {
+			visitPages: false,
+			profileCosmetics: false,
+			watchVideos: false,
+			readArticles: false,
+			gameVault: false
+		};
+		defaultAchievementSettings = {
+			runAutomatically: false,
+			automations: { ...DEFAULT_AUTOMATIONS }
+		};
+		MAX_ACTION_TODOS = 8;
+		MAX_INFORM_TODOS = 3;
+		BORDER_GROUPS = new Set([
+			"border-use",
+			"border-daily",
+			"border-monthly"
+		]);
+		AVATAR_GROUPS = new Set(["avatar-daily", "avatar-monthly"]);
+		BP_CLAIM_ALL_PENDING_KEY = "ao-bp-claim-all";
+		BP_CLAIM_SKIP_ARP_VALUE = "skip-arp";
+		COUNT_MARKER = " achievements";
+		[
+			".achievement-card",
+			".achievement",
+			".achievements-item",
+			".member-achievement",
+			".achievement-item"
+		].join(", ");
+		gatheredCache = {};
+		SKELETON_BAR_WIDTHS = [
+			"88%",
+			"72%",
+			"64%",
+			"48%"
+		];
+		ACTIVITY_LABELS = {
+			timeOnSite: "Time on Site",
+			steamQuests: "Steam Quests",
+			watchTwitch: "Watch Twitch",
+			dailyCalendar: "Daily Calendar",
+			discordPoll: "Discord Poll",
+			dailyQuests: "Daily / weekend quests",
+			steamCommunityEvent: "Steam Community Event"
+		};
+		BREAKDOWN_LABELS = {
+			...ACTIVITY_LABELS,
+			dailyQuests: "Daily quests",
+			weekendQuests: "Weekend quests",
+			battlePassClaims: "Battle Pass claims"
+		};
+		QUESTS_PATH = "/quests";
+		TWITCH_HOST = /(^|\.)twitch\.tv$/i;
+		DOUBLE_ARP_GROUPS = new Set([
+			"featured",
+			"hive",
+			"nexus"
+		]);
+		DEFAULT_INLINE_PANEL_IDS = {
+			equipId: "ao-inline-equip",
+			openId: "ao-inline-open"
+		};
+	}));
+	init_panels_DoCYX__L();
 	var defaultSettings = {
 		higherTier: "hide",
 		autoSyncTier: true,
