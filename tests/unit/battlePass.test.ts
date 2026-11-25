@@ -429,6 +429,63 @@ describe('scrapeBattlePassFromDocument', () => {
     expect(state?.readyClaims?.[0]?.claimPath).toBe('/battle-pass/claim/99');
   });
 
+  it('counts ARP Mega Boost as ARP, not a cosmetic', () => {
+    const flatTitle = element('h3', 'bp-popup__title', { text: '25 ARP' });
+    const flatButton = element('button', 'bp-popup__claim-btn', {
+      text: 'CLAIM',
+    });
+    const flatForm = element('form', '', {
+      attrs: { action: '/battle-pass/claim/1', 'data-milestone-id': '75' },
+      children: [flatButton],
+    });
+    const flatPopup = element('div', 'bp-popup', {
+      attrs: { 'data-milestone-id': '75' },
+      children: [flatTitle, flatForm],
+    });
+    const megaTitle = element('h3', 'bp-popup__title', {
+      text: '50 ARP Mega Boost',
+    });
+    const megaButton = element('button', 'bp-popup__claim-btn', {
+      text: 'CLAIM',
+    });
+    const megaForm = element('form', '', {
+      attrs: { action: '/battle-pass/claim/2', 'data-milestone-id': '91' },
+      children: [megaButton],
+    });
+    const megaPopup = element('div', 'bp-popup', {
+      attrs: { 'data-milestone-id': '91' },
+      children: [megaTitle, megaForm],
+    });
+    const cosmeticTitle = element('h3', 'bp-popup__title', {
+      text: 'GRIS Border',
+    });
+    const cosmeticButton = element('button', 'bp-popup__claim-btn', {
+      text: 'CLAIM',
+    });
+    const cosmeticForm = element('form', '', {
+      attrs: { action: '/battle-pass/claim/3', 'data-milestone-id': '50' },
+      children: [cosmeticButton],
+    });
+    const cosmeticPopup = element('div', 'bp-popup', {
+      attrs: { 'data-milestone-id': '50' },
+      children: [cosmeticTitle, cosmeticForm],
+    });
+    const state = scrapeBattlePassFromDocument(
+      asDocument(
+        element('div', 'bp-landing bp-landing--personal', {
+          children: [flatPopup, megaPopup, cosmeticPopup],
+        }),
+      ),
+      '/control-center/battle-pass/3',
+    );
+    expect(state?.readyToClaim).toBe(3);
+    expect(state?.readyToClaimArp).toBe(2);
+    expect(state?.readyClaims?.filter((claim) => claim.isArp)).toHaveLength(2);
+    expect(
+      state?.readyClaims?.find((claim) => claim.milestoneId === '91')?.isArp,
+    ).toBe(true);
+  });
+
   it('uses the account-menu link from Control Center', () => {
     const link = element('a', 'um-nav-link', {
       attrs: { href: '/control-center/battle-pass/2' },

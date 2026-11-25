@@ -20,8 +20,8 @@ export interface MarketplaceFragmentOffer {
   */
   endsAt?: string;
   /**
-  User already claimed this product (badge / copy). Many fragment offers remain
-  re-claimable; treat as informational only.
+  User already claimed this product (`Claimed` badge). Monthly packs stay listed
+  after purchase — do not recommend buying again until the badge clears.
   */
   isClaimed?: boolean;
   productId?: string;
@@ -39,12 +39,17 @@ export function isPostedListPriceFragment(
 
 /**
 Timed fragment/artifact listings the user can still buy (has an end date).
+Skip cards already marked Claimed for this user (monthly packs stay listed).
 */
 export function isExpiringFragmentOffer(
   offer: MarketplaceFragmentOffer,
   now = Date.now(),
 ): boolean {
-  if (!isPostedListPriceFragment(offer) || !offer.endsAt) {
+  if (
+    !isPostedListPriceFragment(offer) ||
+    offer.isClaimed === true ||
+    !offer.endsAt
+  ) {
     return false;
   }
   const endsAt = Date.parse(offer.endsAt);

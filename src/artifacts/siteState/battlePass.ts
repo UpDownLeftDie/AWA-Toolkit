@@ -713,11 +713,15 @@ function countBattlePassClaims(document_: Document): {
 }
 
 function isBattlePassArpRewardTitle(title: string): boolean {
-  if (/ARP\s*Boost/i.test(title)) {
+  const trimmed = title.trim();
+  // "ARP Boost", "50 ARP Mega Boost" (word between ARP and Boost).
+  if (/ARP\s*(?:Mega\s*)?Boost/i.test(trimmed)) {
     return true;
   }
-  // e.g. "40 ARP" but not "25 ARP Required" (requirement line, not reward title).
-  return /^\d[\d,]*\s*ARP$/i.test(title.trim());
+  // "25 ARP" / "50 ARP …" — not "25 ARP Required" (requirement line).
+  return (
+    /^\d[\d,]*\s*ARP(?:\s|$)/i.test(trimmed) && !/\bRequired\b/i.test(trimmed)
+  );
 }
 
 function battlePassPopupTitle(popup: HTMLElement): string {

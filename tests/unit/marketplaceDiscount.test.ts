@@ -282,6 +282,43 @@ describe('soft path fragment notes', () => {
       })?.name,
     ).toBe('Soon');
   });
+
+  it('does not recommend a marketplace pack the user already claimed', () => {
+    const snapshot = makeSnapshot([
+      makeArtifact('pn295', ArtifactTier.Interstellar, {
+        equippedPosition: 1,
+      }),
+      makeArtifact('chai-stones', ArtifactTier.Interstellar, {
+        equippedPosition: 2,
+      }),
+      makeArtifact('bali-arches', ArtifactTier.Interstellar, {
+        equippedPosition: 3,
+      }),
+    ]);
+    const state = baseState({
+      marketplaceFragments: [
+        {
+          name: '10 Fragments',
+          price: 150,
+          inStock: true,
+          isClaimed: true,
+          endsAt: isoAt(NOW_MS + 67 * 24 * 60 * 60 * 1000),
+        },
+      ],
+    });
+    const result = optimize(
+      buildContext(snapshot, defaultArtifactSettings, state, NOW_MS),
+    );
+    expect(result.notes.some((note) => /10 Fragments/i.test(note))).toBe(
+      false,
+    );
+    expect(
+      primaryExpiringFragmentOffer(state, {
+        availableArp: 2000,
+        now: NOW_MS,
+      }),
+    ).toBeUndefined();
+  });
 });
 
 describe('lockWindowArpLossLines', () => {

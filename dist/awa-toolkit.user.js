@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         AWA Toolkit
 // @namespace    https://github.com/UpDownLeftDie/AWA-Toolkit
-// @version      2.6.0
+// @version      2.6.1
 // @author       jaredcat
 // @description  Artifact Optimizer, Control Center tasks, giveaway/vault filters, and UCF reading mode
 // @license      AGPL-3.0-or-later
@@ -3370,8 +3370,9 @@
 		};
 	}
 	function isBattlePassArpRewardTitle(title) {
-		if (/ARP\s*Boost/i.test(title)) return true;
-		return /^\d[\d,]*\s*ARP$/i.test(title.trim());
+		const trimmed = title.trim();
+		if (/ARP\s*(?:Mega\s*)?Boost/i.test(trimmed)) return true;
+		return /^\d[\d,]*\s*ARP(?:\s|$)/i.test(trimmed) && !/\bRequired\b/i.test(trimmed);
 	}
 	function battlePassPopupTitle(popup) {
 		return popup.querySelector(".bp-popup__title")?.textContent.trim() ?? "";
@@ -4428,7 +4429,7 @@
 		return offer.inStock && isListPriceFragment(offer);
 	}
 	function isExpiringFragmentOffer(offer, now = Date.now()) {
-		if (!isPostedListPriceFragment(offer) || !offer.endsAt) return false;
+		if (!isPostedListPriceFragment(offer) || offer.isClaimed === true || !offer.endsAt) return false;
 		const endsAt = Date.parse(offer.endsAt);
 		return Number.isFinite(endsAt) && endsAt > now;
 	}
