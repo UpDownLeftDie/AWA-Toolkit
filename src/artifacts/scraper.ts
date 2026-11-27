@@ -4,6 +4,7 @@ import {
   documentBody,
   firstNonEmpty,
   readPageFragmentBalance,
+  readPageUsername,
 } from "../pageGlobals";
 import {
   type ArtifactCategory,
@@ -157,7 +158,8 @@ function readUsernameFrom(
 }
 
 function readUsername(): string | undefined {
-  return readUsernameFrom(document);
+  // Live page username wins — cached /member/… links go stale after a rename.
+  return readPageUsername() ?? readUsernameFrom(document);
 }
 
 /**
@@ -170,8 +172,8 @@ export const USER_ARTIFACTS_ROOM_PATH = "/user-artifacts-room";
 Artifact Showroom path for the logged-in user.
 Falls back to `/user-artifacts-room`, which the site redirects.
 */
-export function resolveShowroomUrl(username?: string  ): string {
-  const name = username ?? readUsername();
+export function resolveShowroomUrl(username?: string): string {
+  const name = readUsername() ?? username;
   if (name) {
     return `/member/${encodeURIComponent(name)}/artifacts`;
   }

@@ -152,12 +152,21 @@ export function applyCommunityHoursUnlocks(
     return milestones;
   }
   return milestones.map((milestone) => {
-    if (isCommunityGateMet(milestone, communityHours)) {
+    const required = milestone.communityHoursRequired;
+    if (required === undefined) {
+      return milestone;
+    }
+    if (communityHours >= required) {
       return milestone.isCommunityUnlocked
         ? milestone
         : { ...milestone, isCommunityUnlocked: true };
     }
-    return milestone;
+    // Live hours are below the gate — drop sticky unlocks from a bad merge
+    // or stale scrape. Page badges alone must not keep 90k ARP "unlocked"
+    // when community is still at ~12k.
+    return milestone.isCommunityUnlocked
+      ? { ...milestone, isCommunityUnlocked: false }
+      : milestone;
   });
 }
 
@@ -578,8 +587,25 @@ function milestoneMergeKey(milestone: CommunityEventMilestone): string {
 }
 
 /**
+True when the card title is a non-ARP reward (in-game bundle, etc.).
+ARP/fragment teasers that failed to parse a count stay eligible for ASCE fill.
+*/
+export function isNonArpRewardLabel(label: string | undefined): boolean {
+  const trimmed = label?.trim() ?? '';
+  if (!trimmed) {
+    return false;
+  }
+  if (/\bARP\b/i.test(trimmed) || /\bFragments?\b/i.test(trimmed)) {
+    return false;
+  }
+  return true;
+}
+
+/**
 Visit/carousel scrapes win status flags, but must not wipe ARP or hour
 gates we already know (ASCE stretch teasers often parse as 0 ARP).
+Explicit non-ARP titles (In-Game Bundle, …) must not inherit stale ARP from
+a prior gate at the same hour threshold.
 */
 function preferCommunityEventMilestone(
   scraped: CommunityEventMilestone,
@@ -588,19 +614,32 @@ function preferCommunityEventMilestone(
   if (!previous) {
     return scraped;
   }
+  const scrapedIsNonArp =
+    scraped.arpReward <= 0 && isNonArpRewardLabel(scraped.rewardLabel);
   const arpReward =
-    scraped.arpReward > 0 ? scraped.arpReward : previous.arpReward;
+    scraped.arpReward > 0
+      ? scraped.arpReward
+      : scrapedIsNonArp
+        ? 0
+        : previous.arpReward;
   const next: CommunityEventMilestone = {
     ...previous,
     ...scraped,
     arpReward,
     // Complete ARP cells are source of truth after a visit; stubs keep prior.
     isAwarded:
-      scraped.arpReward > 0 ? scraped.isAwarded : previous.isAwarded,
-    isCommunityUnlocked:
-      scraped.isCommunityUnlocked || previous.isCommunityUnlocked,
+      scraped.arpReward > 0 || scrapedIsNonArp
+        ? scraped.isAwarded
+        : previous.isAwarded,
+    // Scraped lock/unlock wins — never OR sticky previous unlocks (that kept
+    // every ARP gate "community unlocked" after one bad merge).
+    isCommunityUnlocked: scraped.isCommunityUnlocked,
   };
-  if (scraped.arpReward <= 0 && previous.arpReward > 0) {
+  if (
+    scraped.arpReward <= 0 &&
+    previous.arpReward > 0 &&
+    !scrapedIsNonArp
+  ) {
     next.rewardLabel = previous.rewardLabel;
   }
   if (
@@ -706,7 +745,11 @@ function patchMilestoneFromGate(
   gate: CommunityEventMilestoneGate,
 ): CommunityEventMilestone {
   const isUnlocking = gate.unlocked && !current.isCommunityUnlocked;
-  const isFillingArp = current.arpReward <= 0 && gate.arpReward > 0;
+  // Never paint ARP onto an explicit non-ARP card (In-Game Bundle, etc.).
+  const isFillingArp =
+    current.arpReward <= 0 &&
+    gate.arpReward > 0 &&
+    !isNonArpRewardLabel(current.rewardLabel);
   if (!isUnlocking && !isFillingArp) {
     return current;
   }
@@ -1355,7 +1398,7 @@ function isLabeledRowComplete(cell: Element, label: string): boolean {
   return (
     Boolean(
       scope.querySelector(
-        '.fa-check, .fa-check-circle, .bi-check, .bi-check-lg',
+        '.fa-check, .fa-check-circle, .fa-square-check, .bi-check, .bi-check-lg',
       ),
     ) || /[✓✔]/.test(scope.textContent)
   );
@@ -1387,11 +1430,27 @@ function parseMilestoneCell(
 
   const personalHoursRequired = parseLabeledHours(text, 'Personal') ?? 0;
   const communityHours = parseLabeledHours(text, 'Community');
-  const arpReward = parseLeadingCount(text, 'ARP') ?? 0;
-  const fragmentCount = parseLeadingCount(text, 'Fragment');
-  const heading = firstNonEmpty(
+  const rawHeading = firstNonEmpty(
     cell.querySelector(':scope h3')?.textContent.trim(),
-    cell.querySelector(':scope img[alt]')?.getAttribute('alt'),
+    cell.querySelector(':scope img[alt]')?.getAttribute('alt')?.trim(),
+  );
+  // Prefer the card title so adjacent "20 ARP" cells / siblings cannot turn
+  // an In-Game Bundle into a fake community-unlocked ARP gate.
+  let arpReward = 0;
+  let fragmentCount: number | undefined;
+  if (rawHeading && isNonArpRewardLabel(rawHeading)) {
+    arpReward = 0;
+  } else {
+    arpReward =
+      parseLeadingCount(rawHeading ?? '', 'ARP') ??
+      parseLeadingCount(text, 'ARP') ??
+      0;
+    fragmentCount =
+      parseLeadingCount(rawHeading ?? '', 'Fragment') ??
+      parseLeadingCount(text, 'Fragment');
+  }
+  const heading = firstNonEmpty(
+    rawHeading,
     arpReward > 0 ? `${arpReward} ARP` : 'Reward',
   );
 

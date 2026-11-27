@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         AWA Toolkit
 // @namespace    https://github.com/UpDownLeftDie/AWA-Toolkit
-// @version      2.6.1
+// @version      2.6.2
 // @author       jaredcat
 // @description  Artifact Optimizer, Control Center tasks, giveaway/vault filters, and UCF reading mode
 // @license      AGPL-3.0-or-later
@@ -1361,11 +1361,16 @@
 	function applyCommunityHoursUnlocks(milestones, communityHours) {
 		if (communityHours === void 0) return milestones;
 		return milestones.map((milestone) => {
-			if (isCommunityGateMet(milestone, communityHours)) return milestone.isCommunityUnlocked ? milestone : {
+			const required = milestone.communityHoursRequired;
+			if (required === void 0) return milestone;
+			if (communityHours >= required) return milestone.isCommunityUnlocked ? milestone : {
 				...milestone,
 				isCommunityUnlocked: true
 			};
-			return milestone;
+			return milestone.isCommunityUnlocked ? {
+				...milestone,
+				isCommunityUnlocked: false
+			} : milestone;
 		});
 	}
 	function milestoneSortKey(milestone) {
@@ -1532,17 +1537,24 @@
 	function milestoneMergeKey(milestone) {
 		return milestone.communityHoursRequired === void 0 ? `i:${milestone.index}` : `h:${milestone.communityHoursRequired}`;
 	}
+	function isNonArpRewardLabel(label) {
+		const trimmed = label?.trim() ?? "";
+		if (!trimmed) return false;
+		if (/\bARP\b/i.test(trimmed) || /\bFragments?\b/i.test(trimmed)) return false;
+		return true;
+	}
 	function preferCommunityEventMilestone(scraped, previous) {
 		if (!previous) return scraped;
-		const arpReward = scraped.arpReward > 0 ? scraped.arpReward : previous.arpReward;
+		const scrapedIsNonArp = scraped.arpReward <= 0 && isNonArpRewardLabel(scraped.rewardLabel);
+		const arpReward = scraped.arpReward > 0 ? scraped.arpReward : scrapedIsNonArp ? 0 : previous.arpReward;
 		const next = {
 			...previous,
 			...scraped,
 			arpReward,
-			isAwarded: scraped.arpReward > 0 ? scraped.isAwarded : previous.isAwarded,
-			isCommunityUnlocked: scraped.isCommunityUnlocked || previous.isCommunityUnlocked
+			isAwarded: scraped.arpReward > 0 || scrapedIsNonArp ? scraped.isAwarded : previous.isAwarded,
+			isCommunityUnlocked: scraped.isCommunityUnlocked
 		};
-		if (scraped.arpReward <= 0 && previous.arpReward > 0) next.rewardLabel = previous.rewardLabel;
+		if (scraped.arpReward <= 0 && previous.arpReward > 0 && !scrapedIsNonArp) next.rewardLabel = previous.rewardLabel;
 		if (scraped.communityHoursRequired === void 0 && previous.communityHoursRequired !== void 0) next.communityHoursRequired = previous.communityHoursRequired;
 		if (scraped.personalHoursRequired <= 0 && previous.personalHoursRequired > 0) next.personalHoursRequired = previous.personalHoursRequired;
 		return next;
@@ -1588,7 +1600,7 @@
 	}
 	function patchMilestoneFromGate(current, gate) {
 		const isUnlocking = gate.unlocked && !current.isCommunityUnlocked;
-		const isFillingArp = current.arpReward <= 0 && gate.arpReward > 0;
+		const isFillingArp = current.arpReward <= 0 && gate.arpReward > 0 && !isNonArpRewardLabel(current.rewardLabel);
 		if (!isUnlocking && !isFillingArp) return current;
 		return {
 			...current,
@@ -1846,7 +1858,7 @@
 			const text = node.textContent;
 			return text.includes(needle) && !text.includes(other);
 		}) ?? cell;
-		return Boolean(scope.querySelector(".fa-check, .fa-check-circle, .bi-check, .bi-check-lg")) || /[✓✔]/.test(scope.textContent);
+		return Boolean(scope.querySelector(".fa-check, .fa-check-circle, .fa-square-check, .bi-check, .bi-check-lg")) || /[✓✔]/.test(scope.textContent);
 	}
 	function milestoneCellText(cell) {
 		const parts = [cell.textContent];
@@ -1862,13 +1874,20 @@
 		if (!Number.isFinite(index)) return;
 		const personalHoursRequired = parseLabeledHours(text, "Personal") ?? 0;
 		const communityHours = parseLabeledHours(text, "Community");
-		const arpReward = parseLeadingCount(text, "ARP") ?? 0;
-		const fragmentCount = parseLeadingCount(text, "Fragment");
+		const rawHeading = firstNonEmpty(cell.querySelector(":scope h3")?.textContent.trim(), cell.querySelector(":scope img[alt]")?.getAttribute("alt")?.trim());
+		let arpReward = 0;
+		let fragmentCount;
+		if (rawHeading && isNonArpRewardLabel(rawHeading)) arpReward = 0;
+		else {
+			arpReward = parseLeadingCount(rawHeading ?? "", "ARP") ?? parseLeadingCount(text, "ARP") ?? 0;
+			fragmentCount = parseLeadingCount(rawHeading ?? "", "Fragment") ?? parseLeadingCount(text, "Fragment");
+		}
+		const heading = firstNonEmpty(rawHeading, arpReward > 0 ? `${arpReward} ARP` : "Reward");
 		const milestone = {
 			index,
 			personalHoursRequired,
 			arpReward,
-			rewardLabel: firstNonEmpty(cell.querySelector(":scope h3")?.textContent.trim(), cell.querySelector(":scope img[alt]")?.getAttribute("alt"), arpReward > 0 ? `${arpReward} ARP` : "Reward"),
+			rewardLabel: heading,
 			isCommunityUnlocked: /Community Unlocked/i.test(text) || isLabeledRowComplete(cell, "Community"),
 			isAwarded: /\bAwarded\b/i.test(text) && !/\bNot\s+Awarded\b/i.test(text)
 		};
@@ -2520,6 +2539,18 @@
 			return slotLocks[position] === true && findCooldownEntry(settings, position) !== void 0 && cooldownRemainingMs(settings, position, now) <= 0;
 		});
 	}
+	function areAllLockedSlotsElapsed(settings, slotLocks, now = Date.now()) {
+		if (!slotLocks) return false;
+		const locked = [
+			1,
+			2,
+			3
+		].filter((position) => slotLocks[position] === true);
+		if (locked.length === 0) return false;
+		return locked.every((position) => {
+			return findCooldownEntry(settings, position) !== void 0 && cooldownRemainingMs(settings, position, now) <= 0;
+		});
+	}
 	var STUCK_SLOT_LOCK_HINT = "Still stuck after Refresh? Upgrade a maxed artifact manually (Warrior Script) — 0 fragments";
 	async function recordSlotChange(position, artifactInstanceId) {
 		const rest = (await getArtifactSettings()).slotCooldowns.filter((entry) => entry.position !== position);
@@ -2629,11 +2660,11 @@
 		return (link ? /\/member\/([^/]+)\/artifacts/.exec(link.getAttribute("href") ?? "") : void 0)?.[1];
 	}
 	function readUsername() {
-		return readUsernameFrom(document);
+		return readPageUsername() ?? readUsernameFrom(document);
 	}
 	var USER_ARTIFACTS_ROOM_PATH = "/user-artifacts-room";
 	function resolveShowroomUrl(username) {
-		const name = username ?? readUsername();
+		const name = readUsername() ?? username;
 		if (name) return `/member/${encodeURIComponent(name)}/artifacts`;
 		return firstNonEmpty(document.querySelector("a[href*=\"/member/\"][href$=\"/artifacts\"]")?.pathname, USER_ARTIFACTS_ROOM_PATH);
 	}
@@ -4485,7 +4516,7 @@
 		const isAuction = item.dataset.isBlindAuction === "true" || item.classList.contains("auction-game");
 		const isInStock = item.dataset.productInStock !== "false" && !OUT_OF_STOCK_RE.test(text);
 		const isDisabled = item.dataset.productDisabled === "true";
-		const isClaimed = CLAIMED_RE.test(text);
+		const isClaimed = item.dataset.productPurchased === "true" || CLAIMED_RE.test(text);
 		const endsAt = fragmentTimerEndAt(item);
 		const nextItem = {
 			name: fragmentCardName(item),
@@ -4519,10 +4550,27 @@
 		const type = new URLSearchParams(search.startsWith("?") ? search.slice(1) : search).get("type");
 		return type === "fragment" || type === null || type === "";
 	}
+	function hasMarketplaceFragmentPurchaseAttributes(document_) {
+		for (const item of document_.querySelectorAll(FRAGMENT_CARD_SELECTORS)) if (item.dataset.productPurchased !== void 0) return true;
+		return false;
+	}
+	function mergeMarketplaceFragmentOffers(scraped, previous) {
+		if (scraped.some((offer) => offer.isClaimed === true) || !previous?.length) return scraped;
+		const prior = new Map(previous.map((offer) => [offer.productId ?? `${offer.price}:${offer.name}`, offer]));
+		return scraped.map((offer) => {
+			const key = offer.productId ?? `${offer.price}:${offer.name}`;
+			const earlier = prior.get(key);
+			if (earlier?.isClaimed === true && earlier.endsAt === offer.endsAt && offer.isClaimed !== true) return {
+				...offer,
+				isClaimed: true
+			};
+			return offer;
+		});
+	}
 	function applyMarketplaceFragmentsDocument(next, document_) {
 		const offers = scrapeMarketplaceFragmentsFromDocument(document_);
 		if (offers.length === 0) return;
-		next.marketplaceFragments = offers;
+		next.marketplaceFragments = mergeMarketplaceFragmentOffers(offers, next.marketplaceFragments);
 		next.marketplaceFragmentsScrapedAt = new Date().toISOString();
 	}
 	var SITE_STATE_KEY = "artifactSiteState";
@@ -7111,13 +7159,21 @@
 		if (!isActivityEnabled$1(settings, rule.key)) return false;
 		return rule.key === "watchTwitch" ? watchRemainingMs > 0 && isActivityAvailable(siteState.caps, "watchTwitch") : rule.isDue(siteState.caps);
 	}
-	function communityEventTodoUrgency(pending, etaMs) {
+	function waitingPersonalPlayMs(event) {
+		let needHours = 0;
+		for (const milestone of event.milestones) {
+			if (milestone.isAwarded || milestone.arpReward <= 0 || !isCommunityGateMet(milestone, event.communityHours) || isPersonalHoursMet(milestone, event.personalHours)) continue;
+			if (milestone.personalHoursRequired > needHours) needHours = milestone.personalHoursRequired;
+		}
+		return Math.max(0, needHours - event.personalHours) * 36e5;
+	}
+	function communityEventTodoUrgency(event, pending, etaMs) {
 		if (pending.waitingPersonalArp > 0) return actionUrgency({
 			kind: "action",
 			readyAtMs: 0,
-			durationMs: 0,
+			durationMs: waitingPersonalPlayMs(event),
 			arp: pending.waitingPersonalArp,
-			chain: "before"
+			chain: "after"
 		});
 		const waitingArp = pending.waitingCommunityArp + pending.imminentArp + pending.waitingPersonalArp;
 		if (etaMs === void 0) return actionUrgency({
@@ -7145,7 +7201,7 @@
 		if (event.libraryPending) reasons.push({ text: STEAM_LIBRARY_PENDING_HINT });
 		const todo = {
 			text: `Community Event: ${text}`,
-			urgency: communityEventTodoUrgency(pending, estimateNextCommunityUnlock(event, nowMs)?.etaMs)
+			urgency: communityEventTodoUrgency(event, pending, estimateNextCommunityUnlock(event, nowMs)?.etaMs)
 		};
 		if (reasons.length > 0) todo.reasons = reasons;
 		todos.push(todo);
@@ -8012,14 +8068,20 @@
 			reasons: [...lossReasons, { text: "Delay Steam Quests until after discount gear is on when possible; finish non-delayable dailies listed before the swap" }]
 		});
 	}
+	function doesPlanNeedFreeSlot(context) {
+		return context.isNeedsSwap || context.allArpSchedule.hasScheduledAllArp || context.result.deferredAllArp !== void 0 || context.result.deferredSteam !== void 0;
+	}
 	function provideCautions(context) {
 		const candidates = [];
-		if (hasElapsedShowroomLock(context.settings, context.result.slotLocks, context.nowMs)) candidates.push(actionTodoToTask({
-			kind: "caution",
-			tone: "warn",
-			text: "24h lock still showing after the timer hit 0",
-			reasons: [{ text: STUCK_SLOT_LOCK_HINT }]
-		}, "caution:stuckLock"));
+		if (hasElapsedShowroomLock(context.settings, context.result.slotLocks, context.nowMs) && doesPlanNeedFreeSlot(context)) {
+			const areActionsOn = areAccountActionsEnabled(context.settings);
+			candidates.push(actionTodoToTask({
+				kind: "caution",
+				tone: "warn",
+				text: "24h lock still showing after the timer hit 0",
+				reasons: [{ text: areActionsOn ? `Auto-unstick didn't clear it. ${STUCK_SLOT_LOCK_HINT}` : `Enable Account actions to auto-unstick, or ${STUCK_SLOT_LOCK_HINT}` }]
+			}, "caution:stuckLock"));
+		}
 		const mpTodos = [];
 		pushMarketplaceDiscountPriorityCaution(mpTodos, context.result);
 		for (const todo of mpTodos) candidates.push(actionTodoToTask(todo, "caution:marketplaceDiscount"));
@@ -10383,7 +10445,9 @@
 			const p = parsed;
 			const result = {};
 			if (typeof p.borderRotatedDate === "string") result.borderRotatedDate = p.borderRotatedDate;
+			if (typeof p.borderGalleryId === "number" && Number.isFinite(p.borderGalleryId)) result.borderGalleryId = p.borderGalleryId;
 			if (typeof p.avatarRotatedDate === "string") result.avatarRotatedDate = p.avatarRotatedDate;
+			if (typeof p.avatarGalleryId === "number" && Number.isFinite(p.avatarGalleryId)) result.avatarGalleryId = p.avatarGalleryId;
 			if (typeof p.aboutMeSubmittedMonth === "string") result.aboutMeSubmittedMonth = p.aboutMeSubmittedMonth;
 			if (typeof p.visitPagesDate === "string") result.visitPagesDate = p.visitPagesDate;
 			if (typeof p.watchVideosDate === "string") result.watchVideosDate = p.watchVideosDate;
@@ -10492,7 +10556,11 @@
 		return hrefMatch?.[1] ? decodeURIComponent(hrefMatch[1]) : void 0;
 	}
 	function resolveAchievementsUrl(username) {
-		const name = username ?? readUsernameFromDocument(document);
+		let live;
+		try {
+			live = readUsernameFromDocument(document);
+		} catch {}
+		const name = live ?? username;
 		return name ? `/member/${encodeURIComponent(name)}/achievements` : void 0;
 	}
 	function emptySnapshot(username) {
@@ -10628,8 +10696,7 @@
 		const nodes = preferred.length > 0 ? preferred : document_.querySelectorAll(CARD_SELECTOR);
 		for (const card of nodes) {
 			if (card.querySelectorAll(".achievement-card").length > 1) continue;
-			const text = card.textContent;
-			const definition = matchAchievementInText(text);
+			const definition = matchAchievementInText(card.textContent);
 			if (!definition) continue;
 			recordProgress(items, definition, !isCardUnearned(card));
 		}
@@ -10663,20 +10730,48 @@
 		if (options.pathHint !== void 0) result.pathHint = options.pathHint;
 		return result;
 	}
+	function inferImpliedGroupEarnings(items) {
+		const next = { ...items };
+		const groups = new Set(ACHIEVEMENTS.map((achievement) => achievement.group));
+		for (const group of groups) {
+			const chain = ACHIEVEMENTS.filter((achievement) => achievement.group === group);
+			const maxEarnedRank = Math.max(0, ...chain.filter((achievement) => next[achievement.id]?.isEarned === true).map((achievement) => achievement.rank));
+			if (maxEarnedRank <= 0) continue;
+			for (const achievement of chain) {
+				if (achievement.rank >= maxEarnedRank) continue;
+				if (next[achievement.id]?.isEarned === true) continue;
+				next[achievement.id] = {
+					id: achievement.id,
+					title: achievement.title,
+					isEarned: true
+				};
+			}
+		}
+		if (ACHIEVEMENTS.some((achievement) => achievement.group === "border-use" && next[achievement.id]?.isEarned === true)) {
+			const firstBorder = ACHIEVEMENTS.find((achievement) => achievement.group === "border-first");
+			if (firstBorder && next[firstBorder.id]?.isEarned !== true) next[firstBorder.id] = {
+				id: firstBorder.id,
+				title: firstBorder.title,
+				isEarned: true
+			};
+		}
+		return next;
+	}
 	function scrapeAchievementsFromDocument(document_, options = {}) {
 		const username = options.username ?? readUsernameFromDocument(document_, options.pathHint);
 		const items = {};
 		const cardCount = scrapeFromCards(document_, items);
 		scrapeFromAchievementSegments(document_, items);
 		if (cardCount === 0 || Object.keys(items).length < ACHIEVEMENTS.length / 4) scrapeFromBodyText(document_, items);
+		const inferred = inferImpliedGroupEarnings(items);
 		const parsedCount = parseCount(document_);
-		const earnedKnown = Object.values(items).filter((item) => item.isEarned).length;
+		const earnedKnown = Object.values(inferred).filter((item) => item.isEarned).length;
 		return {
 			scrapedAt: new Date().toISOString(),
 			username,
 			earnedCount: parsedCount?.earned ?? earnedKnown,
-			totalCount: parsedCount?.total ?? Math.max(ACHIEVEMENTS.length, Object.keys(items).length),
-			items
+			totalCount: parsedCount?.total ?? Math.max(ACHIEVEMENTS.length, Object.keys(inferred).length),
+			items: inferred
 		};
 	}
 	var MIN_FRESH_ITEM_COUNT = 15;
@@ -10699,8 +10794,40 @@
 			return;
 		}
 	}
+	function mergeAchievementSnapshots(existing, incoming) {
+		if (!existing || Object.keys(existing.items).length === 0) return incoming;
+		if (Object.keys(incoming.items).length === 0) return {
+			...existing,
+			scrapedAt: incoming.scrapedAt,
+			username: incoming.username ?? existing.username
+		};
+		const items = { ...existing.items };
+		for (const [id, progress] of Object.entries(incoming.items)) {
+			const previous = items[id];
+			items[id] = {
+				...progress,
+				isEarned: progress.isEarned || previous?.isEarned === true
+			};
+		}
+		const inferred = inferImpliedGroupEarnings(items);
+		const earnedKnown = Object.values(inferred).filter((item) => item.isEarned).length;
+		return {
+			scrapedAt: incoming.scrapedAt,
+			username: incoming.username ?? existing.username,
+			earnedCount: Math.max(incoming.earnedCount, earnedKnown),
+			totalCount: Math.max(incoming.totalCount, existing.totalCount, Object.keys(inferred).length),
+			items: inferred
+		};
+	}
 	async function saveAchievementSnapshot(snapshot) {
-		await _GM.setValue(SNAPSHOT_KEY, JSON.stringify(snapshot));
+		const merged = mergeAchievementSnapshots(await loadAchievementSnapshot(), snapshot);
+		const liveUsername = readUsernameFromDocument(document);
+		const toStore = liveUsername && liveUsername !== merged.username ? {
+			...merged,
+			username: liveUsername
+		} : merged;
+		await _GM.setValue(SNAPSHOT_KEY, JSON.stringify(toStore));
+		return toStore;
 	}
 	async function fetchDocument$1(path) {
 		try {
@@ -10746,8 +10873,27 @@
 	}
 	async function loadAchievementsDocument(path) {
 		const fetched = await fetchDocument$1(path);
-		if (fetched && parseCount(fetched)) return fetched;
-		return fetched && matchAchievementInText(documentBody(fetched)?.textContent ?? "") ? fetched : openPageDocument$1(path);
+		if (fetched && parseCount(fetched)) {
+			const preview = scrapeAchievementsFromDocument(fetched, { pathHint: path });
+			if (Object.keys(preview.items).length >= MIN_FRESH_ITEM_COUNT) return fetched;
+			console.warn("[Achievements] fetch had count but thin items; trying iframe", Object.keys(preview.items).length);
+		} else if (fetched && matchAchievementInText(documentBody(fetched)?.textContent ?? "")) {
+			const preview = scrapeAchievementsFromDocument(fetched, { pathHint: path });
+			if (Object.keys(preview.items).length >= MIN_FRESH_ITEM_COUNT) return fetched;
+		}
+		return openPageDocument$1(path);
+	}
+	function hasPersonalizationCosmeticItems(state) {
+		return state.availableBorderIds.length > 0 || state.availableAvatarIds.length > 0 || state.selection.border !== void 0 || state.selection.avatar !== void 0;
+	}
+	async function loadPersonalizationDocument() {
+		const fetched = await fetchDocument$1(PERSONALIZATION_PATH);
+		if (fetched) {
+			const state = readPersonalizationFormState(fetched);
+			if (state && hasPersonalizationCosmeticItems(state)) return fetched;
+			if (state) console.warn("[Achievements] profileCosmetics: fetch had form but no items; trying iframe");
+		}
+		return openPageDocument$1(PERSONALIZATION_PATH);
 	}
 	function unearthedWithAutomation(snapshot, key) {
 		return ACHIEVEMENTS.filter((achievement) => {
@@ -10807,18 +10953,6 @@
 			await raceWithTimeout(visitPath(path), timeoutMs);
 		}
 	}
-	function parseSelectedBorderId(document_) {
-		const source = document_.documentElement.textContent;
-		const fromSaved = /saved\s*=\s*\{[^}]*\bborder\s*:\s*(\d+)/i.exec(source);
-		if (fromSaved?.[1]) {
-			const parsed = Number(fromSaved[1]);
-			if (Number.isFinite(parsed)) return parsed;
-		}
-		const match = /(?:let|var|const)\s*selectedBorderId\s*=\s*(\d+)\s*;/i.exec(source) ?? /(?:let|var|const)\s*selectedBorder\s*=\s*(\d+)\s*;/i.exec(source);
-		if (!match?.[1]) return;
-		const parsed = Number(match[1]);
-		return Number.isFinite(parsed) ? parsed : void 0;
-	}
 	function parsePersonalizationItemIds(document_, type) {
 		const ids = new Set();
 		for (const element of document_.querySelectorAll(`.account-personalization__personalization-item[data-type="${CSS.escape(type)}"][data-id]`)) {
@@ -10828,6 +10962,22 @@
 			if (Number.isFinite(parsed)) ids.add(parsed);
 		}
 		return [...ids];
+	}
+	async function assertJsonSuccess(response, label) {
+		if (!response.ok) throw new Error(`${label} failed: HTTP ${response.status}`);
+		const text = (await response.text()).trim();
+		if (!text) return;
+		let data;
+		try {
+			data = JSON.parse(text);
+		} catch {
+			return;
+		}
+		if (!data || typeof data !== "object") return;
+		const record = data;
+		if (record.success !== false) return;
+		const message = typeof record.message === "string" ? record.message : "success: false";
+		throw new Error(`${label} rejected: ${message}`);
 	}
 	function parseOptionalId(raw) {
 		if (!raw || raw === "null") return;
@@ -10845,7 +10995,7 @@
 		return {
 			avatar: void 0,
 			background: void 0,
-			border: parseSelectedBorderId(document_)
+			border: parseOptionalId(/(?:let|var|const)\s*selectedBorderId\s*=\s*(\d+)\s*;/i.exec(source)?.[1])
 		};
 	}
 	function parseUserId(document_) {
@@ -10859,14 +11009,6 @@
 		if (!fromVariable?.[1]) return;
 		const parsed = Number(fromVariable[1]);
 		return Number.isFinite(parsed) ? parsed : void 0;
-	}
-	function pickNextItemId(availableIds, selectedId) {
-		if (availableIds.length === 0) return;
-		const sorted = availableIds.toSorted((a, b) => a - b);
-		if (selectedId === void 0) return sorted[0];
-		const currentIndex = sorted.indexOf(selectedId);
-		if (currentIndex === -1) return sorted[0];
-		return sorted.length === 1 ? void 0 : sorted[(currentIndex + 1) % sorted.length];
 	}
 	function stripHtmlTags(html) {
 		const container = document.createElement("div");
@@ -10910,15 +11052,14 @@
 		return value === void 0 ? "null" : String(value);
 	}
 	async function saveAvatarSelection(userId, selection) {
-		const response = await fetch(`/ajax/user/avatar/save/${userId}`, {
+		await assertJsonSuccess(await fetch(`/ajax/user/avatar/save/${userId}`, {
 			method: "POST",
 			headers: {
 				Accept: "application/json, text/plain, */*",
 				"Content-Type": "application/json"
 			},
 			body: `{"avatar":${encodeAvatarSlot(selection.avatar)},"background":${encodeAvatarSlot(selection.background)},"border":${encodeAvatarSlot(selection.border)}}`
-		});
-		if (!response.ok) throw new Error(`POST /ajax/user/avatar/save/${userId} failed: ${response.status}`);
+		}), `POST /ajax/user/avatar/save/${userId}`);
 	}
 	async function didSubmitAboutMeAutomation(snapshot, state) {
 		if (snapshot.items["add-about-me"]?.isEarned === true) return false;
@@ -10938,48 +11079,158 @@
 		await saveAutomationCooldowns({ aboutMeSubmittedMonth: thisMonth });
 		return true;
 	}
-	function requiresBorderRotationRetry(snapshot) {
-		return ACHIEVEMENTS.some((achievement) => achievement.group === "border-use" && achievement.automation === "profileCosmetics" && snapshot.items[achievement.id]?.isEarned !== true);
+	function requiresExtraBorderVariety(snapshot) {
+		const useGroup = ACHIEVEMENTS.filter((achievement) => achievement.group === "border-use");
+		const maxEarnedUseRank = Math.max(0, ...useGroup.filter((achievement) => snapshot.items[achievement.id]?.isEarned === true).map((achievement) => achievement.rank));
+		if (useGroup.some((achievement) => achievement.rank > maxEarnedUseRank && snapshot.items[achievement.id]?.isEarned === false)) return true;
+		const firstBorder = ACHIEVEMENTS.find((achievement) => achievement.group === "border-first");
+		if (firstBorder && snapshot.items[firstBorder.id]?.isEarned === false && maxEarnedUseRank === 0) return true;
+		return false;
 	}
-	function planDailyAvatarSelection(snapshot, state, cooldowns, today) {
-		const nextSelection = { ...state.selection };
-		let shouldSave = false;
-		const nextBorderId = pickNextItemId(state.availableBorderIds, state.selection.border);
-		if ((cooldowns.borderRotatedDate !== today || requiresBorderRotationRetry(snapshot)) && nextBorderId !== void 0 && nextBorderId !== state.selection.border) {
-			nextSelection.border = nextBorderId;
-			shouldSave = true;
+	function canAttemptBorderRotation(snapshot, cooldowns, today, isForce) {
+		if (cooldowns.borderRotatedDate !== today) return true;
+		return isForce && requiresExtraBorderVariety(snapshot);
+	}
+	var profileCosmeticsLock = { isRunning: false };
+	function galleryRotationCursor(availableIds, savedProductId, lastGalleryId) {
+		if (lastGalleryId !== void 0 && availableIds.includes(lastGalleryId)) return lastGalleryId;
+		if (savedProductId !== void 0 && availableIds.includes(savedProductId)) return savedProductId;
+	}
+	function galleryCandidatesAfter(availableIds, cursor, limit = 8) {
+		if (availableIds.length === 0) return [];
+		const sorted = availableIds.toSorted((a, b) => a - b);
+		const startIndex = cursor === void 0 ? -1 : sorted.indexOf(cursor);
+		const out = [];
+		const max = Math.min(limit, sorted.length);
+		for (let step = 1; step <= max; step += 1) {
+			const id = sorted[(startIndex === -1 ? step - 1 : startIndex + step) % sorted.length];
+			if (id === void 0 || out.includes(id)) continue;
+			if (id === cursor && sorted.length > 1) continue;
+			out.push(id);
 		}
-		const nextAvatarId = pickNextItemId(state.availableAvatarIds, state.selection.avatar);
-		if (nextAvatarId !== void 0 && cooldowns.avatarRotatedDate !== today && nextAvatarId !== state.selection.avatar) {
-			nextSelection.avatar = nextAvatarId;
-			shouldSave = true;
-		}
+		return out;
+	}
+	async function readSavedSelectionAfterSave() {
+		const document_ = await fetchDocument$1(`${PERSONALIZATION_PATH}?_=${String(Date.now())}`);
+		if (!document_) return;
+		return parseAvatarSelection(document_);
+	}
+	async function saveVerifiedSlot(options) {
+		const { userId, base, slot, galleryId, beforeProductId, availableIds } = options;
+		const next = {
+			...base,
+			[slot]: galleryId
+		};
+		if (slot === "border" && availableIds.length === 1 && availableIds[0] === galleryId) await saveAvatarSelection(userId, {
+			...base,
+			border: void 0
+		});
+		await saveAvatarSelection(userId, next);
+		const afterProductId = (await readSavedSelectionAfterSave())?.[slot];
 		return {
-			selection: nextSelection,
-			shouldSave
+			didChange: afterProductId !== void 0 && afterProductId !== beforeProductId,
+			afterProductId
 		};
 	}
-	async function didSaveDailyAvatarRotation(snapshot, state, cooldowns, today) {
-		if (state.userId === void 0) {
-			console.warn("[Achievements] profileCosmetics: no userId for avatar save");
-			return false;
-		}
-		const plan = planDailyAvatarSelection(snapshot, state, cooldowns, today);
-		console.log("[Achievements] profileCosmetics: avatar save plan", {
-			from: state.selection,
-			to: plan.selection,
-			shouldSave: plan.shouldSave,
-			lastBorderDate: cooldowns.borderRotatedDate,
-			lastAvatarDate: cooldowns.avatarRotatedDate,
-			today
+	async function tryRotateGallerySlot(options) {
+		const { userId, slot, availableIds, lastGalleryId } = options;
+		let { workingSelection } = options;
+		const beforeProductId = workingSelection[slot];
+		const cursor = galleryRotationCursor(availableIds, beforeProductId, lastGalleryId);
+		const candidates = galleryCandidatesAfter(availableIds, cursor);
+		console.log(`[Achievements] profileCosmetics: ${slot} candidates`, {
+			savedProductId: beforeProductId,
+			cursor,
+			lastGalleryId,
+			candidates
 		});
-		if (!plan.shouldSave) return false;
-		await saveAvatarSelection(state.userId, plan.selection);
+		for (const galleryId of candidates) try {
+			const result = await saveVerifiedSlot({
+				userId,
+				base: workingSelection,
+				slot,
+				galleryId,
+				beforeProductId: workingSelection[slot],
+				availableIds
+			});
+			if (!result.didChange) {
+				console.warn(`[Achievements] profileCosmetics: ${slot} gallery id did not stick`, galleryId, "still", result.afterProductId ?? workingSelection[slot]);
+				continue;
+			}
+			workingSelection = {
+				...workingSelection,
+				[slot]: result.afterProductId
+			};
+			return {
+				didChange: true,
+				detail: `${slot} ${beforeProductId ?? "none"} → ${result.afterProductId} (gallery ${galleryId})`,
+				selection: workingSelection,
+				galleryId
+			};
+		} catch (error) {
+			console.warn(`[Achievements] profileCosmetics: ${slot} save error`, galleryId, error);
+		}
+		return {
+			didChange: false,
+			detail: `${slot} unchanged (tried ${String(candidates.length)} gallery ids; saved product ${beforeProductId ?? "none"})`,
+			selection: workingSelection
+		};
+	}
+	async function saveCosmeticRotation(snapshot, state, cooldowns, today, isForce) {
+		if (state.userId === void 0) return {
+			didChange: false,
+			detail: "no userId for avatar save"
+		};
+		const isWantsBorder = canAttemptBorderRotation(snapshot, cooldowns, today, isForce);
+		const isWantsAvatar = cooldowns.avatarRotatedDate !== today;
+		if (!isWantsBorder && !isWantsAvatar) return {
+			didChange: false,
+			detail: `already rotated today (border ${cooldowns.borderRotatedDate ?? "—"}, avatar ${cooldowns.avatarRotatedDate ?? "—"})`
+		};
+		if (state.availableBorderIds.length + state.availableAvatarIds.length === 0) return {
+			didChange: false,
+			detail: "no avatar/border gallery items found"
+		};
+		const parts = [];
 		const cooldownPatch = {};
-		if (plan.selection.border !== state.selection.border) cooldownPatch.borderRotatedDate = today;
-		if (plan.selection.avatar !== state.selection.avatar) cooldownPatch.avatarRotatedDate = today;
-		await saveAutomationCooldowns(cooldownPatch);
-		return true;
+		let workingSelection = { ...state.selection };
+		let didChange = false;
+		if (isWantsBorder && state.availableBorderIds.length > 0) {
+			const borderResult = await tryRotateGallerySlot({
+				userId: state.userId,
+				slot: "border",
+				availableIds: state.availableBorderIds,
+				workingSelection,
+				lastGalleryId: cooldowns.borderGalleryId
+			});
+			parts.push(borderResult.detail);
+			workingSelection = borderResult.selection;
+			if (borderResult.didChange && borderResult.galleryId !== void 0) {
+				cooldownPatch.borderRotatedDate = today;
+				cooldownPatch.borderGalleryId = borderResult.galleryId;
+				didChange = true;
+			}
+		}
+		if (isWantsAvatar && state.availableAvatarIds.length > 0) {
+			const avatarResult = await tryRotateGallerySlot({
+				userId: state.userId,
+				slot: "avatar",
+				availableIds: state.availableAvatarIds,
+				workingSelection,
+				lastGalleryId: cooldowns.avatarGalleryId
+			});
+			parts.push(avatarResult.detail);
+			if (avatarResult.didChange && avatarResult.galleryId !== void 0) {
+				cooldownPatch.avatarRotatedDate = today;
+				cooldownPatch.avatarGalleryId = avatarResult.galleryId;
+				didChange = true;
+			}
+		}
+		if (didChange) await saveAutomationCooldowns(cooldownPatch);
+		return {
+			didChange,
+			detail: parts.join("; ") || "no cosmetic changes applied"
+		};
 	}
 	async function didApplyVisitPagesAutomation(snapshot, settings) {
 		if (!isAchievementAutomationEnabled(settings, "visitPages") || unearthedWithAutomation(snapshot, "visitPages").length === 0) return false;
@@ -10990,29 +11241,46 @@
 		await saveAutomationCooldowns({ visitPagesDate: today });
 		return true;
 	}
-	async function didApplyProfileCosmeticsAutomation(snapshot, settings) {
+	async function didApplyProfileCosmeticsAutomation(snapshot, settings, isForce = false) {
 		if (!isAchievementAutomationEnabled(settings, "profileCosmetics")) return false;
-		const personalization = await fetchDocument$1(PERSONALIZATION_PATH);
-		if (!personalization) {
-			console.warn("[Achievements] profileCosmetics: failed to fetch personalization page");
+		if (profileCosmeticsLock.isRunning) {
+			console.log("[Achievements] profileCosmetics: skipped overlapping run");
 			return false;
 		}
-		const state = readPersonalizationFormState(personalization);
-		if (!state) {
-			console.warn("[Achievements] profileCosmetics: could not read form state — update-personalization form or token not found");
-			return false;
+		profileCosmeticsLock.isRunning = true;
+		try {
+			const personalization = await loadPersonalizationDocument();
+			if (!personalization) {
+				console.warn("[Achievements] profileCosmetics: failed to fetch personalization page");
+				return false;
+			}
+			const state = readPersonalizationFormState(personalization);
+			if (!state) {
+				console.warn("[Achievements] profileCosmetics: could not read form state — update-personalization form or token not found");
+				return false;
+			}
+			console.log("[Achievements] profileCosmetics: state", {
+				userId: state.userId,
+				selection: state.selection,
+				borderCount: state.availableBorderIds.length,
+				avatarCount: state.availableAvatarIds.length,
+				isForce
+			});
+			const cooldowns = await loadAutomationCooldowns();
+			const today = utcDateString();
+			const didAboutMe = await didSubmitAboutMeAutomation(snapshot, state);
+			const cosmeticResult = await saveCosmeticRotation(snapshot, state, cooldowns, today, isForce);
+			const notes = [didAboutMe ? "about-me submitted" : void 0, cosmeticResult.detail].filter((note) => Boolean(note));
+			console.log("[Achievements] profileCosmetics: result", notes);
+			const didChange = didAboutMe || cosmeticResult.didChange;
+			const isWantsBorderAttempt = canAttemptBorderRotation(snapshot, cooldowns, today, isForce);
+			const isWantsAvatarAttempt = cooldowns.avatarRotatedDate !== today;
+			if (didChange) showAoToast(`Achievements cosmetics: ${[didAboutMe ? "about-me" : void 0, cosmeticResult.didChange ? cosmeticResult.detail : void 0].filter((part) => Boolean(part)).join(" · ")}`);
+			else if (isWantsBorderAttempt || isWantsAvatarAttempt) showAoToast(`Achievements cosmetics skipped: ${notes.join(" · ")}`);
+			return didChange;
+		} finally {
+			profileCosmeticsLock.isRunning = false;
 		}
-		console.log("[Achievements] profileCosmetics: state", {
-			userId: state.userId,
-			selection: state.selection,
-			borderCount: state.availableBorderIds.length,
-			avatarCount: state.availableAvatarIds.length
-		});
-		const cooldowns = await loadAutomationCooldowns();
-		const today = utcDateString();
-		const didAboutMe = await didSubmitAboutMeAutomation(snapshot, state);
-		const didAvatar = await didSaveDailyAvatarRotation(snapshot, state, cooldowns, today);
-		return didAboutMe || didAvatar;
 	}
 	async function didApplyGameVaultAutomation(snapshot, settings) {
 		if (!isAchievementAutomationEnabled(settings, "gameVault") || unearthedWithAutomation(snapshot, "gameVault").length === 0) return false;
@@ -11047,18 +11315,18 @@
 		await saveAutomationCooldowns({ watchVideosDate: today });
 		return true;
 	}
-	async function didApplyAchievementAutomations(snapshot, settings) {
+	async function didApplyAchievementAutomations(snapshot, settings, isForce = false) {
 		return (await Promise.all([
 			didApplyVisitPagesAutomation(snapshot, settings),
-			didApplyProfileCosmeticsAutomation(snapshot, settings),
+			didApplyProfileCosmeticsAutomation(snapshot, settings, isForce),
 			didApplyGameVaultAutomation(snapshot, settings),
 			didApplyReadArticlesAutomation(snapshot, settings),
 			didApplyWatchVideosAutomation(snapshot, settings)
 		])).some(Boolean);
 	}
-	async function runAchievementAutomations(snapshot, settings) {
+	async function runAchievementAutomations(snapshot, settings, options = {}) {
 		if (!settings.runAutomatically) return snapshot;
-		return await didApplyAchievementAutomations(snapshot, settings) ? refreshSnapshotAfterAutomation(snapshot, snapshot.username) : snapshot;
+		return await didApplyAchievementAutomations(snapshot, settings, options.isForce === true) ? refreshSnapshotAfterAutomation(snapshot, readUsernameFromDocument(document) ?? snapshot.username) : snapshot;
 	}
 	function requiresAchievementHydrate(snapshot, isEnabled = true, isForce = false) {
 		if (!isEnabled) return false;
@@ -11078,7 +11346,7 @@
 		})) : void 0;
 	}
 	async function refreshSnapshotAfterAutomation(snapshot, username) {
-		const resolvedUsername = snapshot.username ?? username;
+		const resolvedUsername = readUsernameFromDocument(document) ?? snapshot.username ?? username;
 		const path = resolveAchievementsUrl(resolvedUsername);
 		if (path) {
 			const refreshed = await loadAchievementsDocument(path);
@@ -11099,22 +11367,37 @@
 	}
 	async function ensureAchievementSnapshot(options = {}) {
 		const existing = await loadAchievementSnapshot();
-		const username = options.username ?? existing?.username ?? readUsernameFromDocument(document);
+		const username = readUsernameFromDocument(document) ?? options.username ?? existing?.username;
 		const isForce = options.force === true;
+		const isUserRefresh = options.isUserRefresh === true;
 		const settings = await getAchievementSettings();
 		if (!isForce && isSnapshotFresh$1(existing)) {
-			if (existing && settings.runAutomatically) await didApplyAchievementAutomations(existing, settings);
+			if (existing && settings.runAutomatically) await didApplyAchievementAutomations(existing, settings, isUserRefresh);
 			return existing;
 		}
 		if (isForce && existing && isForceWithinCooldown(existing)) {
-			if (settings.runAutomatically) await didApplyAchievementAutomations(existing, settings);
+			if (settings.runAutomatically) await didApplyAchievementAutomations(existing, settings, isUserRefresh);
 			return existing;
 		}
 		let snapshot = await scrapeAchievementsSnapshot(username);
-		if (!snapshot || Object.keys(snapshot.items).length === 0) return existing ?? snapshot;
-		if (await didApplyAchievementAutomations(snapshot, settings)) snapshot = await refreshSnapshotAfterAutomation(snapshot, username);
-		await saveAchievementSnapshot(snapshot);
-		return snapshot;
+		const itemCount = snapshot ? Object.keys(snapshot.items).length : 0;
+		if (!snapshot || itemCount < MIN_FRESH_ITEM_COUNT) {
+			console.warn("[Achievements] scrape unusable; keeping previous snapshot", {
+				itemCount,
+				hadExisting: Boolean(existing)
+			});
+			if (existing && settings.runAutomatically) await didApplyAchievementAutomations(existing, settings, isUserRefresh);
+			return existing ?? snapshot;
+		}
+		if (await didApplyAchievementAutomations(snapshot, settings, isUserRefresh)) snapshot = await refreshSnapshotAfterAutomation(snapshot, username);
+		return saveAchievementSnapshot(snapshot);
+	}
+	function linkUsername(snapshot) {
+		try {
+			return readPageUsername() ?? snapshot?.username;
+		} catch {
+			return snapshot?.username;
+		}
 	}
 	var MAX_ACTION_TODOS = 8;
 	var MAX_INFORM_TODOS = 3;
@@ -11135,7 +11418,8 @@
 	function nextUnearnedInGroup(snapshot, group) {
 		const chain = ACHIEVEMENTS.filter((achievement) => achievement.group === group).toSorted((left, right) => left.rank - right.rank);
 		if (!chain.some((achievement) => snapshot?.items[achievement.id] !== void 0)) return;
-		return chain.find((achievement) => isAchievementKnownUnearned(snapshot, achievement.id));
+		const maxEarnedRank = Math.max(0, ...chain.filter((achievement) => isAchievementEarned(snapshot, achievement.id)).map((achievement) => achievement.rank));
+		return chain.find((achievement) => achievement.rank > maxEarnedRank && isAchievementKnownUnearned(snapshot, achievement.id));
 	}
 	function collectNextUnearned(snapshot) {
 		if (!snapshot || Object.keys(snapshot.items).length === 0) return [];
@@ -11161,6 +11445,23 @@
 		if (key === "watchVideos") return cooldowns.watchVideosDate === today;
 		return (key === "readArticles" ? cooldowns.readArticlesDate : cooldowns.gameVaultDate) === today;
 	}
+	function resolveAchievementHref(href, username) {
+		return username && href.includes("{username}") ? href.split("{username}").join(encodeURIComponent(username)) : href;
+	}
+	function attachTodoHref(todo, achievement, options) {
+		if (!achievement.href) return;
+		const resolvedHref = resolveAchievementHref(achievement.href, options.username);
+		if (options.canAutomate && achievement.automation === "profileCosmetics") {
+			todo.tone = "muted";
+			todo.reasons = [{ text: `${achievement.hint} Runs automatically on Refresh.` }];
+			todo.openHref = resolvedHref;
+			todo.openHrefLabel = "Open if stuck";
+			return;
+		}
+		todo.openHref = resolvedHref;
+		todo.openHrefLabel = options.canAutomate ? `${achievement.hrefLabel ?? "Open"} now` : achievement.hrefLabel ?? "Open";
+		if (options.canVisitInBackground) todo.visitInBackground = true;
+	}
 	function buildTodo(achievement, settings, username) {
 		const canAutomate = achievement.automation !== void 0 && isAchievementAutomationEnabled(settings, achievement.automation);
 		const canVisitInBackground = canAutomate && achievement.automation !== "profileCosmetics";
@@ -11174,16 +11475,15 @@
 				durationMs: 0
 			}
 		};
-		if (achievement.href) {
-			const href = achievement.href;
-			todo.openHref = username && href.includes("{username}") ? href.split("{username}").join(encodeURIComponent(username)) : href;
-			todo.openHrefLabel = canAutomate ? `${achievement.hrefLabel ?? "Open"} now` : achievement.hrefLabel ?? "Open";
-			if (canVisitInBackground) todo.visitInBackground = true;
-		}
+		attachTodoHref(todo, achievement, {
+			canAutomate,
+			canVisitInBackground,
+			...username !== void 0 && { username }
+		});
 		return todo;
 	}
 	function progressNeededTodo(snapshot) {
-		const href = resolveAchievementsUrl(snapshot?.username);
+		const href = resolveAchievementsUrl(linkUsername(snapshot));
 		const todo = {
 			text: "Load achievement progress",
 			reasons: [{ text: "We fetch your achievements page in the background (like Battle Pass). If this stays, use the button to retry or open the page." }],
@@ -11241,7 +11541,7 @@
 				pushCapped(infos, aboutMeWaitingTodo(next), MAX_INFORM_TODOS);
 				continue;
 			}
-			const todo = buildTodo(next, settings, snapshot?.username);
+			const todo = buildTodo(next, settings, linkUsername(snapshot));
 			if (next.kind === "inform") {
 				pushCapped(infos, todo, MAX_INFORM_TODOS);
 				continue;
@@ -12154,6 +12454,7 @@
 		if (path.includes("/steam/community-event")) await waitForCommunityEventHours(document_);
 		else if (path.includes("/battle-pass")) await waitForBattlePassUi(document_);
 		else if (path.includes("/game-vault")) await waitForGameVaultUi(document_);
+		else if (path.includes("/marketplace") && !path.includes("/game-vault")) await waitForMarketplaceFragmentsUi(document_);
 		else await delay(400);
 		return {
 			document: document_,
@@ -12209,11 +12510,19 @@
 			await delay(250);
 		}
 	}
+	async function waitForMarketplaceFragmentsUi(document_) {
+		const started = Date.now();
+		while (Date.now() - started < 5e3) {
+			if (hasMarketplaceFragmentPurchaseAttributes(document_)) return;
+			await delay(250);
+		}
+	}
 	function requiresIframeFallback(path, fetched) {
 		if (path.includes("/artifacts") || path.includes("/user-artifacts-room")) return !documentBody(fetched)?.querySelector(":scope a.artifact-list-item.change-artifact-modal, :scope .slot img");
 		if (path.includes("/arp-log")) return !isArpLogDocumentReady(fetched);
 		if (path.includes("/battle-pass")) return !isBattlePassDocumentReady(fetched);
 		if (path.includes("/game-vault")) return !isGameVaultMonthlyClaimUsedFromDocument(fetched);
+		if (path.includes("/marketplace") && !path.includes("/game-vault")) return scrapeMarketplaceFragmentsFromDocument(fetched).length > 0 && !hasMarketplaceFragmentPurchaseAttributes(fetched);
 		if (path.includes("/steam/community-event")) return !fetched.querySelector(".carousel-cell") || !hasPersonalHours(fetched);
 		return /\/steam\/quests\/.+/.test(path) && !hasSteamPlayEligibilitySignal(fetched);
 	}
@@ -12318,13 +12627,20 @@
 		if (existing?.slotLocks) await syncSlotLocksFromScrape(existing.slotLocks);
 		return existing;
 	}
-	async function scrapeShowroomAfterLockNudge(showroomPath, existing) {
+	async function scrapeShowroomAfterLockNudge(showroomPath, existing, options) {
 		let inventory = existing;
 		if (!inventory?.artifacts.length) {
 			const prelim = await loadRemotePage(showroomPath);
 			if (prelim) inventory = scrapeShowroomFromDocument(prelim.document, pathnameFromUrl(prelim.url, showroomPath));
 		}
-		if (inventory?.artifacts.length && areAccountActionsEnabled(await getArtifactSettings())) await nudgeStuckSlotLocks(inventory.artifacts);
+		const settings = await getArtifactSettings();
+		if (options?.shouldNudge !== false && areAccountActionsEnabled(settings) && areAllLockedSlotsElapsed(settings, inventory?.slotLocks ?? existing?.slotLocks) && Boolean(inventory?.artifacts.length) && inventory?.artifacts.length) {
+			const target = pickStuckLockNudgeTarget(inventory.artifacts);
+			const nudged = await nudgeStuckSlotLocks(inventory.artifacts);
+			if (target && nudged?.ok) showAoToast(`Auto-unstick: upgraded ${target.displayName}`);
+			else if (nudged && !nudged.ok) console.warn("[Artifact Optimizer] Auto-unstick failed", nudged);
+			else if (!target) console.info("[Artifact Optimizer] Auto-unstick skipped — no maxed 0-frag artifact");
+		}
 		const loaded = await loadRemotePage(showroomPath);
 		if (!loaded) {
 			if (existing?.slotLocks) await syncSlotLocksFromScrape(existing.slotLocks);
@@ -12403,10 +12719,12 @@
 	async function ensureArtifactSnapshot(options = {}) {
 		const existing = await loadSnapshot();
 		const isWantsForce = options.force === true;
-		const isElapsedLock = hasElapsedShowroomLock(await getArtifactSettings(), existing?.slotLocks);
+		const settings = await getArtifactSettings();
+		const isElapsedLock = hasElapsedShowroomLock(settings, existing?.slotLocks);
+		const shouldNudgeStuckLocks = areAllLockedSlotsElapsed(settings, existing?.slotLocks);
 		if (!isWantsForce && !isElapsedLock && isSnapshotFresh(existing) && areSlotLocksFresh(existing)) return existing;
 		const showroomPath = resolveShowroomUrl(existing?.username);
-		if (isWantsForce || isElapsedLock) return scrapeShowroomAfterLockNudge(showroomPath, existing);
+		if (isWantsForce || isElapsedLock) return scrapeShowroomAfterLockNudge(showroomPath, existing, { shouldNudge: shouldNudgeStuckLocks });
 		const loaded = await loadRemotePage(showroomPath);
 		if (!loaded) {
 			if (existing?.slotLocks) await syncSlotLocksFromScrape(existing.slotLocks);
@@ -12805,14 +13123,16 @@
 		if (isAchievementsPage()) {
 			await waitForAchievementsDocument();
 			let achievements = scrapeAchievementsFromDocument(document, options.username === void 0 ? {} : { username: options.username });
-			await saveAchievementSnapshot(achievements);
-			achievements = await runAchievementAutomations(achievements, options.achievementSettings);
-			await saveAchievementSnapshot(achievements);
-			return achievements;
+			achievements = await saveAchievementSnapshot(achievements);
+			achievements = await runAchievementAutomations(achievements, options.achievementSettings, { isForce: options.shouldForceSite });
+			return saveAchievementSnapshot(achievements);
 		}
 		const cached = await loadAchievementSnapshot();
 		if (options.isRemote || options.shouldForceSite || requiresAchievementHydrate(cached, true, options.shouldForceSite)) {
-			const ensureOptions = { force: options.shouldForceSite || !cached || Object.keys(cached.items).length === 0 };
+			const ensureOptions = {
+				force: options.shouldForceSite || !cached || Object.keys(cached.items).length === 0,
+				isUserRefresh: options.shouldForceSite
+			};
 			if (options.username !== void 0) ensureOptions.username = options.username;
 			return ensureAchievementSnapshot(ensureOptions);
 		}
@@ -12839,7 +13159,7 @@
 		const achievements = await gatherAchievements({
 			isRemote,
 			shouldForceSite,
-			username: snapshot?.username,
+			username: readPageUsername() ?? snapshot?.username,
 			settings,
 			achievementSettings
 		});
@@ -13163,9 +13483,7 @@
 			3
 		].filter((position) => slotLocks[position] === true);
 		if (lockedSlots.length === 0) return "";
-		const lockParts = formatLockedSlotParts(settings, lockedSlots, slotLocks);
-		const stuckHint = hasElapsedShowroomLock(settings, slotLocks) ? `. ${STUCK_SLOT_LOCK_HINT}` : "";
-		return `<div class="ao-note">24h slot cooldown: ${lockParts.join(", ")}${stuckHint}</div>`;
+		return `<div class="ao-note">24h slot cooldown: ${formatLockedSlotParts(settings, lockedSlots, slotLocks).join(", ")}</div>`;
 	}
 	function renderArpLogCard(siteState) {
 		const arp = siteState?.arpLog;
@@ -14555,7 +14873,10 @@
   `;
 	}
 	async function refreshControlCenterAchievements() {
-		await ensureAchievementSnapshot({ force: true });
+		await ensureAchievementSnapshot({
+			force: true,
+			isUserRefresh: true
+		});
 		await injectControlCenterPanel({ force: true });
 	}
 	function paintControlCenterAchievementsPanel(panel, data, isHydrating) {

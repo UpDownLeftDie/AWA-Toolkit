@@ -13,6 +13,7 @@ export {
   ensureAchievementSnapshot,
   isAchievementsPage,
   loadAchievementSnapshot,
+  mergeAchievementSnapshots,
   requiresAchievementHydrate,
   runAchievementAutomations,
   type AchievementSnapshot,

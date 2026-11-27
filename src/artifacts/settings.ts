@@ -467,6 +467,33 @@ export function hasElapsedShowroomLock(
 }
 
 /**
+True when every Showroom-locked slot has an elapsed local timer — safe to try
+the Megumin 0-frag unstick. False while any locked slot still has time left
+(normal cooldown; upgrade API will reject).
+*/
+export function areAllLockedSlotsElapsed(
+  settings: ArtifactOptimizerSettings,
+  slotLocks: Partial<Record<ArtifactSlotPosition, boolean>> | undefined,
+  now = Date.now(),
+): boolean {
+  if (!slotLocks) {
+    return false;
+  }
+  const locked = ([1, 2, 3] as const).filter(
+    (position) => slotLocks[position] === true,
+  );
+  if (locked.length === 0) {
+    return false;
+  }
+  return locked.every((position) => {
+    return (
+      findCooldownEntry(settings, position) !== undefined &&
+      cooldownRemainingMs(settings, position, now) <= 0
+    );
+  });
+}
+
+/**
 Megumin FAQ fallback when AWA's 24h lock icon doesn't clear after 24h.
 */
 export const STUCK_SLOT_LOCK_HINT =

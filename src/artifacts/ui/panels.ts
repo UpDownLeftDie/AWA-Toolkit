@@ -1072,7 +1072,7 @@ function renderControlCenterAchievementsBody(
 Force-refresh achievement progress (and re-paint Control Center panels).
 */
 async function refreshControlCenterAchievements(): Promise<void> {
-  await ensureAchievementSnapshot({ force: true });
+  await ensureAchievementSnapshot({ force: true, isUserRefresh: true });
   await injectControlCenterPanel({ force: true });
 }
 

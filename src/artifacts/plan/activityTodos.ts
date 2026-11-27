@@ -22,6 +22,8 @@ import {
   estimateNextCommunityUnlock,
   isActivityAvailable,
   isActivityPending,
+  isCommunityGateMet,
+  isPersonalHoursMet,
   nextLockedCommunityArpMilestone,
   remainingDailyQuestRows,
   remainingSteamQuestRewards,
@@ -1031,17 +1033,41 @@ function isSequencedActivityDue(
 
 // ── Community event todo ───────────────────────────────────────────────
 
+function waitingPersonalPlayMs(
+  event: NonNullable<SiteState['communityEvent']>,
+): number {
+  let needHours = 0;
+  for (const milestone of event.milestones) {
+    if (
+      milestone.isAwarded ||
+      milestone.arpReward <= 0 ||
+      !isCommunityGateMet(milestone, event.communityHours) ||
+      isPersonalHoursMet(milestone, event.personalHours)
+    ) {
+      continue;
+    }
+    if (milestone.personalHoursRequired > needHours) {
+      needHours = milestone.personalHoursRequired;
+    }
+  }
+  return Math.max(0, needHours - event.personalHours) * 3_600_000;
+}
+
 function communityEventTodoUrgency(
+  event: NonNullable<SiteState['communityEvent']>,
   pending: ReturnType<typeof breakDownCommunityEventPending>,
   etaMs: number | undefined,
 ): ActionTodoUrgency {
   if (pending.waitingPersonalArp > 0) {
+    // After All-ARP% equip — not before. Ranking "before" put "play 4h more"
+    // above the equip step that says to gear up first. Duration is the grind
+    // window so shorter UTC-capped work (Twitch) still ranks ahead of CE hours.
     return actionUrgency({
       kind: 'action',
       readyAtMs: 0,
-      durationMs: 0,
+      durationMs: waitingPersonalPlayMs(event),
       arp: pending.waitingPersonalArp,
-      chain: 'before',
+      chain: 'after',
     });
   }
   const waitingArp =
@@ -1098,6 +1124,7 @@ function pushCommunityEventTodo(
   const todo: ActionTodo = {
     text: `Community Event: ${text}`,
     urgency: communityEventTodoUrgency(
+      event,
       pending,
       estimateNextCommunityUnlock(event, nowMs)?.etaMs,
     ),

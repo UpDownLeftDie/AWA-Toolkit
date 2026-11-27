@@ -10,7 +10,7 @@ minimumReleaseAgeExclude:
   - vitest@4.1.11 || 5.0.3 || 5.1.2
   - eslint@10.9.0 || 10.12.0
   - vite-plugin-monkey@8.1.1
-  - vite@8.3.0
+  - vite@8.3.0 || 8.4.0
   - '@types/node@26.6.4 || 26.6.10'
   - eslint-config-narwhal@2.1.0 || 2.1.18
   - '@typescript-eslint/eslint-plugin@8.74.0'
@@ -25,6 +25,7 @@ minimumReleaseAgeExclude:
   - '@typescript-eslint/visitor-keys@8.74.0'
   - typescript-eslint@8.74.0
   - eslint-plugin-sonarjs@4.2.3
+  - postcss@8.5.34
 overrides:
   brace-expansion@<1.1.21: ^1.1.21
   brace-expansion@>=4.0.0 <5.0.12: ^5.0.12

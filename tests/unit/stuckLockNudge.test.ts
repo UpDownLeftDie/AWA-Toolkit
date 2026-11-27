@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 
 import { pickStuckLockNudgeTarget } from '../../src/artifacts/api';
 import {
+  areAllLockedSlotsElapsed,
   COOLDOWN_MS,
   defaultArtifactSettings,
   hasElapsedShowroomLock,
@@ -78,8 +79,57 @@ describe('hasElapsedShowroomLock', () => {
   });
 });
 
+describe('areAllLockedSlotsElapsed', () => {
+  const nowMs = Date.parse('2026-08-10T16:50:00.000Z');
+
+  it('is false while any locked slot still has time left', () => {
+    expect(
+      areAllLockedSlotsElapsed(
+        {
+          ...defaultArtifactSettings,
+          slotCooldowns: [
+            {
+              position: 1,
+              changedAt: new Date(nowMs - COOLDOWN_MS).toISOString(),
+              estimated: true,
+            },
+            {
+              position: 3,
+              changedAt: new Date(nowMs - COOLDOWN_MS / 2).toISOString(),
+            },
+          ],
+        },
+        { 1: true, 2: false, 3: true },
+        nowMs,
+      ),
+    ).toBe(false);
+  });
+
+  it('is true when every locked slot timer has hit 0', () => {
+    expect(
+      areAllLockedSlotsElapsed(
+        {
+          ...defaultArtifactSettings,
+          slotCooldowns: [
+            {
+              position: 1,
+              changedAt: new Date(nowMs - COOLDOWN_MS).toISOString(),
+            },
+            {
+              position: 2,
+              changedAt: new Date(nowMs - COOLDOWN_MS).toISOString(),
+            },
+          ],
+        },
+        { 1: true, 2: true, 3: false },
+        nowMs,
+      ),
+    ).toBe(true);
+  });
+});
+
 describe('renderCooldownBlock', () => {
-  it('appends the Megumin stuck-lock hint when the timer has elapsed', () => {
+  it('lists locked slots without the Megumin FAQ (caution owns that)', () => {
     const html = renderCooldownBlock(
       {
         ...defaultArtifactSettings,
@@ -94,7 +144,7 @@ describe('renderCooldownBlock', () => {
       { 2: true },
     );
     expect(html).toContain('slot 2 (locked');
-    expect(html).toContain(STUCK_SLOT_LOCK_HINT);
+    expect(html).not.toContain(STUCK_SLOT_LOCK_HINT);
   });
 });
 

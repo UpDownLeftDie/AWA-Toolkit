@@ -199,7 +199,10 @@ function parseFragmentProductCard(
   const isInStock =
     item.dataset.productInStock !== 'false' && !OUT_OF_STOCK_RE.test(text);
   const isDisabled = item.dataset.productDisabled === 'true';
-  const isClaimed = CLAIMED_RE.test(text);
+  // `data-product-purchased` is set client-side; Claimed badge text is the
+  // same signal once JS has painted.
+  const isClaimed =
+    item.dataset.productPurchased === 'true' || CLAIMED_RE.test(text);
   const endsAt = fragmentTimerEndAt(item);
   const nextItem: MarketplaceFragmentOffer = {
     name: fragmentCardName(item),
@@ -266,6 +269,66 @@ export function isMarketplaceFragmentsPath(
   return type === 'fragment' || type === null || type === '';
 }
 
+/**
+True when client JS has painted per-card purchase state
+(`data-product-purchased`). Fetch HTML never includes this attribute.
+*/
+export function hasMarketplaceFragmentPurchaseAttributes(
+  document_: Document,
+): boolean {
+  for (const item of document_.querySelectorAll<HTMLElement>(
+    FRAGMENT_CARD_SELECTORS,
+  )) {
+    if (item.dataset.productPurchased !== undefined) {
+      return true;
+    }
+  }
+  return false;
+}
+
+/**
+True when at least one card shows this user already bought it.
+*/
+export function hasMarketplaceFragmentPurchaseSignal(
+  document_: Document,
+): boolean {
+  return scrapeMarketplaceFragmentsFromDocument(document_).some(
+    (offer) => offer.isClaimed === true,
+  );
+}
+
+/**
+Keep prior `isClaimed` when a remote fetch re-lists the same timer without
+purchase badges (SSR never includes them). Drop the flag when the listing
+window changes (new monthly pack).
+*/
+function mergeMarketplaceFragmentOffers(
+  scraped: MarketplaceFragmentOffer[],
+  previous: MarketplaceFragmentOffer[] | undefined,
+): MarketplaceFragmentOffer[] {
+  if (scraped.some((offer) => offer.isClaimed === true) || !previous?.length) {
+    return scraped;
+  }
+  const prior = new Map(
+    previous.map((offer) => [
+      offer.productId ?? `${offer.price}:${offer.name}`,
+      offer,
+    ]),
+  );
+  return scraped.map((offer) => {
+    const key = offer.productId ?? `${offer.price}:${offer.name}`;
+    const earlier = prior.get(key);
+    if (
+      earlier?.isClaimed === true &&
+      earlier.endsAt === offer.endsAt &&
+      offer.isClaimed !== true
+    ) {
+      return { ...offer, isClaimed: true };
+    }
+    return offer;
+  });
+}
+
 export function applyMarketplaceFragmentsDocument(
   next: SiteState,
   document_: Document,
@@ -274,6 +337,9 @@ export function applyMarketplaceFragmentsDocument(
   if (offers.length === 0) {
     return;
   }
-  next.marketplaceFragments = offers;
+  next.marketplaceFragments = mergeMarketplaceFragmentOffers(
+    offers,
+    next.marketplaceFragments,
+  );
   next.marketplaceFragmentsScrapedAt = new Date().toISOString();
 }

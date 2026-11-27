@@ -1,8 +1,11 @@
 import { describe, expect, it } from 'vitest';
 
 import {
+  inferImpliedGroupEarnings,
   isAchievementsDocumentReady,
+  mergeAchievementSnapshots,
   scrapeAchievementsFromDocument,
+  type AchievementSnapshot,
 } from '../../src/achievements/scraper';
 
 function mockAchievementsDocument(bodyText: string): Document {
@@ -82,5 +85,103 @@ Visit the FAQ page
     expect(
       isAchievementsDocumentReady(mockAchievementsDocument(SAMPLE_PAGE)),
     ).toBe(true);
+  });
+
+  it('merges partial scrapes without dropping previously known items', () => {
+    const existing: AchievementSnapshot = {
+      scrapedAt: '2026-01-01T00:00:00.000Z',
+      username: 'CamKitties',
+      earnedCount: 90,
+      totalCount: 118,
+      items: {
+        'try-it-on': {
+          id: 'try-it-on',
+          title: 'Try it on',
+          isEarned: true,
+        },
+        'use-25-different-borders': {
+          id: 'use-25-different-borders',
+          title: 'Use 25 different borders',
+          isEarned: false,
+        },
+      },
+    };
+    const incoming: AchievementSnapshot = {
+      scrapedAt: '2026-01-02T00:00:00.000Z',
+      username: 'CamKitties',
+      earnedCount: 92,
+      totalCount: 118,
+      items: {
+        'use-25-different-borders': {
+          id: 'use-25-different-borders',
+          title: 'Use 25 different borders',
+          isEarned: true,
+        },
+        'add-about-me': {
+          id: 'add-about-me',
+          title: 'Add about me',
+          isEarned: false,
+        },
+      },
+    };
+    const merged = mergeAchievementSnapshots(existing, incoming);
+    expect(merged.items['try-it-on']?.isEarned).toBe(true);
+    expect(merged.items['use-25-different-borders']?.isEarned).toBe(true);
+    expect(merged.items['add-about-me']?.isEarned).toBe(false);
+    expect(merged.scrapedAt).toBe(incoming.scrapedAt);
+  });
+
+  it('infers Try it on / Use 5–10 when Use 25 is earned', () => {
+    const inferred = inferImpliedGroupEarnings({
+      'try-it-on': {
+        id: 'try-it-on',
+        title: 'Try it on',
+        isEarned: false,
+      },
+      'use-5-different-borders': {
+        id: 'use-5-different-borders',
+        title: 'Use 5 different borders',
+        isEarned: false,
+      },
+      'use-25-different-borders': {
+        id: 'use-25-different-borders',
+        title: 'Use 25 different borders',
+        isEarned: true,
+      },
+    });
+    expect(inferred['try-it-on']?.isEarned).toBe(true);
+    expect(inferred['use-5-different-borders']?.isEarned).toBe(true);
+    expect(inferred['add-your-first-border']?.isEarned).toBe(true);
+  });
+
+  it('does not demote earned achievements on a noisy re-scrape', () => {
+    const existing: AchievementSnapshot = {
+      scrapedAt: '2026-01-01T00:00:00.000Z',
+      username: 'CamKitties',
+      earnedCount: 1,
+      totalCount: 118,
+      items: {
+        'try-it-on': {
+          id: 'try-it-on',
+          title: 'Try it on',
+          isEarned: true,
+        },
+      },
+    };
+    const incoming: AchievementSnapshot = {
+      scrapedAt: '2026-01-02T00:00:00.000Z',
+      username: 'CamKitties',
+      earnedCount: 0,
+      totalCount: 118,
+      items: {
+        'try-it-on': {
+          id: 'try-it-on',
+          title: 'Try it on',
+          isEarned: false,
+        },
+      },
+    };
+    const merged = mergeAchievementSnapshots(existing, incoming);
+    expect(merged.items['try-it-on']?.isEarned).toBe(true);
   });
 });

@@ -19,14 +19,12 @@ import type { ArtifactSnapshot } from '../scraper';
 import {
   areAccountActionsEnabled,
   areAchievementsEnabled,
-  hasElapsedShowroomLock,
   isAchievementsHelperFeatureEnabled,
   isNotificationTypeEnabled,
   MAX_UTC_DAILY_END_BUFFER_HOURS,
   NOTIFICATION_TYPE_COPY,
   NOTIFICATION_TYPE_KEYS,
   saveArtifactSettings,
-  STUCK_SLOT_LOCK_HINT,
   type ArtifactOptimizerSettings,
 } from '../settings';
 import {
@@ -457,10 +455,9 @@ export function renderCooldownBlock(
     return '';
   }
   const lockParts = formatLockedSlotParts(settings, lockedSlots, slotLocks);
-  const stuckHint = hasElapsedShowroomLock(settings, slotLocks)
-    ? `. ${STUCK_SLOT_LOCK_HINT}`
-    : '';
-  return `<div class="ao-note">24h slot cooldown: ${lockParts.join(', ')}${stuckHint}</div>`;
+  // Sticky-lock FAQ lives on the caution when an equip needs free slots.
+  // Account actions auto-unstick on Refresh; don't nag in the cooldown line.
+  return `<div class="ao-note">24h slot cooldown: ${lockParts.join(', ')}</div>`;
 }
 
 function renderArpLogCard(siteState: SiteState | undefined): string {

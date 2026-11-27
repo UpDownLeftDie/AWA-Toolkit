@@ -1,4 +1,4 @@
-import { nudgeStuckSlotLocks } from './api';
+import { nudgeStuckSlotLocks, pickStuckLockNudgeTarget } from './api';
 import { documentBody } from '../pageGlobals';
 import { applyAsceCommunityHours } from './asce';
 import { lastDiscordPollPostAt } from './data';
@@ -11,10 +11,12 @@ import {
 } from './scraper';
 import {
   areAccountActionsEnabled,
+  areAllLockedSlotsElapsed,
   getArtifactSettings,
   hasElapsedShowroomLock,
   syncSlotLocksFromScrape,
 } from './settings';
+import { showAoToast } from './ui/dialog';
 import {
   applyArpLogActivityCaps,
   applyBattlePassEndFromDocument,
@@ -26,6 +28,7 @@ import {
   applySteamFreeToPlayResolution,
   applySteamQuestsFromDocument,
   emptySiteState,
+  hasMarketplaceFragmentPurchaseAttributes,
   isArpLogDocumentReady,
   isBattlePassDocumentReady,
   isChooseYourOwnGameQuest,
@@ -33,6 +36,7 @@ import {
   isControlCenterDocumentReady,
   isGameVaultDocumentReady,
   isGameVaultMonthlyClaimUsedFromDocument,
+  scrapeMarketplaceFragmentsFromDocument,
   loadSiteState,
   markCommunityEventEnded,
   mergeArpLogScrape,
@@ -203,6 +207,11 @@ async function settleIframePage(
     await waitForBattlePassUi(document_);
   } else if (path.includes('/game-vault')) {
     await waitForGameVaultUi(document_);
+  } else if (
+    path.includes('/marketplace') &&
+    !path.includes('/game-vault')
+  ) {
+    await waitForMarketplaceFragmentsUi(document_);
   } else {
     await delay(400);
   }
@@ -283,6 +292,20 @@ async function waitForGameVaultUi(document_: Document): Promise<void> {
   }
 }
 
+async function waitForMarketplaceFragmentsUi(
+  document_: Document,
+): Promise<void> {
+  const started = Date.now();
+  while (Date.now() - started < 5000) {
+    // Wait for `data-product-purchased` (true or false) — Claimed badges
+    // paint with the same client pass.
+    if (hasMarketplaceFragmentPurchaseAttributes(document_)) {
+      return;
+    }
+    await delay(250);
+  }
+}
+
 function requiresIframeFallback(path: string, fetched: Document): boolean {
   if (path.includes('/artifacts') || path.includes('/user-artifacts-room')) {
     return !documentBody(fetched)?.querySelector(
@@ -299,6 +322,14 @@ function requiresIframeFallback(path: string, fetched: Document): boolean {
     // Claimed / monthly-cap banners are client-rendered. Fetch HTML still
     // looks purchasable after this user has claimed.
     return !isGameVaultMonthlyClaimUsedFromDocument(fetched);
+  }
+  if (path.includes('/marketplace') && !path.includes('/game-vault')) {
+    // `data-product-purchased` / Claimed badges are client-rendered. Fetch
+    // HTML always looks unpurchased after this user has bought a pack.
+    return (
+      scrapeMarketplaceFragmentsFromDocument(fetched).length > 0 &&
+      !hasMarketplaceFragmentPurchaseAttributes(fetched)
+    );
   }
   if (path.includes('/steam/community-event')) {
     // Hours are filled client-side into #personal-hours; fetch HTML is empty.
@@ -579,12 +610,12 @@ async function persistShowroomSnapshot(
 
 /**
 Megumin FAQ: POST Upgrade on a maxed (0-frag) artifact clears AWA's stuck
-24h lock bug. Force Refresh and elapsed-timer hydrates do that, then
-re-fetch Showroom.
+24h lock bug — only when every locked slot's local timer has already hit 0.
 */
 async function scrapeShowroomAfterLockNudge(
   showroomPath: string,
   existing: ArtifactSnapshot | undefined,
+  options?: { shouldNudge?: boolean },
 ): Promise<ArtifactSnapshot | undefined> {
   let inventory = existing;
   if (!inventory?.artifacts.length) {
@@ -596,11 +627,24 @@ async function scrapeShowroomAfterLockNudge(
       );
     }
   }
-  if (
-    inventory?.artifacts.length &&
-    areAccountActionsEnabled(await getArtifactSettings())
-  ) {
-    await nudgeStuckSlotLocks(inventory.artifacts);
+  const settings = await getArtifactSettings();
+  const shouldNudge =
+    options?.shouldNudge !== false &&
+    areAccountActionsEnabled(settings) &&
+    areAllLockedSlotsElapsed(settings, inventory?.slotLocks ?? existing?.slotLocks) &&
+    Boolean(inventory?.artifacts.length);
+  if (shouldNudge && inventory?.artifacts.length) {
+    const target = pickStuckLockNudgeTarget(inventory.artifacts);
+    const nudged = await nudgeStuckSlotLocks(inventory.artifacts);
+    if (target && nudged?.ok) {
+      showAoToast(`Auto-unstick: upgraded ${target.displayName}`);
+    } else if (nudged && !nudged.ok) {
+      console.warn('[Artifact Optimizer] Auto-unstick failed', nudged);
+    } else if (!target) {
+      console.info(
+        '[Artifact Optimizer] Auto-unstick skipped — no maxed 0-frag artifact',
+      );
+    }
   }
 
   const loaded = await loadRemotePage(showroomPath);
@@ -745,11 +789,14 @@ export async function ensureArtifactSnapshot(
   const isWantsForce = options.force === true;
   const settings = await getArtifactSettings();
   const isElapsedLock = hasElapsedShowroomLock(settings, existing?.slotLocks);
+  const shouldNudgeStuckLocks = areAllLockedSlotsElapsed(
+    settings,
+    existing?.slotLocks,
+  );
 
   // Refresh always re-fetches the Showroom — lock icons are cheap and are the
   // source of truth. Spam-guarding here left Control Center stuck on a stale
-  // all-locked snapshot. An elapsed GM timer with a still-locked Showroom is
-  // AWA's stuck-lock bug — Megumin's 0-frag upgrade, then re-scrape.
+  // all-locked snapshot. Only nudge when every locked slot's timer hit 0.
   if (
     !isWantsForce &&
     !isElapsedLock &&
@@ -761,7 +808,9 @@ export async function ensureArtifactSnapshot(
 
   const showroomPath = resolveShowroomUrl(existing?.username);
   if (isWantsForce || isElapsedLock) {
-    return scrapeShowroomAfterLockNudge(showroomPath, existing);
+    return scrapeShowroomAfterLockNudge(showroomPath, existing, {
+      shouldNudge: shouldNudgeStuckLocks,
+    });
   }
 
   const loaded = await loadRemotePage(showroomPath);

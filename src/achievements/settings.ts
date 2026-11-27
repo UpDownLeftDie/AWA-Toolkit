@@ -30,9 +30,19 @@ export interface AutomationCooldowns {
   */
   borderRotatedDate?: string;
   /**
+  Last personalization gallery `data-id` we successfully saved for border.
+  AWA persists a different product id in `saved.border`, so rotation must
+  key off this gallery id — not the remapped product id.
+  */
+  borderGalleryId?: number;
+  /**
   Last UTC date (YYYY-MM-DD) avatar item was rotated.
   */
   avatarRotatedDate?: string;
+  /**
+  Last personalization gallery `data-id` we successfully saved for avatar.
+  */
+  avatarGalleryId?: number;
   /**
   Last UTC year-month (YYYY-MM) about-me was submitted.
   */
@@ -65,8 +75,14 @@ export async function loadAutomationCooldowns(): Promise<AutomationCooldowns> {
     if (typeof p.borderRotatedDate === "string") {
       result.borderRotatedDate = p.borderRotatedDate;
     }
+    if (typeof p.borderGalleryId === "number" && Number.isFinite(p.borderGalleryId)) {
+      result.borderGalleryId = p.borderGalleryId;
+    }
     if (typeof p.avatarRotatedDate === "string") {
       result.avatarRotatedDate = p.avatarRotatedDate;
+    }
+    if (typeof p.avatarGalleryId === "number" && Number.isFinite(p.avatarGalleryId)) {
+      result.avatarGalleryId = p.avatarGalleryId;
     }
     if (typeof p.aboutMeSubmittedMonth === "string") {
       result.aboutMeSubmittedMonth = p.aboutMeSubmittedMonth;

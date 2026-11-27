@@ -135,6 +135,27 @@ describe('scrapeMarketplaceFragmentsFromDocument', () => {
     expect(offers[1]?.price).toBe(1000);
     expect(offers[1]?.endsAt).toBe('2026-12-01T00:00:00.000Z');
   });
+
+  it('marks purchased cards from data-product-purchased or Claimed badge', () => {
+    const purchased = mockFragmentCard({
+      id: '1242',
+      name: '10 Fragments',
+      price: '150',
+      text: 'Ends in: 10 Fragments 150 ARP',
+      endsAt: '2027-02-01 00:00:00',
+    });
+    purchased.dataset.productPurchased = 'true';
+    const badgeOnly = mockFragmentCard({
+      id: '405',
+      name: 'Mysterious Text',
+      price: '1',
+      text: 'Mysterious Text Claimed',
+    });
+    const offers = scrapeMarketplaceFragmentsFromDocument(
+      mockFragmentDocument([purchased, badgeOnly]),
+    );
+    expect(offers.every((offer) => offer.isClaimed === true)).toBe(true);
+  });
 });
 
 describe('soft path fragment notes', () => {

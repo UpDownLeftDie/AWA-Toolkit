@@ -1,4 +1,5 @@
 import type { ActionTodo } from "../artifacts/plan/types";
+import { readPageUsername } from "../pageGlobals";
 import { ACHIEVEMENTS, type AchievementDefinition } from "./data";
 import {
   resolveAchievementsUrl,
@@ -11,6 +12,14 @@ import {
   type AchievementSettings,
   type AutomationCooldowns,
 } from "./settings";
+
+function linkUsername(snapshot: AchievementSnapshot | undefined): string | undefined {
+  try {
+    return readPageUsername() ?? snapshot?.username;
+  } catch {
+    return snapshot?.username;
+  }
+}
 
 const MAX_ACTION_TODOS = 8;
 const MAX_INFORM_TODOS = 3;
@@ -57,8 +66,17 @@ function nextUnearnedInGroup(
   if (!isGroupScraped) {
     return undefined;
   }
-  return chain.find((achievement) =>
-    isAchievementKnownUnearned(snapshot, achievement.id),
+  // Higher earned rank implies lower ranks are done (stacked cards).
+  const maxEarnedRank = Math.max(
+    0,
+    ...chain
+      .filter((achievement) => isAchievementEarned(snapshot, achievement.id))
+      .map((achievement) => achievement.rank),
+  );
+  return chain.find(
+    (achievement) =>
+      achievement.rank > maxEarnedRank &&
+      isAchievementKnownUnearned(snapshot, achievement.id),
   );
 }
 
@@ -116,6 +134,52 @@ function isSatisfiedForCurrentInterval(
   return (key === "readArticles" ? cooldowns.readArticlesDate : cooldowns.gameVaultDate) === today;
 }
 
+function resolveAchievementHref(
+  href: string,
+  username?: string,
+): string {
+  return username && href.includes("{username}")
+    ? href.split("{username}").join(encodeURIComponent(username))
+    : href;
+}
+
+function attachTodoHref(
+  todo: ActionTodo,
+  achievement: AchievementDefinition,
+  options: {
+    canAutomate: boolean;
+    canVisitInBackground: boolean;
+    username?: string;
+  },
+): void {
+  if (!achievement.href) {
+    return;
+  }
+  const resolvedHref = resolveAchievementHref(
+    achievement.href,
+    options.username,
+  );
+  // Profile cosmetics run via API on Refresh — don't look like a manual chore.
+  if (options.canAutomate && achievement.automation === "profileCosmetics") {
+    todo.tone = "muted";
+    todo.reasons = [
+      {
+        text: `${achievement.hint} Runs automatically on Refresh.`,
+      },
+    ];
+    todo.openHref = resolvedHref;
+    todo.openHrefLabel = "Open if stuck";
+    return;
+  }
+  todo.openHref = resolvedHref;
+  todo.openHrefLabel = options.canAutomate
+    ? `${achievement.hrefLabel ?? "Open"} now`
+    : (achievement.hrefLabel ?? "Open");
+  if (options.canVisitInBackground) {
+    todo.visitInBackground = true;
+  }
+}
+
 function buildTodo(
   achievement: AchievementDefinition,
   settings: AchievementSettings,
@@ -136,27 +200,18 @@ function buildTodo(
       durationMs: 0,
     },
   };
-  if (achievement.href) {
-    const href = achievement.href;
-    const resolvedHref =
-      username && href.includes("{username}")
-        ? href.split("{username}").join(encodeURIComponent(username))
-        : href;
-    todo.openHref = resolvedHref;
-    todo.openHrefLabel = canAutomate
-      ? `${achievement.hrefLabel ?? "Open"} now`
-      : (achievement.hrefLabel ?? "Open");
-    if (canVisitInBackground) {
-      todo.visitInBackground = true;
-    }
-  }
+  attachTodoHref(todo, achievement, {
+    canAutomate,
+    canVisitInBackground,
+    ...(username !== undefined && { username }),
+  });
   return todo;
 }
 
 function progressNeededTodo(
   snapshot: AchievementSnapshot | undefined,
 ): ActionTodo {
-  const href = resolveAchievementsUrl(snapshot?.username);
+  const href = resolveAchievementsUrl(linkUsername(snapshot));
   const todo: ActionTodo = {
     text: "Load achievement progress",
     reasons: [
@@ -244,7 +299,7 @@ export function buildAchievementTodos(
       pushCapped(infos, aboutMeWaitingTodo(next), MAX_INFORM_TODOS);
       continue;
     }
-    const todo = buildTodo(next, settings, snapshot?.username);
+    const todo = buildTodo(next, settings, linkUsername(snapshot));
     if (next.kind === "inform") {
       pushCapped(infos, todo, MAX_INFORM_TODOS);
       continue;

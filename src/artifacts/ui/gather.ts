@@ -15,6 +15,7 @@ import {
   type AchievementSettings,
   type AutomationCooldowns,
 } from '../../achievements/settings';
+import { readPageUsername } from '../../pageGlobals';
 import {
   applyAsceCommunityHours,
   didRefreshAsceCommunityHours,
@@ -140,13 +141,14 @@ async function gatherAchievements(options: {
       document,
       options.username === undefined ? {} : { username: options.username },
     );
-    await saveAchievementSnapshot(achievements);
+    // Merge into GM cache so a single visible tab can't wipe other groups.
+    achievements = await saveAchievementSnapshot(achievements);
     achievements = await runAchievementAutomations(
       achievements,
       options.achievementSettings,
+      { isForce: options.shouldForceSite },
     );
-    await saveAchievementSnapshot(achievements);
-    return achievements;
+    return saveAchievementSnapshot(achievements);
   }
 
   const cached = await loadAchievementSnapshot();
@@ -158,8 +160,18 @@ async function gatherAchievements(options: {
   // Same pattern as Battle Pass / site state: fetch `/member/…/achievements`
   // in the background whenever the cache is missing, thin, or stale.
   if (isNeedsFetch) {
-    const ensureOptions: { force: boolean; username?: string } = {
-      force: options.shouldForceSite || !cached || Object.keys(cached.items).length === 0,
+    const ensureOptions: {
+      force: boolean;
+      isUserRefresh: boolean;
+      username?: string;
+    } = {
+      force:
+        options.shouldForceSite ||
+        !cached ||
+        Object.keys(cached.items).length === 0,
+      // Same-day border variety extras only on explicit Refresh — not when
+      // force-scraping an empty/thin cache during background hydrate.
+      isUserRefresh: options.shouldForceSite,
     };
     if (options.username !== undefined) {
       ensureOptions.username = options.username;
@@ -239,7 +251,8 @@ export async function gatherData(options?: {
   const achievements = await gatherAchievements({
     isRemote,
     shouldForceSite,
-    username: snapshot?.username,
+    // Prefer live username; artifact snapshot still has the old name after rename.
+    username: readPageUsername() ?? snapshot?.username,
     settings,
     achievementSettings,
   });

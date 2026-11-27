@@ -585,6 +585,7 @@ export {
   breakDownCommunityEventPending,
   describeCommunityEventPending,
   describeCommunityEventPendingParts,
+  isNonArpRewardLabel,
   COMMUNITY_HOURS_REMOTE_SAMPLE_MIN_MS,
   markCommunityEventEnded,
   appendCommunityHoursSample,
@@ -655,6 +656,8 @@ export {
   scrapeMarketplaceFragmentsFromDocument,
   scrapeMarketplaceFragments,
   isMarketplaceFragmentsPath,
+  hasMarketplaceFragmentPurchaseAttributes,
+  hasMarketplaceFragmentPurchaseSignal,
   applyMarketplaceFragmentsDocument,
 } from "./marketplaceFragments";
 export type { BattlePassReadyClaim, BattlePassState } from "./battlePass";
